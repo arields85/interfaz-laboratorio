@@ -58,4 +58,30 @@ describe('AdminNumberInput', () => {
 
         expect(onChange).toHaveBeenCalledWith('42');
     });
+    it('steps with ArrowUp and ArrowDown from the keyboard, clamped to the range', async () => {
+        const onChange = vi.fn();
+        const user = userEvent.setup();
+
+        render(
+            <AdminNumberInput ariaLabel="Threshold" value={9} min={0} max={10} step={0.5} onChange={onChange} />,
+        );
+
+        const input = screen.getByRole('textbox', { name: 'Threshold' });
+        await user.click(input);
+        await user.keyboard('{ArrowUp}');
+        expect(onChange).toHaveBeenLastCalledWith('9.5');
+
+        await user.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}');
+        expect(onChange).toHaveBeenLastCalledWith('10');
+
+        await user.keyboard('{ArrowDown}');
+        expect(onChange).toHaveBeenLastCalledWith('9.5');
+    });
+
+    it('labels the step buttons in Spanish', () => {
+        render(<AdminNumberInput ariaLabel="Threshold" value={1} onChange={vi.fn()} />);
+
+        expect(screen.getByRole('button', { name: 'Aumentar valor' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Disminuir valor' })).toBeInTheDocument();
+    });
 });

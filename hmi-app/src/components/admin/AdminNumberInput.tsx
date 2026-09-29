@@ -85,6 +85,13 @@ export default function AdminNumberInput({
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && commitOnBlur) {
             e.currentTarget.blur();
+            return;
+        }
+
+        // The field is a text input (no native spinner), so the arrow keys step it like the buttons.
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            nudge(e.key === 'ArrowUp' ? step : -step);
         }
     };
 
@@ -127,6 +134,7 @@ export default function AdminNumberInput({
                     <button
                         type="button"
                         tabIndex={-1}
+                        aria-label="Aumentar valor"
                         onMouseDown={e => { e.preventDefault(); nudge(step); }}
                         className="flex items-center justify-center h-3 w-4 text-white/30 hover:text-admin-accent transition-colors"
                     >
@@ -135,6 +143,7 @@ export default function AdminNumberInput({
                     <button
                         type="button"
                         tabIndex={-1}
+                        aria-label="Disminuir valor"
                         onMouseDown={e => { e.preventDefault(); nudge(-step); }}
                         className="flex items-center justify-center h-3 w-4 text-white/30 hover:text-admin-accent transition-colors"
                     >

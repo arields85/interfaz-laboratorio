@@ -351,6 +351,7 @@ describe('viewer entrance CSS contract (index.css)', () => {
             '--viewer-entrance-flash-offset',
             '--viewer-entrance-outline-color',
             '--viewer-entrance-outline-width',
+            '--viewer-entrance-outline-opacity',
             '--viewer-entrance-outline-duration',
             '--viewer-entrance-outline-fade',
             '--viewer-entrance-outline-offset',
@@ -378,7 +379,7 @@ describe('viewer entrance CSS contract (index.css)', () => {
 
     it('traces the outline with a normalized dash offset and then fades it out', () => {
         expect(indexCss).toMatch(/@keyframes hmi-viewer-entrance-outline-draw\s*{[\s\S]*?stroke-dashoffset: 1;[\s\S]*?stroke-dashoffset: 0;/);
-        expect(indexCss).toMatch(/@keyframes hmi-viewer-entrance-outline-fade\s*{[\s\S]*?opacity: 1;[\s\S]*?opacity: 0;/);
+        expect(indexCss).toMatch(/@keyframes hmi-viewer-entrance-outline-fade\s*{[\s\S]*?opacity: var\(--viewer-entrance-outline-opacity\);[\s\S]*?opacity: 0;/);
         const rule = indexCss.match(/\[data-viewer-entrance='true'\] \.hmi-viewer-entrance-outline-rect\s*{([\s\S]*?)}/);
         expect(rule).not.toBeNull();
         const body = rule?.[1] ?? '';

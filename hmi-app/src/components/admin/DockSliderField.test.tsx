@@ -68,4 +68,41 @@ describe('DockSliderField', () => {
 
         expect(screen.getByRole('textbox', { name: 'Opacity value' }).parentElement).toHaveClass(ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS);
     });
+    it('shows the unit next to the numeric field when one is given', () => {
+        render(
+            <DockSliderField label="Grosor" value={1} min={0.5} max={3} step={0.25} unit="px" onChange={() => undefined} />,
+        );
+
+        expect(screen.getByText('px')).toBeInTheDocument();
+    });
+
+    it('clamps and snaps typed values on commit and steps with buttons and arrow keys', async () => {
+        const user = userEvent.setup();
+
+        render(<ControlledDockSliderField initialValue={25} min={0} max={100} step={5} />);
+
+        const slider = screen.getByRole('slider', { name: 'Opacity' });
+        const input = screen.getByRole('textbox', { name: 'Opacity value' });
+
+        await user.click(input);
+        await user.keyboard('250');
+        await user.tab();
+        expect(input).toHaveValue('100');
+        expect(slider).toHaveValue('100');
+
+        await user.click(input);
+        await user.keyboard('{ArrowDown}{ArrowDown}');
+        await user.tab();
+        expect(slider).toHaveValue('90');
+
+        await user.click(screen.getByRole('button', { name: 'Aumentar valor' }));
+        expect(slider).toHaveValue('95');
+        await user.click(screen.getByRole('button', { name: 'Disminuir valor' }));
+        expect(slider).toHaveValue('90');
+
+        await user.click(input);
+        await user.keyboard('{Backspace}{Backspace}{Backspace}{Enter}');
+        expect(slider).toHaveValue('0');
+        expect(input).toHaveValue('0');
+    });
 });

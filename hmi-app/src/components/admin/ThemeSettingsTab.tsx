@@ -9,7 +9,19 @@ import {
     setActiveThemeStyle,
     THEME_STYLE_PRESETS,
 } from '../../services/themeStyle.service';
-import { ADMIN_SIDEBAR_HINT_CLS, ADMIN_SIDEBAR_SECTION_CLS } from './adminSidebarStyles';
+import {
+    applyViewerEntranceSettingsToDocument,
+    readStoredViewerEntranceSettings,
+    VIEWER_ENTRANCE_LIMITS,
+    writeStoredViewerEntranceSettings,
+} from '../../services/viewerEntranceStyle.service';
+import type { ViewerEntranceSettings } from '../../domain/viewerEntrance.types';
+import DockSliderField from './DockSliderField';
+import {
+    ADMIN_SIDEBAR_HINT_CLS,
+    ADMIN_SIDEBAR_SECTION_CLS,
+    ADMIN_SIDEBAR_SECTION_HEADER_CLS,
+} from './adminSidebarStyles';
 import type { SaveStatus } from './saveStatus';
 
 // Presentational copy for the built-in presets (`themeStyle.service`'s
@@ -34,6 +46,24 @@ const THEME_PRESET_COPY: Record<string, { name: string; description: string }> =
     },
 };
 
+interface EntranceControlCopy {
+    key: keyof ViewerEntranceSettings;
+    label: string;
+    numberInputAriaLabel: string;
+    unit: string;
+}
+
+// Spanish, usted register. Labels double as the sliders' accessible names.
+const ENTRANCE_CONTROLS: readonly EntranceControlCopy[] = [
+    { key: 'outlineWidthPx', label: 'Grosor del contorno', numberInputAriaLabel: 'Valor de grosor del contorno', unit: 'px' },
+    { key: 'outlineOpacityPercent', label: 'Opacidad del contorno', numberInputAriaLabel: 'Valor de opacidad del contorno', unit: '%' },
+    { key: 'flashIntensityPercent', label: 'Intensidad del destello', numberInputAriaLabel: 'Valor de intensidad del destello', unit: '%' },
+];
+
+function areEntranceSettingsEqual(a: ViewerEntranceSettings, b: ViewerEntranceSettings): boolean {
+    return ENTRANCE_CONTROLS.every(({ key }) => a[key] === b[key]);
+}
+
 function getPresetCopy(id: string): { name: string; description: string } {
     return THEME_PRESET_COPY[id] ?? { name: id, description: '' };
 }
@@ -48,10 +78,13 @@ interface ThemeSettingsTabProps {
 export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef, revertRef }: ThemeSettingsTabProps) {
     const initialId = useMemo(() => readStoredThemeStylePresetId() ?? CLASSIC_THEME_STYLE_ID, []);
     const [selectedId, setSelectedId] = useState(initialId);
+    const initialEntrance = useMemo(() => readStoredViewerEntranceSettings(), []);
+    const [entrance, setEntrance] = useState<ViewerEntranceSettings>(initialEntrance);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
     const snapshotIdRef = useRef(initialId);
+    const snapshotEntranceRef = useRef(initialEntrance);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -76,6 +109,15 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         }
     }, []);
 
+    // Selecting a theme or a value different from the saved one is dirty;
+    // returning to the saved configuration is a not-dirty clear, not a
+    // persisted `Guardado` -- nothing was written to storage.
+    const syncDirty = (isDirty: boolean) => {
+        dirtyRef.current = isDirty;
+        setSaveStatus(isDirty ? 'dirty' : null);
+        onDirtyChange?.(isDirty);
+    };
+
     const handleSelect = (id: string) => {
         if (id === selectedId) {
             return;
@@ -84,13 +126,20 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         setSelectedId(id);
         previewThemeStyleOnDocument(id);
 
-        // Selecting a theme different from the saved one is dirty; clicking
-        // back onto the saved theme itself is a not-dirty clear, not a
-        // persisted `Guardado` -- nothing was written to storage.
-        const isDirty = id !== snapshotIdRef.current;
-        dirtyRef.current = isDirty;
-        setSaveStatus(isDirty ? 'dirty' : null);
-        onDirtyChange?.(isDirty);
+        syncDirty(id !== snapshotIdRef.current || !areEntranceSettingsEqual(entrance, snapshotEntranceRef.current));
+    };
+
+    // Moving a slider previews the value on the whole document right away
+    // (the viewer reads the `--viewer-entrance-*` tokens), like a theme card.
+    const handleEntranceChange = (key: keyof ViewerEntranceSettings, value: number) => {
+        const next = { ...entrance, [key]: value };
+        if (next[key] === entrance[key]) {
+            return;
+        }
+
+        setEntrance(next);
+        applyViewerEntranceSettingsToDocument(next);
+        syncDirty(selectedId !== snapshotIdRef.current || !areEntranceSettingsEqual(next, snapshotEntranceRef.current));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -103,6 +152,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             if (dirtyRef.current) {
                 previewThemeStyleOnDocument(snapshotIdRef.current);
+                applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
             }
         };
     }, []);
@@ -114,7 +164,10 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         saveRef.current = () => {
             setActiveThemeStyle(selectedId);
+            writeStoredViewerEntranceSettings(entrance);
+            applyViewerEntranceSettingsToDocument(entrance);
             snapshotIdRef.current = selectedId;
+            snapshotEntranceRef.current = entrance;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -123,7 +176,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [onDirtyChange, saveRef, selectedId]);
+    }, [entrance, onDirtyChange, saveRef, selectedId]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -134,6 +187,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             const snapshotId = snapshotIdRef.current;
             setSelectedId(snapshotId);
             previewThemeStyleOnDocument(snapshotId);
+            setEntrance(snapshotEntranceRef.current);
+            applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
             dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
@@ -198,6 +253,31 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                     );
                 })}
             </div>
+
+            <section aria-labelledby="theme-entrance-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
+                <div id="theme-entrance-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
+                    Animación de entrada
+                </div>
+                <p className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    Ajuste el contorno y el destello con que aparece cada marco al abrir un dashboard en el visor. Los
+                    valores se aplican a todos los temas. Para previsualizarlos, cambie de dashboard o de vista en el visor.
+                </p>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                    {ENTRANCE_CONTROLS.map(({ key, label, numberInputAriaLabel, unit }) => (
+                        <DockSliderField
+                            key={key}
+                            label={label}
+                            ariaLabel={label}
+                            numberInputAriaLabel={numberInputAriaLabel}
+                            unit={unit}
+                            value={entrance[key]}
+                            {...VIEWER_ENTRANCE_LIMITS[key]}
+                            onChange={(value) => handleEntranceChange(key, value)}
+                        />
+                    ))}
+                </div>
+            </section>
         </div>
     );
 }

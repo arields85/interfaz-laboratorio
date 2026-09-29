@@ -653,7 +653,9 @@ h1, h2, h3, h4, h5, h6 {
  *   --viewer-entrance-flash-*         destello del fondo del marco: color, opacidad pico, duración y
  *                                     espera tras el arranque del marco (capa superpuesta, no toca --frame-*)
  *   --viewer-entrance-outline-*       contorno que se traza por el perímetro del marco: color, grosor,
- *                                     duración del trazado, fundido posterior y espera tras el arranque
+ *                                     opacidad pico (de donde parte el fundido), duración del trazado,
+ *                                     fundido posterior y espera tras el arranque
+ *   (grosor del contorno, opacidad del contorno y opacidad pico del destello: ajustables desde Tema)
  *   --viewer-entrance-count-duration  duración del conteo ascendente de los números principales (lo lee
  *                                     también JS, junto con spread y value-offset: una sola fuente)
  * ──────────────────────────────────────────────────────────────────────── */
@@ -670,6 +672,7 @@ h1, h2, h3, h4, h5, h6 {
   --viewer-entrance-flash-offset: 60ms;
   --viewer-entrance-outline-color: #ffffff;
   --viewer-entrance-outline-width: 1px;
+  --viewer-entrance-outline-opacity: 1;
   --viewer-entrance-outline-duration: 700ms;
   --viewer-entrance-outline-fade: 350ms;
   --viewer-entrance-outline-offset: 0ms;
@@ -814,7 +817,7 @@ h1, h2, h3, h4, h5, h6 {
 
 @keyframes hmi-viewer-entrance-outline-fade {
   from {
-    opacity: 1;
+    opacity: var(--viewer-entrance-outline-opacity);
   }
 
   to {

@@ -15,6 +15,8 @@ export interface DockSliderFieldProps {
     ariaLabel?: string;
     numberInputAriaLabel?: string;
     numberInputClassName?: string;
+    /** Short unit (e.g. "px", "%") shown right after the numeric field. */
+    unit?: string;
     disabled?: boolean;
     className?: string;
 }
@@ -43,6 +45,7 @@ export default function DockSliderField({
     ariaLabel,
     numberInputAriaLabel,
     numberInputClassName = ADMIN_SIDEBAR_VALUE_INPUT_WIDTH_CLS,
+    unit,
     disabled = false,
     className = '',
 }: DockSliderFieldProps) {
@@ -67,17 +70,20 @@ export default function DockSliderField({
                     {label}
                 </span>
 
-                <AdminNumberInput
-                    value={value}
-                    min={min}
-                    max={max}
-                    step={step}
-                    disabled={disabled}
-                    commitOnBlur
-                    ariaLabel={resolvedNumberInputAriaLabel}
-                    className={numberInputClassName}
-                    onChange={handleNumericChange}
-                />
+                <div className="flex items-center gap-1">
+                    <AdminNumberInput
+                        value={value}
+                        min={min}
+                        max={max}
+                        step={step}
+                        disabled={disabled}
+                        commitOnBlur
+                        ariaLabel={resolvedNumberInputAriaLabel}
+                        className={numberInputClassName}
+                        onChange={handleNumericChange}
+                    />
+                    {unit && <span className="text-industrial-muted">{unit}</span>}
+                </div>
             </div>
 
             <input
