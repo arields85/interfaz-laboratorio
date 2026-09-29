@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import { parseCssLengthPx, type TabFramePathGeometry } from '../utils/tabFramePath';
 
@@ -13,15 +13,18 @@ function isSameGeometry(a: TabFramePathGeometry | null, b: TabFramePathGeometry 
         && a.tabHeight === b.tabHeight
         && a.tabCut === b.tabCut
         && a.bodyCut === b.bodyCut
-        && a.radius === b.radius;
+        && a.radius === b.radius
+        && a.glowSpread === b.glowSpread;
 }
 
 /**
  * Pixel geometry of the tab frame silhouette for the layer rendered in `ref` (a box that has the
  * frame's size): its measured size, the tab width reported by the frame, the `--tab-frame-*` tokens
  * and the corner radius (`border-radius` of `ref`, so callers decide which radius applies).
- * `null` while there is no tab (`tabWidth` null) or the box has not been laid out yet -- callers
- * then keep the standard shape. It re-measures on resize and when the document style changes (a
+ * `null` while there is no tab (`tabWidth` null), its width is still unknown (`<= 0`, the frame has
+ * not measured its title yet) or the box has not been laid out yet. Callers that know the frame IS
+ * the tab shape (`tabWidth !== null`) draw nothing meanwhile rather than a rectangle. It measures in a
+ * layout effect so the first paint already has the silhouette. It re-measures on resize and when the document style changes (a
  * theme preview rewrites the frame tokens there).
  */
 export function useTabFrameGeometry(
@@ -30,10 +33,10 @@ export function useTabFrameGeometry(
 ): TabFramePathGeometry | null {
     const [geometry, setGeometry] = useState<TabFramePathGeometry | null>(null);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const element = ref.current;
 
-        if (tabWidth === null || !element) {
+        if (tabWidth === null || tabWidth <= 0 || !element) {
             return undefined;
         }
 
@@ -57,6 +60,7 @@ export function useTabFrameGeometry(
                 tabCut: token('--tab-frame-tab-cut'),
                 bodyCut: token('--tab-frame-body-cut'),
                 radius: parseCssLengthPx(style.borderTopLeftRadius, rootFontSize),
+                glowSpread: token('--tab-frame-glow-spread'),
             };
 
             setGeometry((current) => (isSameGeometry(current, next) ? current : next));
@@ -77,5 +81,5 @@ export function useTabFrameGeometry(
     }, [ref, tabWidth]);
 
     // Without a tab there is no silhouette, whatever was measured before.
-    return tabWidth === null ? null : geometry;
+    return tabWidth === null || tabWidth <= 0 ? null : geometry;
 }

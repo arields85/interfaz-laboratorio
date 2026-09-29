@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import AnalyticsDataModeDot from './AnalyticsDataModeDot';
-import { TabFrameContext } from '../../hooks/tabFrameContext';
+import { TabFrameContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
 
 // =============================================================================
 // WidgetHeader
@@ -37,6 +37,19 @@ import { TabFrameContext } from '../../hooks/tabFrameContext';
 //
 // UI Style Guide §15.3 — Arquitectura Técnica v1.3 §9.3
 // =============================================================================
+
+/**
+ * Tab title (tab frame shape): the SAME behavior as the standard title (muted, white while the
+ * widget is hovered, `transition-colors`) but through the `--tab-frame-text` / `-hover` tokens so
+ * the tab color can be tuned in one place. Full class names so Tailwind finds them.
+ */
+const TAB_TITLE_CLASSES = 'min-w-0 truncate uppercase text-(color:--tab-frame-text) group-hover:text-(color:--tab-frame-text-hover) transition-colors';
+
+/** In an alert state the tab title is the alert color at 100 % (no hover change). */
+const TAB_TITLE_ALERT_CLASSES: Record<TabFrameAlertState, string> = {
+    warning: 'text-status-warning',
+    critical: 'text-status-critical',
+};
 
 export interface WidgetHeaderProps {
     /** Texto principal del header (se renderiza en uppercase) */
@@ -158,7 +171,7 @@ export default function WidgetHeader({
         />
     ) : null;
     const titleNode = inTab ? (
-        <span className="min-w-0 truncate uppercase">
+        <span className={tabFrame.alertState ? `min-w-0 truncate uppercase ${TAB_TITLE_ALERT_CLASSES[tabFrame.alertState]}` : TAB_TITLE_CLASSES}>
             {title}
         </span>
     ) : (

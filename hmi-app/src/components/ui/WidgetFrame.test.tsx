@@ -2,6 +2,7 @@ import { act, render, screen, within } from '@testing-library/react';
 import { Activity } from 'lucide-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
+import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
 import { GridFrameScope } from './GridFrameScope';
 import WidgetFrame from './WidgetFrame';
 import WidgetHeader from './WidgetHeader';
@@ -11,17 +12,19 @@ function renderFramed({
     title = 'Actividad de Máquina',
     inGrid = true,
     dataMode,
+    frameClassName = 'glass-panel',
 }: {
     widgetType?: string;
     title?: string;
     inGrid?: boolean;
     dataMode?: 'real' | 'simulated';
+    frameClassName?: string;
 } = {}) {
     const frame = (
         <WidgetFrame
             widgetType={widgetType}
             title={title}
-            frameClassName="glass-panel"
+            frameClassName={frameClassName}
             className="p-5 group relative w-full h-full"
             outerClassName="external-layout"
             data-state="producing"
@@ -128,12 +131,12 @@ describe('WidgetFrame', () => {
             expect(subtitle).toHaveClass('row-start-2');
         });
 
-        it('draws the data-mode dot inside the tab: dark for simulated, green for real', () => {
+        it('draws the data-mode dot inside the tab: muted for simulated, green for real', () => {
             previewFrameShape('tab');
 
             const { unmount } = renderFramed({ dataMode: 'simulated' });
             const simulatedDot = within(screen.getByTestId('tab-frame-tab')).getByTestId('widget-data-mode');
-            // No own color: it inherits the tab text color (`bg-current`), not the muted body gray.
+            // No own color class: it inherits the tab color (`bg-current`, the muted token), like the standard dot.
             expect(simulatedDot).toHaveClass('bg-current');
             expect(simulatedDot).not.toHaveClass('text-industrial-muted');
             expect(simulatedDot.style.color).toBe('');
@@ -144,15 +147,15 @@ describe('WidgetFrame', () => {
             expect(realDot).toHaveClass('text-status-normal');
         });
 
-        it('leaves the title color to the tab (inherits its text token) instead of the muted body color', () => {
+        it('gives the tab title the standard title behavior (muted, white on widget hover) through the tab text tokens', () => {
             previewFrameShape('tab');
 
             renderFramed();
 
             const title = screen.getByText('Actividad de Máquina');
             expect(screen.getByTestId('tab-frame-tab')).toContainElement(title);
+            expect(title).toHaveClass('text-(color:--tab-frame-text)', 'group-hover:text-(color:--tab-frame-text-hover)', 'transition-colors');
             expect(title).not.toHaveClass('text-industrial-muted');
-            expect(title).not.toHaveClass('group-hover:text-white');
             expect(title.style.color).toBe('');
         });
 
@@ -232,14 +235,15 @@ describe('WidgetFrame', () => {
             offsetWidth.mockRestore();
         });
 
-        it('treats an unmeasured tab (width 0) as unknown', () => {
+        it('reports an unmeasured tab (width 0) as PENDING (0), never as the standard shape (null)', () => {
             previewFrameShape('tab');
             const offsetWidth = mockTabWidth(0);
             const onTabWidth = vi.fn();
 
             renderReporting(onTabWidth);
 
-            expect(onTabWidth).toHaveBeenLastCalledWith(null);
+            expect(onTabWidth).toHaveBeenCalledWith(0);
+            expect(onTabWidth).not.toHaveBeenCalledWith(null);
             offsetWidth.mockRestore();
         });
 
@@ -262,6 +266,128 @@ describe('WidgetFrame', () => {
             act(() => previewFrameShape('standard'));
             expect(onTabWidth).toHaveBeenLastCalledWith(null);
             offsetWidth.mockRestore();
+        });
+    });
+
+    describe('unified silhouette (measured box)', () => {
+        const GEOMETRY = { width: 300, height: 200, tabWidth: 180, tabHeight: 25, tabCut: 25, bodyCut: 50, radius: 4, glowSpread: 2 };
+        const TOKENS: Record<string, string> = {
+            '--tab-frame-height': '25px',
+            '--tab-frame-tab-cut': '25px',
+            '--tab-frame-body-cut': '50px',
+            '--tab-frame-glow-spread': '2px',
+        };
+
+        function mockLayout(tabWidth = 180) {
+            vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+            vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
+            vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
+                return this.dataset.testid === 'tab-frame-tab' ? tabWidth : 0;
+            });
+            vi.spyOn(window, 'getComputedStyle').mockImplementation(() => ({
+                getPropertyValue: (name: string) => TOKENS[name] ?? '',
+                borderTopLeftRadius: '4px',
+                fontSize: '16px',
+            }) as unknown as CSSStyleDeclaration);
+        }
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it('clips the painted surface to the rounded unified path (tab + body), not to a polygon', () => {
+            previewFrameShape('tab');
+            mockLayout();
+
+            renderFramed();
+
+            expect(screen.getByTestId('tab-frame-surface').style.clipPath).toBe(`path('${buildTabFramePath(GEOMETRY)}')`);
+        });
+
+        it('draws the rest border as a stroke of the same path, inside the surface', () => {
+            previewFrameShape('tab');
+            mockLayout();
+
+            renderFramed();
+
+            const border = screen.getByTestId('tab-frame-border');
+            expect(border.closest('[data-testid="tab-frame-surface"]')).not.toBeNull();
+            expect(border).toHaveClass('hmi-tab-frame-border');
+            expect(border.querySelector('path')?.getAttribute('d')).toBe(buildTabFramePath(GEOMETRY));
+        });
+
+        it('paints the tab fill inside the surface so it takes the same silhouette', () => {
+            previewFrameShape('tab');
+            mockLayout();
+
+            renderFramed();
+
+            const fill = screen.getByTestId('tab-frame-fill');
+            expect(fill).toHaveClass('hmi-tab-frame-fill');
+            expect(fill.closest('[data-testid="tab-frame-surface"]')).not.toBeNull();
+        });
+
+        it('keeps the CSS fallback (no inline path, no border stroke) while the tab is not measured', () => {
+            previewFrameShape('tab');
+            mockLayout(0);
+
+            renderFramed();
+
+            expect(screen.getByTestId('tab-frame-surface').style.clipPath).toBe('');
+            expect(screen.getByTestId('tab-frame-border').querySelector('path')).toBeNull();
+        });
+
+        it('has no alert glow for a normal widget', () => {
+            previewFrameShape('tab');
+            mockLayout();
+
+            const { container } = renderFramed();
+
+            expect(container.querySelector('[data-testid="tab-frame-glow"]')).toBeNull();
+            expect(container.firstElementChild).not.toHaveAttribute('data-alert-state');
+        });
+
+        it.each(['warning', 'critical'])('marks the shell and draws the %s glow along the unified silhouette, only outside it', (state) => {
+            previewFrameShape('tab');
+            mockLayout();
+
+            const { container } = renderFramed({ frameClassName: `widget-state-${state}` });
+
+            expect(container.firstElementChild).toHaveAttribute('data-alert-state', state);
+
+            const glow = screen.getByTestId('tab-frame-glow');
+            expect(glow).toHaveClass('hmi-tab-frame-glow');
+            expect(glow).toHaveAttribute('data-alert-state', state);
+            expect(glow.style.clipPath).toBe(`path(evenodd, '${buildTabFrameGlowClipPath(GEOMETRY, TAB_FRAME_GLOW_CLIP_MARGIN_PX)}')`);
+            // The glow layer sits BEHIND the surface and its shape is the silhouette grown by the spread.
+            expect(glow.nextElementSibling).toBe(screen.getByTestId('tab-frame-surface'));
+            const shape = within(glow).getByTestId('tab-frame-glow-shape');
+            expect(shape.style.clipPath).toBe(`path('${buildTabFramePath(GEOMETRY, -2)}')`);
+        });
+
+        it('colors the tab title with the alert color and follows the state live', () => {
+            previewFrameShape('tab');
+            mockLayout();
+
+            const framed = (frameClassName: string) => (
+                <GridFrameScope>
+                    <WidgetFrame widgetType="machine-activity" title="Actividad" frameClassName={frameClassName} className="p-5">
+                        <WidgetHeader title="Actividad" icon={Activity} />
+                    </WidgetFrame>
+                </GridFrameScope>
+            );
+            const { rerender } = render(framed('widget-state-warning'));
+            expect(screen.getByText('Actividad')).toHaveClass('text-status-warning');
+            expect(document.querySelector('.hmi-tab-frame')).toHaveAttribute('data-alert-state', 'warning');
+
+            rerender(framed('widget-state-critical'));
+            expect(screen.getByText('Actividad')).toHaveClass('text-status-critical');
+            expect(document.querySelector('.hmi-tab-frame')).toHaveAttribute('data-alert-state', 'critical');
+
+            rerender(framed('glass-panel'));
+            expect(screen.getByText('Actividad')).not.toHaveClass('text-status-critical');
+            expect(screen.getByText('Actividad')).toHaveClass('text-(color:--tab-frame-text)');
+            expect(document.querySelector('.hmi-tab-frame')).not.toHaveAttribute('data-alert-state');
         });
     });
 });

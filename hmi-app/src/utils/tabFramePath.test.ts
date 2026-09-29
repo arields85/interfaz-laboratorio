@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTabFramePath, parseCssLengthPx, type TabFramePathGeometry } from './tabFramePath';
+import { buildTabFrameGlowClipPath, buildTabFramePath, parseCssLengthPx, type TabFramePathGeometry } from './tabFramePath';
 
 const GEOMETRY: TabFramePathGeometry = {
     width: 300,
@@ -74,6 +74,14 @@ describe('buildTabFramePath', () => {
         expect(path).not.toContain('NaN');
         expect(radii.length).toBeGreaterThan(0);
         expect(Math.max(...radii)).toBeLessThanOrEqual(24);
+    });
+});
+
+describe('buildTabFrameGlowClipPath', () => {
+    it('is an even-odd path: a margin rectangle around the frame with the silhouette punched out', () => {
+        expect(buildTabFrameGlowClipPath(GEOMETRY, 60)).toBe(
+            `M -60 -60 H 360 V 260 H -60 Z ${buildTabFramePath(GEOMETRY)}`,
+        );
     });
 });
 

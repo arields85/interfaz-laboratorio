@@ -1,9 +1,11 @@
 // =============================================================================
 // Tab frame silhouette
 //
-// Pure geometry of the tab frame shape ("Forma del marco" = Pestaña) in pixels, for the layers that
-// need a real path instead of the CSS `clip-path` polygons of the live frame: the builder selection
-// ring and the viewer entrance outline (a stroke that traces itself, `pathLength="1"`).
+// Pure geometry of the tab frame shape ("Forma del marco" = Pestaña) in pixels. CSS `clip-path:
+// polygon()` cannot round corners, so every layer that draws the shape uses a real path
+// (`clip-path: path()` or an SVG stroke) built here from the measured box and the `--tab-frame-*`
+// tokens: the frame clip, its border, the alert glow, the builder selection ring and ghosts and the
+// viewer entrance flash and outline (a stroke that traces itself, `pathLength="1"`).
 //
 // The silhouette runs clockwise from the top-left corner: the tab (top edge, right side cut by
 // `tabCut`), the body top edge, the body's top-right chamfer (`bodyCut`), the right side and the
@@ -25,6 +27,8 @@ export interface TabFramePathGeometry {
     bodyCut: number;
     /** Radius of every corner (the frame radius of the active preset). */
     radius: number;
+    /** Spread (px) of the warning/critical glow around the silhouette; absent = no glow. */
+    glowSpread?: number;
 }
 
 interface Point {
@@ -160,6 +164,22 @@ export function buildTabFramePath(geometry: TabFramePathGeometry, inset = 0): st
     const baseRadius = Math.max(0, radius);
 
     return roundedPolygonPath(points, (convex) => Math.max(0, convex ? baseRadius - inset : baseRadius + inset));
+}
+
+/** Ink margin (px) of the glow clip: further than the glow blur can reach. */
+export const TAB_FRAME_GLOW_CLIP_MARGIN_PX = 64;
+
+/**
+ * Even-odd `clip-path: path(evenodd, ...)` for the alert glow: a rectangle `margin` px larger than
+ * the frame on every side with the silhouette punched out, so only what lies OUTSIDE the shape
+ * survives (the glow of the standard frame is a `box-shadow`, which is never painted inside).
+ */
+export function buildTabFrameGlowClipPath(geometry: TabFramePathGeometry, margin: number): string {
+    const right = format(geometry.width + margin);
+    const bottom = format(geometry.height + margin);
+    const start = format(-margin);
+
+    return `M ${start} ${start} H ${right} V ${bottom} H ${start} Z ${buildTabFramePath(geometry)}`;
 }
 
 /**

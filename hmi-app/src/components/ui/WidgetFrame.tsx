@@ -1,7 +1,9 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, Ref } from 'react';
 import { useTabFrameActive } from '../../hooks/useTabFrameActive';
-import { TabFrameContext, TabFrameReporterContext } from '../../hooks/tabFrameContext';
+import { useTabFrameGeometry } from '../../hooks/useTabFrameGeometry';
+import { TabFrameContext, TabFrameReporterContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
+import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
 
 // =============================================================================
 // WidgetFrame
@@ -21,7 +23,21 @@ import { TabFrameContext, TabFrameReporterContext } from '../../hooks/tabFrameCo
 //         it there).
 //    Fill, blur and border colors keep coming from the active preset's `--frame-*` tokens because
 //    the surface reuses the same classes; geometry comes from the `--tab-frame-*` tokens.
+//
+// The silhouette is ONE rounded path (`utils/tabFramePath.ts`, every corner with the frame radius)
+// built from the measured shell (`useTabFrameGeometry`, ResizeObserver-driven, no per-frame work):
+// it clips the surface (`clip-path: path()`; CSS `polygon()` cannot round corners), and the same
+// path is stroked for the rest border and grown for the alert glow. Until the box and the tab are
+// measured, the CSS polygon of `index.css` is the fallback.
 // =============================================================================
+
+const ALERT_STATE_PATTERN = /(?:^|\s)widget-state-(warning|critical)(?:\s|$)/;
+
+function resolveAlertState(frameClassName: string): TabFrameAlertState | null {
+    const match = ALERT_STATE_PATTERN.exec(frameClassName);
+
+    return match ? (match[1] as TabFrameAlertState) : null;
+}
 
 interface WidgetFrameProps extends Omit<HTMLAttributes<HTMLElement>, 'className' | 'children'> {
     /** Widget type, checked against `supportsTabFrame`. */
@@ -53,28 +69,49 @@ export default function WidgetFrame({
     ...rest
 }: WidgetFrameProps) {
     const tabActive = useTabFrameActive(widgetType, title);
+    const shellRef = useRef<HTMLDivElement>(null);
     const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
-    const tabContext = useMemo(() => ({ titleHost }), [titleHost]);
+    const [tabWidth, setTabWidth] = useState(0);
+    const alertState = resolveAlertState(frameClassName);
+    const tabContext = useMemo(() => ({ titleHost, alertState }), [titleHost, alertState]);
     const reportTabWidth = useContext(TabFrameReporterContext);
+    const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null);
+    const silhouette = geometry ? buildTabFramePath(geometry) : null;
 
-    // Publish the tab width (it follows the title) for the layers that trace the silhouette; an
-    // unmeasured tab (width 0, e.g. not laid out yet) is reported as unknown.
-    useEffect(() => {
-        if (!tabActive || !titleHost || !reportTabWidth) {
+    // Publish the tab width (it follows the title) for the layers that trace the silhouette. It is
+    // published from the very first layout pass: 0 means "tab shape, width not measured yet" so those
+    // layers wait for the silhouette instead of showing a rectangle; `null` only when the frame is not
+    // the tab shape (or unmounts).
+    useLayoutEffect(() => {
+        if (!tabActive) {
             return undefined;
         }
 
-        const publish = () => reportTabWidth(titleHost.offsetWidth > 0 ? titleHost.offsetWidth : null);
+        const publish = () => {
+            const measured = titleHost && titleHost.offsetWidth > 0 ? titleHost.offsetWidth : 0;
+            setTabWidth(measured);
+            reportTabWidth?.(measured);
+        };
         publish();
 
-        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
-        resizeObserver?.observe(titleHost);
+        if (!titleHost || typeof ResizeObserver === 'undefined') {
+            return undefined;
+        }
 
-        return () => {
-            resizeObserver?.disconnect();
-            reportTabWidth(null);
-        };
+        const resizeObserver = new ResizeObserver(publish);
+        resizeObserver.observe(titleHost);
+
+        return () => resizeObserver.disconnect();
     }, [tabActive, titleHost, reportTabWidth]);
+
+    // Leaving the tab shape (or unmounting) is the only thing that reports the standard shape.
+    useLayoutEffect(() => {
+        if (!tabActive) {
+            return undefined;
+        }
+
+        return () => reportTabWidth?.(null);
+    }, [tabActive, reportTabWidth]);
 
     // `Tag` is a `div` or an `article`: a `Ref<HTMLElement>` type-checks on neither intrinsic
     // element type, so the ref is narrowed to `never` at the JSX boundary (runtime is unaffected).
@@ -92,15 +129,37 @@ export default function WidgetFrame({
 
     return (
         <div
+            ref={shellRef}
             data-widget-frame-shape="tab"
+            data-alert-state={alertState ?? undefined}
+            style={{ borderRadius: 'var(--frame-radius-rest)' }}
             className={['hmi-tab-frame group relative w-full h-full min-h-0', outerClassName].filter(Boolean).join(' ')}
         >
+            {alertState && (
+                <div
+                    data-testid="tab-frame-glow"
+                    aria-hidden="true"
+                    data-alert-state={alertState}
+                    className="hmi-tab-frame-glow"
+                    style={geometry ? { clipPath: `path(evenodd, '${buildTabFrameGlowClipPath(geometry, TAB_FRAME_GLOW_CLIP_MARGIN_PX)}')` } : { display: 'none' }}
+                >
+                    <div
+                        data-testid="tab-frame-glow-shape"
+                        className="hmi-tab-frame-glow-shape"
+                        style={geometry ? { clipPath: `path('${buildTabFramePath(geometry, -(geometry.glowSpread ?? 0))}')` } : undefined}
+                    />
+                </div>
+            )}
             <div
                 data-testid="tab-frame-surface"
                 aria-hidden="true"
                 className={`${frameClassName} hmi-tab-frame-surface`}
+                style={silhouette ? { clipPath: `path('${silhouette}')` } : undefined}
             >
-                <span data-testid="tab-frame-border" className="hmi-tab-frame-border" />
+                <span data-testid="tab-frame-fill" className="hmi-tab-frame-fill" />
+                <svg data-testid="tab-frame-border" className="hmi-tab-frame-border">
+                    {silhouette && <path d={silhouette} />}
+                </svg>
             </div>
             <Tag
                 ref={ref as Ref<never>}

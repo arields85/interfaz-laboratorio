@@ -445,18 +445,30 @@ h1, h2, h3, h4, h5, h6 {
  *   --tab-frame-height       alto de la pestaña (= franja sobre el cuerpo)
  *   --tab-frame-tab-cut      recorte del lado derecho de la pestaña (45° = igual al alto)
  *   --tab-frame-body-cut     chaflán de la esquina superior derecha del cuerpo (45°)
- *   --tab-frame-fill/-text   relleno gris claro y texto oscuro de la pestaña
- *   --tab-frame-pad-*        relleno horizontal de la pestaña (inicio = alinea el punto con el contenido)
+ *   --tab-frame-fill         relleno de la pestaña (blanco al 20 %); con alerta warning/critical
+ *                            pasa a ser el color del estado a --tab-frame-alert-fill-opacity
+ *   --tab-frame-text/-hover  color del título de la pestaña en reposo y con el widget en hover
+ *                            (por defecto el mismo apagado -> blanco del título del marco estándar)
+ *   --tab-frame-pad-*        relleno horizontal de la pestaña (el inicio deja el punto lo más a la izquierda)
+ *   --tab-frame-gap          separación entre el punto de modo de dato y el título
+ *   --tab-frame-glow-*       brillo de alerta: desenfoque (reposo/hover) y expansión, iguales al
+ *                            box-shadow de `.widget-state-warning/-critical`
  *   --tab-frame-icon-shift-* desplazamiento del ícono del header hacia la esquina recortada
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --tab-frame-height: 25px;
   --tab-frame-tab-cut: var(--tab-frame-height);
   --tab-frame-body-cut: 50px;
-  --tab-frame-fill: #a9aaad;
-  --tab-frame-text: var(--color-industrial-bg);
-  --tab-frame-pad-start: 1.25rem;
+  --tab-frame-fill: color-mix(in srgb, #fff 20%, transparent);
+  --tab-frame-alert-fill-opacity: 40%;
+  --tab-frame-text: var(--color-industrial-muted);
+  --tab-frame-text-hover: #fff;
+  --tab-frame-pad-start: 0.625rem;
   --tab-frame-pad-end: 0.3rem;
+  --tab-frame-gap: 0.375rem;
+  --tab-frame-glow-blur: 7px;
+  --tab-frame-glow-blur-hover: 9px;
+  --tab-frame-glow-spread: 2px;
   --tab-frame-icon-shift-x: 1.25rem;
   --tab-frame-icon-shift-y: 0.5rem;
 }
@@ -1044,7 +1056,9 @@ h1, h2, h3, h4, h5, h6 {
     transition: none;
   }
 
-  .hmi-tab-frame-border {
+  .hmi-tab-frame-border > path,
+  .hmi-tab-frame-glow,
+  .hmi-tab-frame-glow-shape {
     transition: none;
   }
 }
@@ -1734,23 +1748,25 @@ h1, h2, h3, h4, h5, h6 {
    * Opt-in: solo `WidgetFrame` (forma Pestaña) emite estas clases; la regla base
    * `.glass-panel` de arriba NO cambia (diálogos, páginas y esqueletos la usan).
    * El envoltorio `.hmi-tab-frame` tiene el tamaño externo de siempre y contiene, como
-   * hermanos: la superficie pintada (mismas clases de vidrio + `.hmi-tab-frame-surface`),
-   * el contenido y la pestaña.
-   * La superficie se recorta con clip-path a la silueta del cuerpo (debajo de la franja
-   * de la pestaña, con el chaflán de 45° arriba a la derecha): el radio del tema sigue
-   * redondeando las esquinas inferiores y el remate `::after` de las esquinas superiores
-   * queda fuera del recorte. El recorte quita el borde CSS a lo largo del borde superior
-   * y de la diagonal, así que lo dibuja `.hmi-tab-frame-border`: una banda con el mismo
-   * polígono (grosor `--tab-frame-stroke-width`; la diagonal mide el grosor en perpendicular,
-   * es decir ancho * raíz de 2 en vertical) coloreada con el borde del tema. */
+   * hermanos: (solo con alerta) la capa de brillo, la superficie pintada (mismas clases de
+   * vidrio + `.hmi-tab-frame-surface`), el contenido y la pestaña.
+   * La silueta es UN solo trazado con TODAS las esquinas redondeadas con el radio del tema
+   * (`utils/tabFramePath.ts`): `clip-path: polygon()` no puede redondear, así que
+   * `WidgetFrame` escribe `clip-path: path()` en línea a partir del tamaño medido. El
+   * polígono de abajo es solo el respaldo hasta que se mide (esquinas rectas).
+   * La superficie no lleva borde CSS ni sombra propios (el recorte los quitaría a lo largo
+   * de la diagonal y los pintaría sobre la pestaña): el borde es el trazo SVG
+   * `.hmi-tab-frame-border` y el brillo de alerta la capa `.hmi-tab-frame-glow`. */
   .hmi-tab-frame > .hmi-tab-frame-surface {
     position: absolute;
     inset: 0;
     pointer-events: none;
+    border: none;
+    box-shadow: none;
     clip-path: polygon(
-      0 var(--tab-frame-height),
-      calc(100% - var(--tab-frame-body-cut)) var(--tab-frame-height),
-      100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut)),
+      0 0,
+      calc(100% - var(--tab-frame-body-cut)) 0,
+      100% var(--tab-frame-body-cut),
       100% 100%,
       0 100%
     );
@@ -1773,25 +1789,45 @@ h1, h2, h3, h4, h5, h6 {
     --tab-frame-stroke-color: color-mix(in srgb, #fff var(--frame-border), transparent);
   }
 
-  .hmi-tab-frame-surface > .hmi-tab-frame-border {
-    --tab-frame-band: calc(var(--tab-frame-stroke-width) * 1.4142);
+  /* Relleno de la pestaña: una franja del alto de la pestaña DENTRO de la superficie recortada,
+   * así toma la misma silueta (esquinas de la pestaña y empalme cóncavo incluidos). */
+  .hmi-tab-frame-fill {
     position: absolute;
-    /* El polígono está en coordenadas de la caja del borde; el hijo absoluto parte del padding box. */
-    inset: calc(-1 * var(--tab-frame-stroke-width));
-    pointer-events: none;
-    background-color: var(--tab-frame-stroke-color);
-    transition: background-color 0.2s ease;
-    clip-path: polygon(
-      0 var(--tab-frame-height),
-      calc(100% - var(--tab-frame-body-cut)) var(--tab-frame-height),
-      100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut)),
-      100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut) + var(--tab-frame-band)),
-      calc(100% - var(--tab-frame-body-cut) + var(--tab-frame-stroke-width) - var(--tab-frame-band)) calc(var(--tab-frame-height) + var(--tab-frame-stroke-width)),
-      0 calc(var(--tab-frame-height) + var(--tab-frame-stroke-width))
-    );
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--tab-frame-height);
+    background: var(--tab-frame-fill);
   }
 
-  /* Estados warning/critical: el borde CSS es de 2px con el color del estado. La superficie es
+  /* Con alerta (metric-card en warning/critical) la pestaña se rellena con el color del estado. */
+  .hmi-tab-frame[data-alert-state='warning'] {
+    --tab-frame-fill: color-mix(in srgb, var(--color-status-warning) var(--tab-frame-alert-fill-opacity), transparent);
+  }
+
+  .hmi-tab-frame[data-alert-state='critical'] {
+    --tab-frame-fill: color-mix(in srgb, var(--color-status-critical) var(--tab-frame-alert-fill-opacity), transparent);
+  }
+
+  /* Borde de reposo: trazo SVG del mismo trazado, centrado sobre el borde de la silueta y al doble
+   * de grosor (la superficie recortada se queda con la mitad interior = el grosor del borde). Sigue
+   * el cuerpo y no la pestaña (la franja de la pestaña queda fuera del recorte, como en la referencia). */
+  .hmi-tab-frame-border {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    clip-path: inset(var(--tab-frame-height) 0 0 0);
+  }
+
+  .hmi-tab-frame-border > path {
+    fill: none;
+    stroke: var(--tab-frame-stroke-color);
+    stroke-width: calc(var(--tab-frame-stroke-width) * 2);
+    transition: stroke 0.2s ease;
+  }
+
+  /* Estados warning/critical: el borde es de 2px con el color del estado. La superficie es
    * un hijo del envoltorio (no del contenido), así que su hover viene del envoltorio. */
   .hmi-tab-frame-surface.widget-state-warning {
     --tab-frame-stroke-width: 2px;
@@ -1811,8 +1847,6 @@ h1, h2, h3, h4, h5, h6 {
     --frame-accent-color: var(--frame-accent-color-hover);
     --frame-accent-opacity: var(--frame-accent-opacity-hover);
     --tab-frame-stroke-color: color-mix(in srgb, var(--color-status-warning) 55%, transparent);
-    border-color: color-mix(in srgb, var(--color-status-warning) 55%, transparent);
-    box-shadow: 0 0 18px 3px color-mix(in srgb, var(--color-status-warning) 28%, transparent);
   }
 
   .hmi-tab-frame:hover > .hmi-tab-frame-surface.widget-state-critical {
@@ -1823,12 +1857,51 @@ h1, h2, h3, h4, h5, h6 {
     --frame-accent-color: var(--frame-accent-color-hover);
     --frame-accent-opacity: var(--frame-accent-opacity-hover);
     --tab-frame-stroke-color: color-mix(in srgb, var(--color-status-critical) 55%, transparent);
-    border-color: color-mix(in srgb, var(--color-status-critical) 55%, transparent);
-    box-shadow: 0 0 18px 3px color-mix(in srgb, var(--color-status-critical) 28%, transparent);
   }
 
-  /* La pestaña: relleno y texto por token, lado derecho cortado a 45° (el elemento incluye la
-   * zona del corte como relleno derecho, así el ancho sigue al título). */
+  /* Brillo de alerta: el `box-shadow` de `.widget-state-*` no sobrevive al recorte, así que vive en
+   * una capa propia DETRÁS de la superficie (hermana, no ancestro: un `filter` en un ancestro
+   * rompería el `backdrop-filter` del vidrio). `.hmi-tab-frame-glow-shape` es la silueta crecida
+   * `--tab-frame-glow-spread` (recorte en línea), la capa la desenfoca (`blur` = mitad del radio del
+   * box-shadow: 14px -> 7px) y un recorte par-impar en línea (`WidgetFrame`) deja solo lo que queda
+   * FUERA de la silueta, como el box-shadow. Mismo color, 20 % en reposo; en hover 28 % y más desenfoque. */
+  .hmi-tab-frame-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    filter: blur(var(--tab-frame-glow-blur));
+    transition: filter 0.2s ease;
+  }
+
+  .hmi-tab-frame-glow-shape {
+    position: absolute;
+    inset: 0;
+    transition: background-color 0.2s ease;
+  }
+
+  .hmi-tab-frame:hover > .hmi-tab-frame-glow {
+    filter: blur(var(--tab-frame-glow-blur-hover));
+  }
+
+  .hmi-tab-frame-glow[data-alert-state='warning'] > .hmi-tab-frame-glow-shape {
+    background-color: color-mix(in srgb, var(--color-status-warning) 20%, transparent);
+  }
+
+  .hmi-tab-frame-glow[data-alert-state='critical'] > .hmi-tab-frame-glow-shape {
+    background-color: color-mix(in srgb, var(--color-status-critical) 20%, transparent);
+  }
+
+  .hmi-tab-frame:hover > .hmi-tab-frame-glow[data-alert-state='warning'] > .hmi-tab-frame-glow-shape {
+    background-color: color-mix(in srgb, var(--color-status-warning) 28%, transparent);
+  }
+
+  .hmi-tab-frame:hover > .hmi-tab-frame-glow[data-alert-state='critical'] > .hmi-tab-frame-glow-shape {
+    background-color: color-mix(in srgb, var(--color-status-critical) 28%, transparent);
+  }
+
+  /* La pestaña: solo el contenedor del título (el relleno es la franja de la superficie). El
+   * elemento incluye la zona del corte como relleno derecho, así el ancho sigue al título.
+   * `color` es el del punto de modo simulado (hereda); el título lleva sus propias clases. */
   .hmi-tab-frame-tab {
     position: absolute;
     top: 0;
@@ -1836,14 +1909,12 @@ h1, h2, h3, h4, h5, h6 {
     z-index: 1;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--tab-frame-gap);
     height: var(--tab-frame-height);
     max-width: calc(100% - var(--tab-frame-body-cut));
     padding-left: var(--tab-frame-pad-start);
     padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));
-    background: var(--tab-frame-fill);
     color: var(--tab-frame-text);
-    clip-path: polygon(0 0, calc(100% - var(--tab-frame-tab-cut)) 0, 100% 100%, 0 100%);
   }
 
   /* El ícono del header sigue en su fila (nada se mueve) y se traslada a la esquina recortada. */

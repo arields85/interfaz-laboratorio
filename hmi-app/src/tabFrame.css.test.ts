@@ -24,9 +24,15 @@ describe('index.css tab frame shape', () => {
         expect(root).toContain('--tab-frame-height: 25px;');
         expect(root).toContain('--tab-frame-tab-cut: var(--tab-frame-height);');
         expect(root).toContain('--tab-frame-body-cut: 50px;');
-        expect(root).toContain('--tab-frame-fill: #a9aaad;');
-        expect(root).toContain('--tab-frame-text: var(--color-industrial-bg);');
-        expect(root).toContain('--tab-frame-pad-start: 1.25rem;');
+        expect(root).toContain('--tab-frame-fill: color-mix(in srgb, #fff 20%, transparent);');
+        expect(root).toContain('--tab-frame-text: var(--color-industrial-muted);');
+        expect(root).toContain('--tab-frame-text-hover: #fff;');
+        expect(root).toContain('--tab-frame-pad-start: 0.625rem;');
+        expect(root).toContain('--tab-frame-gap: 0.375rem;');
+        expect(root).toContain('--tab-frame-alert-fill-opacity: 40%;');
+        expect(root).toContain('--tab-frame-glow-blur: 7px;');
+        expect(root).toContain('--tab-frame-glow-blur-hover: 9px;');
+        expect(root).toContain('--tab-frame-glow-spread: 2px;');
         expect(root).toContain('--tab-frame-pad-end:');
         expect(root).toContain('--tab-frame-icon-shift-x:');
         expect(root).toContain('--tab-frame-icon-shift-y:');
@@ -39,31 +45,41 @@ describe('index.css tab frame shape', () => {
         expect(base).not.toContain('clip-path');
     });
 
-    it('clips the painted surface to the chamfered body silhouette below the tab strip, keeping the preset radius', () => {
+    it('falls back to the chamfered polygon (measured path takes over inline), with no CSS border or shadow of its own', () => {
         const body = ruleBody('\\.hmi-tab-frame > \\.hmi-tab-frame-surface');
 
         expect(body).toContain('position: absolute;');
         expect(body).toContain('inset: 0;');
         expect(body).toContain('pointer-events: none;');
+        // The border is the SVG stroke and the glow its own layer: a CSS border/shadow would draw on the tab and be clipped.
+        expect(body).toContain('border: none;');
+        expect(body).toContain('box-shadow: none;');
         expect(body).toMatch(
-            /clip-path:\s*polygon\(\s*0 var\(--tab-frame-height\),\s*calc\(100% - var\(--tab-frame-body-cut\)\) var\(--tab-frame-height\),\s*100% calc\(var\(--tab-frame-height\) \+ var\(--tab-frame-body-cut\)\),\s*100% 100%,\s*0 100%\s*\);/,
+            /clip-path:\s*polygon\(\s*0 0,\s*calc\(100% - var\(--tab-frame-body-cut\)\) 0,\s*100% var\(--tab-frame-body-cut\),\s*100% 100%,\s*0 100%\s*\);/,
         );
-        // Bottom corners keep the preset radius: the surface is still a .glass-panel and this rule never sets a radius.
         expect(body).not.toContain('border-radius');
     });
 
-    it('draws the top edge and the 45deg diagonal border with an overlay band derived from the tokens', () => {
-        const body = ruleBody('\\.hmi-tab-frame-surface > \\.hmi-tab-frame-border');
+    it('paints the tab fill as a strip inside the clipped surface, so the tab takes the unified silhouette', () => {
+        const body = ruleBody('\\.hmi-tab-frame-fill');
 
-        expect(body).toContain('--tab-frame-band: calc(var(--tab-frame-stroke-width) * 1.4142);');
-        expect(body).toContain('inset: calc(-1 * var(--tab-frame-stroke-width));');
-        expect(body).toContain('background-color: var(--tab-frame-stroke-color);');
-        expect(body).toMatch(/transition:\s*background-color 0\.2s ease;/);
-        // Band polygon: top edge (stroke wide) and the diagonal (stroke wide measured perpendicular = width * sqrt(2) vertically).
-        expect(body).toMatch(
-            /clip-path:\s*polygon\(\s*0 var\(--tab-frame-height\),\s*calc\(100% - var\(--tab-frame-body-cut\)\) var\(--tab-frame-height\),\s*100% calc\(var\(--tab-frame-height\) \+ var\(--tab-frame-body-cut\)\),\s*100% calc\(var\(--tab-frame-height\) \+ var\(--tab-frame-body-cut\) \+ var\(--tab-frame-band\)\),/,
-        );
-        expect(body).toContain('calc(100% - var(--tab-frame-body-cut) + var(--tab-frame-stroke-width) - var(--tab-frame-band)) calc(var(--tab-frame-height) + var(--tab-frame-stroke-width))');
+        expect(body).toContain('position: absolute;');
+        expect(body).toContain('height: var(--tab-frame-height);');
+        expect(body).toContain('background: var(--tab-frame-fill);');
+    });
+
+    it('strokes the SVG border path at twice the stroke width (the surface clip keeps the inner half) and skips the tab strip', () => {
+        const svg = ruleBody('\\.hmi-tab-frame-border');
+        expect(svg).toContain('position: absolute;');
+        expect(svg).toContain('inset: 0;');
+        // The rest border follows the body only: the tab strip has no border.
+        expect(svg).toContain('clip-path: inset(var(--tab-frame-height) 0 0 0);');
+
+        const stroke = ruleBody('\\.hmi-tab-frame-border > path');
+        expect(stroke).toContain('fill: none;');
+        expect(stroke).toContain('stroke: var(--tab-frame-stroke-color);');
+        expect(stroke).toContain('stroke-width: calc(var(--tab-frame-stroke-width) * 2);');
+        expect(stroke).toMatch(/transition:\s*stroke 0\.2s ease;/);
     });
 
     it('takes the overlay color from the preset border token at rest and hover', () => {
@@ -83,7 +99,9 @@ describe('index.css tab frame shape', () => {
 
         const hoverBody = ruleBody(`\\.hmi-tab-frame:hover > \\.hmi-tab-frame-surface\\.widget-state-${state}`);
         expect(hoverBody).toContain(`--tab-frame-stroke-color: color-mix(in srgb, var(--color-status-${state}) ${hover}%, transparent);`);
-        expect(hoverBody).toContain(`border-color: color-mix(in srgb, var(--color-status-${state}) ${hover}%, transparent);`);
+        // The glow is its own layer now: the surface never carries a shadow or a CSS border color.
+        expect(hoverBody).not.toContain('box-shadow');
+        expect(hoverBody).not.toContain('border-color');
     });
 
     it('swaps the theme hover tokens on the state surfaces when the shell is hovered', () => {
@@ -93,7 +111,34 @@ describe('index.css tab frame shape', () => {
         expect(hoverBody).toContain('--frame-blur: var(--frame-blur-hover);');
     });
 
-    it('draws the tab with the fill and text tokens, its right side cut at 45deg by the tab cut', () => {
+    it.each(['warning', 'critical'])('fills the tab with the %s color at the alert fill opacity when the widget is in that state', (state) => {
+        const body = ruleBody(`\\.hmi-tab-frame\\[data-alert-state='${state}'\\]`);
+
+        expect(body).toContain(`--tab-frame-fill: color-mix(in srgb, var(--color-status-${state}) var(--tab-frame-alert-fill-opacity), transparent);`);
+    });
+
+    it.each([
+        ['warning', 20, 28],
+        ['critical', 20, 28],
+    ])('recovers the %s glow of the standard frame (same color, %i%% at rest, blur grows with %i%% on hover), outside the silhouette only', (state, rest, hover) => {
+        const layer = ruleBody('\\.hmi-tab-frame-glow');
+        expect(layer).toContain('position: absolute;');
+        expect(layer).toContain('inset: 0;');
+        expect(layer).toContain('pointer-events: none;');
+        expect(layer).toContain('filter: blur(var(--tab-frame-glow-blur));');
+        expect(layer).toMatch(/transition:\s*filter 0\.2s ease;/);
+
+        const shape = ruleBody(`\\.hmi-tab-frame-glow\\[data-alert-state='${state}'\\] > \\.hmi-tab-frame-glow-shape`);
+        expect(shape).toContain(`background-color: color-mix(in srgb, var(--color-status-${state}) ${rest}%, transparent);`);
+
+        const hoverLayer = ruleBody('\\.hmi-tab-frame:hover > \\.hmi-tab-frame-glow');
+        expect(hoverLayer).toContain('filter: blur(var(--tab-frame-glow-blur-hover));');
+
+        const hoverShape = ruleBody(`\\.hmi-tab-frame:hover > \\.hmi-tab-frame-glow\\[data-alert-state='${state}'\\] > \\.hmi-tab-frame-glow-shape`);
+        expect(hoverShape).toContain(`background-color: color-mix(in srgb, var(--color-status-${state}) ${hover}%, transparent);`);
+    });
+
+    it('lays the tab out with the start padding and gap tokens; its fill lives in the surface strip, not on the tab', () => {
         const body = ruleBody('\\.hmi-tab-frame-tab');
 
         expect(body).toContain('position: absolute;');
@@ -101,11 +146,12 @@ describe('index.css tab frame shape', () => {
         expect(body).toContain('left: 0;');
         expect(body).toContain('height: var(--tab-frame-height);');
         expect(body).toContain('max-width: calc(100% - var(--tab-frame-body-cut));');
+        expect(body).toContain('gap: var(--tab-frame-gap);');
         expect(body).toContain('padding-left: var(--tab-frame-pad-start);');
         expect(body).toContain('padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));');
-        expect(body).toContain('background: var(--tab-frame-fill);');
         expect(body).toContain('color: var(--tab-frame-text);');
-        expect(body).toMatch(/clip-path:\s*polygon\(0 0,\s*calc\(100% - var\(--tab-frame-tab-cut\)\) 0,\s*100% 100%,\s*0 100%\);/);
+        expect(body).not.toContain('background');
+        expect(body).not.toContain('clip-path');
     });
 
     it('moves the header icon into the cut-off corner with the shift tokens', () => {
