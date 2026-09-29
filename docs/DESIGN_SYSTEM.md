@@ -42,6 +42,27 @@ La pestaña **Tema** de Configuración general elige un tema predefinido que def
 - **Reglas:** no hardcodear radios, bordes ni fondos de marco, botón o tag en componentes; usar las clases del tema. Para agregar un tema, sumar un preset al modelo y su tarjeta en la pestaña.
 - **Diseño de temas nuevos:** el laboratorio de estilos (`tools/style-lab/`) permite probar combinaciones y copiar la elección para convertirla en preset.
 
+## Forma del marco (Estándar / Pestaña)
+
+Configuración general → Tema → "Forma del marco" elige entre **Estándar** (el marco redondeado de siempre, por defecto) y **Pestaña**: el título pasa a una pestaña gris clara al ras de la esquina superior izquierda, la esquina superior derecha del cuerpo se recorta a 45° y el ícono del header se traslada al corte. Es global (se combina con los tres temas: relleno, desenfoque y color del borde siguen saliendo de los `--frame-*` del tema activo) y no cambia el tamaño externo ni la posición del contenido (subtítulo, indicador, valor y pie).
+
+- **Estado:** `services/frameShape.service.ts` (clave `hmi-frame-shape` en `localStorage`; solo se guarda el override, una instalación nueva es Estándar) y un store Zustand (`store/frameShape.store.ts`) que lee el hook `useFrameShape`; se refleja como `data-frame-shape` en `<html>`. Igual que un tema, elegirla previsualiza en vivo; Guardar persiste y Descartar o cerrar sin guardar restauran lo guardado. `main.tsx` la reaplica al arrancar.
+- **Quién la aplica:** `components/ui/WidgetFrame.tsx` es la raíz enmarcada de los widgets del grid. La decisión vive en un solo lugar (`hooks/useTabFrameActive.ts`): forma Pestaña elegida + dentro de un grid de dashboard (`GridFrameScope`, que emiten `DashboardViewer` y `BuilderCanvas`) + tipo elegible (`supportsTabFrame` en `utils/widgetCapabilities.ts`) + con título. Conservan el marco estándar: gráficos con selectores de período (`activity-analytics`, `prod-trend`, `prod-history`, `trend-chart`, `trend-chart-v2`), widgets sin título, `status`, `text-title`, `connection-status`, `alert-history`, widgets del header y todo `.glass-panel` fuera del grid (diálogos, páginas, esqueletos).
+- **DOM en modo Pestaña:** un envoltorio `.hmi-tab-frame` (tamaño externo de siempre) con tres hermanos: la superficie pintada (`.hmi-tab-frame-surface`, las mismas clases de vidrio recortadas con `clip-path` a la silueta del cuerpo, más la banda `.hmi-tab-frame-border` que dibuja el borde superior y la diagonal), el contenido (sin recorte, con el padding y los refs de siempre) y la pestaña (`.hmi-tab-frame-tab`), que recibe el título desde `WidgetHeader` mediante un portal. La regla base `.glass-panel` no cambia.
+- **Estados:** la banda toma el borde del tema en reposo y hover, y el color de estado (2 px, 35 %/55 %) en `widget-state-warning/-critical`.
+
+| Token | Valor inicial | Uso |
+|-------|---------------|-----|
+| `--tab-frame-height` | `25px` | Alto de la pestaña (franja sobre el cuerpo) |
+| `--tab-frame-tab-cut` | `var(--tab-frame-height)` | Recorte del lado derecho de la pestaña (45° = igual al alto) |
+| `--tab-frame-body-cut` | `50px` | Chaflán de la esquina superior derecha del cuerpo (45°) |
+| `--tab-frame-fill` | `#a9aaad` | Relleno de la pestaña |
+| `--tab-frame-text` | `var(--color-industrial-bg)` | Texto y punto de modo de dato (simulado) sobre la pestaña |
+| `--tab-frame-pad-start` / `--tab-frame-pad-end` | `1.25rem` / `0.3rem` | Relleno horizontal de la pestaña (el inicio alinea el punto con el contenido) |
+| `--tab-frame-icon-shift-x` / `-y` | `1.25rem` / `0.5rem` | Desplazamiento del ícono del header hacia la esquina recortada |
+
+Los valores se midieron sobre una captura de referencia con escala del 150 % (ya convertidos a px CSS) y se afinan en vivo desde `index.css`.
+
 ## Entrada animada del visor
 
 Al entrar a un dashboard o cambiar de vista, el visor arma la pantalla con movimiento: los marcos aparecen en orden aleatorio, los indicadores (barra y aro) se llenan hasta su valor y los gráficos SVG se revelan de izquierda a derecha. Es CSS puro, no retrasa ni condiciona la carga de datos, no se reproduce con el refresco periódico y queda desactivada con `prefers-reduced-motion`. Solo aplica bajo el marco del visor (`[data-viewer-entrance='true']`): el builder nunca anima.

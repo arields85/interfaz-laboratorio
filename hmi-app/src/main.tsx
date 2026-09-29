@@ -6,6 +6,7 @@ import App from './App.tsx'
 import { applyThemeOverrides } from './components/admin/DesignSettingsTab'
 import { applyThemeStyleOverrides } from './services/themeStyle.service'
 import { applyViewerEntranceOverrides } from './services/viewerEntranceStyle.service'
+import { applyFrameShapeOverrides } from './services/frameShape.service'
 import { cleanupLegacyStorage } from './utils/legacyStorageCleanup'
 import { prismaSessionClient } from './services/prismaSessionClient'
 import { startPrismaVoiceTimelineDiagnostics } from './services/prismaVoiceTimelineDiagnosticsSink'
@@ -24,6 +25,7 @@ cleanupLegacyStorage()
 applyThemeOverrides()
 applyThemeStyleOverrides()
 applyViewerEntranceOverrides()
+applyFrameShapeOverrides()
 void prismaSessionClient.bootstrap().catch(() => undefined)
 // T16: registered before the session-reset pagehide listener below, so its
 // own pagehide flush (browser voice timeline diagnostics) runs first --

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeSettingsTab from './ThemeSettingsTab';
@@ -16,6 +16,14 @@ import {
     VIEWER_ENTRANCE_STORAGE_KEY,
     writeStoredViewerEntranceSettings,
 } from '../../services/viewerEntranceStyle.service';
+import {
+    FRAME_SHAPE_ATTRIBUTE,
+    FRAME_SHAPE_STORAGE_KEY,
+    getActiveFrameShape,
+    previewFrameShape,
+    resetFrameShapeOnDocument,
+    writeStoredFrameShape,
+} from '../../services/frameShape.service';
 
 function createRef<T>(): { current: T | null } {
     return { current: null };
@@ -26,11 +34,13 @@ describe('ThemeSettingsTab', () => {
         localStorage.clear();
         resetThemeStyleOnDocument(document.documentElement);
         resetViewerEntranceSettingsOnDocument(document.documentElement);
+        resetFrameShapeOnDocument(document.documentElement);
     });
 
     afterEach(() => {
         resetThemeStyleOnDocument(document.documentElement);
         resetViewerEntranceSettingsOnDocument(document.documentElement);
+        resetFrameShapeOnDocument(document.documentElement);
         localStorage.clear();
     });
 
@@ -43,7 +53,7 @@ describe('ThemeSettingsTab', () => {
         const instrumentOption = screen.getByRole('radio', { name: /Instrumento/ });
 
         expect(group).toBeInTheDocument();
-        expect(screen.getAllByRole('radio')).toHaveLength(3);
+        expect(within(group).getAllByRole('radio')).toHaveLength(3);
         expect(classicOption).toHaveAttribute('aria-checked', 'true');
         expect(outlineOption).toHaveAttribute('aria-checked', 'false');
         expect(instrumentOption).toHaveAttribute('aria-checked', 'false');
@@ -491,6 +501,160 @@ describe('ThemeSettingsTab', () => {
 
             const hint = screen.getByText(/cambie de dashboard/i);
             expect(hint.textContent).not.toMatch(/\btu\b|\bvos\b|\bpodés\b|\bcambiá\b/i);
+        });
+    });
+
+    describe('Forma del marco', () => {
+        const shapeGroup = () => screen.getByRole('radiogroup', { name: 'Forma del marco' });
+
+        it('renders a radiogroup with Estándar (selected) and Pestaña, with usted-register copy', () => {
+            render(<ThemeSettingsTab />);
+
+            const standard = within(shapeGroup()).getByRole('radio', { name: /Estándar/ });
+            const tab = within(shapeGroup()).getByRole('radio', { name: /Pestaña/ });
+
+            expect(within(shapeGroup()).getAllByRole('radio')).toHaveLength(2);
+            expect(standard).toHaveAttribute('aria-checked', 'true');
+            expect(tab).toHaveAttribute('aria-checked', 'false');
+            expect(shapeGroup().closest('section')?.textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
+        });
+
+        it('does not touch the document or storage on a fresh install', () => {
+            render(<ThemeSettingsTab />);
+
+            expect(document.documentElement.hasAttribute(FRAME_SHAPE_ATTRIBUTE)).toBe(false);
+            expect(localStorage.getItem(FRAME_SHAPE_STORAGE_KEY)).toBeNull();
+        });
+
+        it('starts from the persisted shape', () => {
+            writeStoredFrameShape('tab');
+
+            render(<ThemeSettingsTab />);
+
+            expect(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ })).toHaveAttribute('aria-checked', 'true');
+        });
+
+        it('previews the tab shape on the whole app immediately and marks the tab dirty, without persisting', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+
+            expect(getActiveFrameShape()).toBe('tab');
+            expect(document.documentElement.getAttribute(FRAME_SHAPE_ATTRIBUTE)).toBe('tab');
+            expect(localStorage.getItem(FRAME_SHAPE_STORAGE_KEY)).toBeNull();
+            expect(onDirtyChange).toHaveBeenCalledWith(true);
+            expect(onSaveStatusChange).toHaveBeenCalledWith('dirty');
+            expect(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ })).toHaveAttribute('aria-checked', 'true');
+        });
+
+        it('persists the override on save and clears dirty', async () => {
+            const user = userEvent.setup();
+            const saveRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+
+            render(<ThemeSettingsTab saveRef={saveRef} onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+            act(() => {
+                saveRef.current?.();
+            });
+
+            expect(localStorage.getItem(FRAME_SHAPE_STORAGE_KEY)).toBe('tab');
+            expect(getActiveFrameShape()).toBe('tab');
+            expect(onSaveStatusChange).toHaveBeenCalledWith('saved');
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('removes the stored override when the standard shape is saved again', async () => {
+            const user = userEvent.setup();
+            const saveRef = createRef<() => void>();
+            writeStoredFrameShape('tab');
+            previewFrameShape('tab');
+
+            render(<ThemeSettingsTab saveRef={saveRef} />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Estándar/ }));
+            act(() => {
+                saveRef.current?.();
+            });
+
+            expect(localStorage.getItem(FRAME_SHAPE_STORAGE_KEY)).toBeNull();
+            expect(getActiveFrameShape()).toBe('standard');
+        });
+
+        it('restores the saved shape on revert without persisting', async () => {
+            const user = userEvent.setup();
+            const revertRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab revertRef={revertRef} onDirtyChange={onDirtyChange} />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+            act(() => {
+                revertRef.current?.();
+            });
+
+            expect(getActiveFrameShape()).toBe('standard');
+            expect(document.documentElement.hasAttribute(FRAME_SHAPE_ATTRIBUTE)).toBe(false);
+            expect(localStorage.getItem(FRAME_SHAPE_STORAGE_KEY)).toBeNull();
+            expect(within(shapeGroup()).getByRole('radio', { name: /Estándar/ })).toHaveAttribute('aria-checked', 'true');
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('clears dirty when the selection returns to the saved shape', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Estándar/ }));
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+            expect(getActiveFrameShape()).toBe('standard');
+        });
+
+        it('restores the saved shape on the whole app when the tab unmounts with an unsaved preview', async () => {
+            const user = userEvent.setup();
+
+            const { unmount } = render(<ThemeSettingsTab />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+            expect(getActiveFrameShape()).toBe('tab');
+
+            unmount();
+
+            expect(getActiveFrameShape()).toBe('standard');
+        });
+
+        it('keeps the tab dirty while another setting still differs, even after the shape returns to the saved one', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Estándar/ }));
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+        });
+
+        it('applies the shape independently of the theme preset (global, not per preset)', async () => {
+            const user = userEvent.setup();
+
+            render(<ThemeSettingsTab />);
+
+            await user.click(within(shapeGroup()).getByRole('radio', { name: /Pestaña/ }));
+            await user.click(screen.getByRole('radio', { name: /Instrumento/ }));
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+
+            expect(getActiveFrameShape()).toBe('tab');
         });
     });
 });

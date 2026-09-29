@@ -219,27 +219,35 @@ function renderBuilderCanvasWithoutMeasurement(overrides?: {
     };
 }
 
-vi.mock('../viewer/WidgetPresentationBoundary', () => ({
-    default: ({
+vi.mock('../viewer/WidgetPresentationBoundary', async () => {
+    const { useContext } = await import('react');
+    const { GridFrameScopeContext } = await import('../../hooks/tabFrameContext');
+
+    function WidgetStub({
         widget,
         renderContext,
     }: {
         widget: { id: string; title?: string };
         renderContext?: { surface?: string; isTransientResizeActive?: boolean };
-    }) => (
-        widget.title === 'Editable Input'
+    }) {
+        const inGrid = useContext(GridFrameScopeContext);
+
+        return widget.title === 'Editable Input'
             ? <input data-testid={`widget-renderer-input-${widget.id}`} defaultValue="editable" />
             : (
                 <div
                     data-testid={`widget-renderer-${widget.id}`}
                     data-render-surface={renderContext?.surface ?? 'none'}
                     data-resize-active={renderContext?.isTransientResizeActive === true ? 'true' : 'false'}
+                    data-in-grid={String(inGrid)}
                 >
                     {widget.title ?? widget.id}
                 </div>
-            )
-    ),
-}));
+            );
+    }
+
+    return { default: WidgetStub };
+});
 
 describe('BuilderCanvas', () => {
     beforeEach(() => {
@@ -278,6 +286,12 @@ describe('BuilderCanvas', () => {
             displayOptions: { historicalDensity: 'normal' },
         };
     }
+
+    it('renders every widget inside the dashboard grid scope (frame shape applies in the builder)', async () => {
+        await renderInteractiveCanvas();
+
+        expect(screen.getByTestId('widget-renderer-widget-1')).toHaveAttribute('data-in-grid', 'true');
+    });
 
     it('keeps the builder root as a neutral shell until the first valid canvas measurement arrives', () => {
         const { builderRoot } = renderBuilderCanvasWithoutMeasurement();

@@ -1,7 +1,10 @@
+import { useContext } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import AnalyticsDataModeDot from './AnalyticsDataModeDot';
+import { TabFrameContext } from '../../hooks/tabFrameContext';
 
 // =============================================================================
 // WidgetHeader
@@ -95,19 +98,22 @@ interface WidgetHeaderDataModeProps {
     dataMode?: AnalyticsDataMode | null;
     dataModeTestId?: string;
     withLeadingSeparator?: boolean;
+    /** Dot drawn on the light tab of the tab frame shape. */
+    onTab?: boolean;
 }
 
 export function WidgetHeaderDataMode({
     dataMode,
     dataModeTestId,
     withLeadingSeparator = false,
+    onTab = false,
 }: WidgetHeaderDataModeProps) {
     if (!dataMode) {
         return null;
     }
 
     const dot = (
-        <AnalyticsDataModeDot mode={dataMode} testId={dataModeTestId} />
+        <AnalyticsDataModeDot mode={dataMode} testId={dataModeTestId} onTab={onTab} />
     );
 
     return withLeadingSeparator
@@ -129,12 +135,16 @@ export default function WidgetHeader({
     iconTestId,
     alignment = 'standard',
 }: WidgetHeaderProps) {
+    const tabFrame = useContext(TabFrameContext);
     const hasSubtitle = Boolean(subtitle);
     const alignmentClassName = alignment === 'standard' ? '-translate-y-1' : '';
     const centered = iconPosition === 'centered';
     const iconOnLeft = iconPosition === 'left';
+    // Tab frame shape: the title (and its data-mode dot) live in the tab, the icon in the cut-off
+    // corner; the title row keeps its height so the subtitle and the content below never move.
+    const inTab = tabFrame !== null && !centered && !iconOnLeft;
     const dataModeNode = dataMode ? (
-        <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId={dataModeTestId} />
+        <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId={dataModeTestId} onTab={inTab} />
     ) : null;
     const iconNode = Icon ? (
         <Icon
@@ -147,7 +157,11 @@ export default function WidgetHeader({
             data-testid={iconTestId}
         />
     ) : null;
-    const titleNode = (
+    const titleNode = inTab ? (
+        <span className="min-w-0 truncate uppercase">
+            {title}
+        </span>
+    ) : (
         <span className={centered
             ? 'min-w-0 text-center uppercase text-industrial-muted group-hover:text-white transition-colors'
             : 'min-w-0 flex-1 truncate uppercase text-industrial-muted group-hover:text-white transition-colors'}>
@@ -178,7 +192,34 @@ export default function WidgetHeader({
         <div className={`grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] gap-y-0 ${alignmentClassName} ${className}`}>
             {/* Fila 1: título + bloque derecho. El subtítulo no participa de esta alineación. */}
             <div className="row-start-1 flex items-center justify-between gap-2">
-                {iconOnLeft ? (
+                {inTab ? (
+                    <>
+                        {/* Pestaña: el título va en la pestaña del marco; este espaciador invisible
+                            conserva la altura de la fila para que nada debajo se mueva. */}
+                        {tabFrame.titleHost && createPortal(
+                            <>
+                                {titleLeading}
+                                {dataModeNode}
+                                {titleNode}
+                            </>,
+                            tabFrame.titleHost,
+                        )}
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span aria-hidden="true" className="invisible min-w-0 flex-1 truncate uppercase">{'\u00A0'}</span>
+                        </div>
+
+                        {(iconNode || trailing) && (
+                            <div className="flex items-center gap-2 shrink-0 leading-none">
+                                {iconNode && (
+                                    <span data-tab-frame-slot="icon" className="hmi-tab-frame-icon flex items-center">
+                                        {iconNode}
+                                    </span>
+                                )}
+                                {trailing}
+                            </div>
+                        )}
+                    </>
+                ) : iconOnLeft ? (
                     <>
                         <div className="flex min-w-0 flex-1 items-center gap-2">
                             {iconNode}

@@ -436,6 +436,31 @@ h1, h2, h3, h4, h5, h6 {
   --frame-accent-opacity-hover: 0%;
 }
 
+/* ── Forma del marco: Pestaña (tokens) ─────────────────────────────────────
+ * Geometría y colores de la forma "Pestaña" (Configuración general -> Tema ->
+ * "Forma del marco"); solo se usan bajo `.hmi-tab-frame` (ver `WidgetFrame`).
+ * Medidos a mano sobre la captura de referencia (pantalla con escala del 150 %,
+ * valores ya convertidos a px CSS). Relleno, desenfoque y color del borde del
+ * cuerpo NO están aquí: siguen viniendo de los `--frame-*` del tema activo.
+ *   --tab-frame-height       alto de la pestaña (= franja sobre el cuerpo)
+ *   --tab-frame-tab-cut      recorte del lado derecho de la pestaña (45° = igual al alto)
+ *   --tab-frame-body-cut     chaflán de la esquina superior derecha del cuerpo (45°)
+ *   --tab-frame-fill/-text   relleno gris claro y texto oscuro de la pestaña
+ *   --tab-frame-pad-*        relleno horizontal de la pestaña (inicio = alinea el punto con el contenido)
+ *   --tab-frame-icon-shift-* desplazamiento del ícono del header hacia la esquina recortada
+ * ────────────────────────────────────────────────────────────────────── */
+:root {
+  --tab-frame-height: 25px;
+  --tab-frame-tab-cut: var(--tab-frame-height);
+  --tab-frame-body-cut: 50px;
+  --tab-frame-fill: #a9aaad;
+  --tab-frame-text: var(--color-industrial-bg);
+  --tab-frame-pad-start: 1.25rem;
+  --tab-frame-pad-end: 0.3rem;
+  --tab-frame-icon-shift-x: 1.25rem;
+  --tab-frame-icon-shift-y: 0.5rem;
+}
+
 /* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
  * El contenedor de grupo reusa el marco de cualquier widget (radio, borde,
  * blur, acento de esquina, todos --frame-*) pero pinta su PROPIO fondo (P7,
@@ -999,6 +1024,10 @@ h1, h2, h3, h4, h5, h6 {
   .theme-button-segment-active,
   .theme-button-bare,
   .admin-accent-ghost {
+    transition: none;
+  }
+
+  .hmi-tab-frame-border {
     transition: none;
   }
 }
@@ -1684,4 +1713,112 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 2px;
   }
 
+  /* ── Forma del marco: Pestaña (reglas) ────────────────────────────────────
+   * Opt-in: solo `WidgetFrame` (forma Pestaña) emite estas clases; la regla base
+   * `.glass-panel` de arriba NO cambia (diálogos, páginas y esqueletos la usan).
+   * El envoltorio `.hmi-tab-frame` tiene el tamaño externo de siempre y contiene, como
+   * hermanos: la superficie pintada (mismas clases de vidrio + `.hmi-tab-frame-surface`),
+   * el contenido y la pestaña.
+   * La superficie se recorta con clip-path a la silueta del cuerpo (debajo de la franja
+   * de la pestaña, con el chaflán de 45° arriba a la derecha): el radio del tema sigue
+   * redondeando las esquinas inferiores y el remate `::after` de las esquinas superiores
+   * queda fuera del recorte. El recorte quita el borde CSS a lo largo del borde superior
+   * y de la diagonal, así que lo dibuja `.hmi-tab-frame-border`: una banda con el mismo
+   * polígono (grosor `--tab-frame-stroke-width`; la diagonal mide el grosor en perpendicular,
+   * es decir ancho * raíz de 2 en vertical) coloreada con el borde del tema. */
+  .hmi-tab-frame > .hmi-tab-frame-surface {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    clip-path: polygon(
+      0 var(--tab-frame-height),
+      calc(100% - var(--tab-frame-body-cut)) var(--tab-frame-height),
+      100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut)),
+      100% 100%,
+      0 100%
+    );
+  }
+
+  .hmi-tab-frame-surface {
+    --tab-frame-stroke-width: 1px;
+    --tab-frame-stroke-color: color-mix(in srgb, #fff var(--frame-border), transparent);
+  }
+
+  .hmi-tab-frame-surface > .hmi-tab-frame-border {
+    --tab-frame-band: calc(var(--tab-frame-stroke-width) * 1.4142);
+    position: absolute;
+    /* El polígono está en coordenadas de la caja del borde; el hijo absoluto parte del padding box. */
+    inset: calc(-1 * var(--tab-frame-stroke-width));
+    pointer-events: none;
+    background-color: var(--tab-frame-stroke-color);
+    transition: background-color 0.2s ease;
+    clip-path: polygon(
+      0 var(--tab-frame-height),
+      calc(100% - var(--tab-frame-body-cut)) var(--tab-frame-height),
+      100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut)),
+      100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut) + var(--tab-frame-band)),
+      calc(100% - var(--tab-frame-body-cut) + var(--tab-frame-stroke-width) - var(--tab-frame-band)) calc(var(--tab-frame-height) + var(--tab-frame-stroke-width)),
+      0 calc(var(--tab-frame-height) + var(--tab-frame-stroke-width))
+    );
+  }
+
+  /* Estados warning/critical: el borde CSS es de 2px con el color del estado. La superficie es
+   * un hijo del envoltorio (no del contenido), así que su hover viene del envoltorio. */
+  .hmi-tab-frame-surface.widget-state-warning {
+    --tab-frame-stroke-width: 2px;
+    --tab-frame-stroke-color: color-mix(in srgb, var(--color-status-warning) 35%, transparent);
+  }
+
+  .hmi-tab-frame-surface.widget-state-critical {
+    --tab-frame-stroke-width: 2px;
+    --tab-frame-stroke-color: color-mix(in srgb, var(--color-status-critical) 35%, transparent);
+  }
+
+  .hmi-tab-frame:hover > .hmi-tab-frame-surface.widget-state-warning {
+    --frame-radius: var(--frame-radius-hover);
+    --frame-blur: var(--frame-blur-hover);
+    --frame-accent-length: var(--frame-accent-length-hover);
+    --frame-accent-thickness: var(--frame-accent-thickness-hover);
+    --frame-accent-color: var(--frame-accent-color-hover);
+    --frame-accent-opacity: var(--frame-accent-opacity-hover);
+    --tab-frame-stroke-color: color-mix(in srgb, var(--color-status-warning) 55%, transparent);
+    border-color: color-mix(in srgb, var(--color-status-warning) 55%, transparent);
+    box-shadow: 0 0 18px 3px color-mix(in srgb, var(--color-status-warning) 28%, transparent);
+  }
+
+  .hmi-tab-frame:hover > .hmi-tab-frame-surface.widget-state-critical {
+    --frame-radius: var(--frame-radius-hover);
+    --frame-blur: var(--frame-blur-hover);
+    --frame-accent-length: var(--frame-accent-length-hover);
+    --frame-accent-thickness: var(--frame-accent-thickness-hover);
+    --frame-accent-color: var(--frame-accent-color-hover);
+    --frame-accent-opacity: var(--frame-accent-opacity-hover);
+    --tab-frame-stroke-color: color-mix(in srgb, var(--color-status-critical) 55%, transparent);
+    border-color: color-mix(in srgb, var(--color-status-critical) 55%, transparent);
+    box-shadow: 0 0 18px 3px color-mix(in srgb, var(--color-status-critical) 28%, transparent);
+  }
+
+  /* La pestaña: relleno y texto por token, lado derecho cortado a 45° (el elemento incluye la
+   * zona del corte como relleno derecho, así el ancho sigue al título). */
+  .hmi-tab-frame-tab {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: var(--tab-frame-height);
+    max-width: calc(100% - var(--tab-frame-body-cut));
+    padding-left: var(--tab-frame-pad-start);
+    padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));
+    background: var(--tab-frame-fill);
+    color: var(--tab-frame-text);
+    clip-path: polygon(0 0, calc(100% - var(--tab-frame-tab-cut)) 0, 100% 100%, 0 100%);
+  }
+
+  /* El ícono del header sigue en su fila (nada se mueve) y se traslada a la esquina recortada. */
+  .hmi-tab-frame-icon {
+    transform: translate(var(--tab-frame-icon-shift-x), var(--tab-frame-icon-shift-y));
+  }
 }

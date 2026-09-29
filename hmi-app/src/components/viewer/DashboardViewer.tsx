@@ -16,6 +16,7 @@ import { extendViewerEntranceOrders, resolveViewerEntranceOrders } from '../../u
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 import { ViewerEntranceContext } from '../../hooks/useViewerEntranceCountUp';
+import { GridFrameScope } from '../ui/GridFrameScope';
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -197,6 +198,7 @@ export default function DashboardViewer({
                                     style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
                                     <ViewerEntranceContext.Provider value={entranceKey !== undefined ? (entranceOrders.get(widget.id) ?? 0) : null}>
+                                        <GridFrameScope>
                                         <WidgetPresentationBoundary
                                             widget={effectiveWidget}
                                             equipmentMap={equipmentMap}
@@ -211,6 +213,7 @@ export default function DashboardViewer({
                                             onNavigateDashboard={onNavigateDashboard}
                                             className="w-full h-full"
                                         />
+                                        </GridFrameScope>
                                     </ViewerEntranceContext.Provider>
                                     {entranceKey !== undefined && widget.type !== 'text-title' ? (
                                         <ViewerEntranceFrameOverlays

@@ -16,6 +16,12 @@ import {
     writeStoredViewerEntranceSettings,
 } from '../../services/viewerEntranceStyle.service';
 import type { ViewerEntranceSettings } from '../../domain/viewerEntrance.types';
+import type { FrameShape } from '../../domain/frameShape.types';
+import {
+    previewFrameShape,
+    readStoredFrameShape,
+    writeStoredFrameShape,
+} from '../../services/frameShape.service';
 import DockSliderField from './DockSliderField';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
@@ -60,6 +66,26 @@ const ENTRANCE_CONTROLS: readonly EntranceControlCopy[] = [
     { key: 'flashIntensityPercent', label: 'Intensidad del destello', numberInputAriaLabel: 'Valor de intensidad del destello', unit: '%' },
 ];
 
+interface FrameShapeCopy {
+    value: FrameShape;
+    name: string;
+    description: string;
+}
+
+// Spanish, usted register. The names double as the radios' accessible names.
+const FRAME_SHAPE_OPTIONS: readonly FrameShapeCopy[] = [
+    {
+        value: 'standard',
+        name: 'Estándar',
+        description: 'El marco redondeado de siempre, con el título dentro del widget.',
+    },
+    {
+        value: 'tab',
+        name: 'Pestaña',
+        description: 'El título pasa a una pestaña sobre el marco y la esquina superior derecha se recorta, con el ícono en el corte.',
+    },
+];
+
 function areEntranceSettingsEqual(a: ViewerEntranceSettings, b: ViewerEntranceSettings): boolean {
     return ENTRANCE_CONTROLS.every(({ key }) => a[key] === b[key]);
 }
@@ -80,11 +106,14 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const [selectedId, setSelectedId] = useState(initialId);
     const initialEntrance = useMemo(() => readStoredViewerEntranceSettings(), []);
     const [entrance, setEntrance] = useState<ViewerEntranceSettings>(initialEntrance);
+    const initialShape = useMemo(() => readStoredFrameShape(), []);
+    const [shape, setShape] = useState<FrameShape>(initialShape);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
     const snapshotIdRef = useRef(initialId);
     const snapshotEntranceRef = useRef(initialEntrance);
+    const snapshotShapeRef = useRef(initialShape);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -112,6 +141,14 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     // Selecting a theme or a value different from the saved one is dirty;
     // returning to the saved configuration is a not-dirty clear, not a
     // persisted `Guardado` -- nothing was written to storage.
+    const isDifferentFromSnapshot = (next: {
+        id: string;
+        entrance: ViewerEntranceSettings;
+        shape: FrameShape;
+    }) => next.id !== snapshotIdRef.current
+        || !areEntranceSettingsEqual(next.entrance, snapshotEntranceRef.current)
+        || next.shape !== snapshotShapeRef.current;
+
     const syncDirty = (isDirty: boolean) => {
         dirtyRef.current = isDirty;
         setSaveStatus(isDirty ? 'dirty' : null);
@@ -126,7 +163,19 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         setSelectedId(id);
         previewThemeStyleOnDocument(id);
 
-        syncDirty(id !== snapshotIdRef.current || !areEntranceSettingsEqual(entrance, snapshotEntranceRef.current));
+        syncDirty(isDifferentFromSnapshot({ id, entrance, shape }));
+    };
+
+    // The shape is previewed on the whole document like a theme card: every framed widget of the
+    // dashboard grid reads it through `useFrameShape`.
+    const handleShapeSelect = (next: FrameShape) => {
+        if (next === shape) {
+            return;
+        }
+
+        setShape(next);
+        previewFrameShape(next);
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next }));
     };
 
     // Moving a slider previews the value on the whole document right away
@@ -139,7 +188,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setEntrance(next);
         applyViewerEntranceSettingsToDocument(next);
-        syncDirty(selectedId !== snapshotIdRef.current || !areEntranceSettingsEqual(next, snapshotEntranceRef.current));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape }));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -153,6 +202,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             if (dirtyRef.current) {
                 previewThemeStyleOnDocument(snapshotIdRef.current);
                 applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
+                previewFrameShape(snapshotShapeRef.current);
             }
         };
     }, []);
@@ -166,8 +216,11 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             setActiveThemeStyle(selectedId);
             writeStoredViewerEntranceSettings(entrance);
             applyViewerEntranceSettingsToDocument(entrance);
+            writeStoredFrameShape(shape);
+            previewFrameShape(shape);
             snapshotIdRef.current = selectedId;
             snapshotEntranceRef.current = entrance;
+            snapshotShapeRef.current = shape;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -176,7 +229,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [entrance, onDirtyChange, saveRef, selectedId]);
+    }, [entrance, onDirtyChange, saveRef, selectedId, shape]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -189,6 +242,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewThemeStyleOnDocument(snapshotId);
             setEntrance(snapshotEntranceRef.current);
             applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
+            setShape(snapshotShapeRef.current);
+            previewFrameShape(snapshotShapeRef.current);
             dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
@@ -253,6 +308,50 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                     );
                 })}
             </div>
+
+            <section aria-labelledby="theme-shape-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
+                <div id="theme-shape-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
+                    Forma del marco
+                </div>
+                <p className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    Elija la forma de los marcos de los widgets del dashboard. Se combina con cualquier tema. Solo aplica
+                    a los widgets con título; los gráficos con selector de período conservan el marco estándar.
+                </p>
+
+                <div role="radiogroup" aria-label="Forma del marco" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {FRAME_SHAPE_OPTIONS.map((option) => {
+                        const isSelected = option.value === shape;
+
+                        return (
+                            <button
+                                key={option.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={isSelected}
+                                aria-label={option.name}
+                                onClick={() => handleShapeSelect(option.value)}
+                                className={[
+                                    ADMIN_SIDEBAR_SECTION_CLS,
+                                    'flex flex-col gap-2 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-admin-accent/40',
+                                    isSelected ? 'border-admin-accent/60 bg-admin-accent/5' : 'hover:border-white/20',
+                                ].join(' ')}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="uppercase text-white">{option.name}</span>
+                                    <span
+                                        aria-hidden="true"
+                                        className={[
+                                            'h-3 w-3 shrink-0 rounded-full border',
+                                            isSelected ? 'border-admin-accent bg-admin-accent' : 'border-white/30',
+                                        ].join(' ')}
+                                    />
+                                </div>
+                                <p className={ADMIN_SIDEBAR_HINT_CLS}>{option.description}</p>
+                            </button>
+                        );
+                    })}
+                </div>
+            </section>
 
             <section aria-labelledby="theme-entrance-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
                 <div id="theme-entrance-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>

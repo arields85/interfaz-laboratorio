@@ -5,6 +5,7 @@ import type { EquipmentSummary } from '../../domain/equipment.types';
 import { Activity, Thermometer, Zap, Droplet, Wind, Settings, Gauge, Fan, FoldVertical, HelpCircle, HeartPulse, Siren, Wifi, BarChart2, LineChart, type LucideIcon } from 'lucide-react';
 import GaugeDisplay, { CIRCULAR_VIEWBOX_SIZE } from '../../components/ui/GaugeDisplay';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import { getStateVisuals } from '../utils/machineActivity';
@@ -635,18 +636,31 @@ export default function MachineActivityWidget({
 
     if (isLoadingData) {
         return (
-            <div className={`glass-panel group p-5 w-full h-full ${className ?? ''}`}>
+            <WidgetFrame
+                widgetType={widget.type}
+                title={widget.title ?? 'Actividad de Máquina'}
+                frameClassName="glass-panel"
+                className="group p-5 w-full h-full"
+                outerClassName={className}
+            >
                 <WidgetCenteredContentLayout
                     header={<WidgetHeader title={widget.title ?? 'Actividad de Máquina'} icon={Icon} dataMode={dataMode} />}
                 >
                     <WidgetRuntimeState state="loading" testId="machine-activity-widget-loading" />
                 </WidgetCenteredContentLayout>
-            </div>
+            </WidgetFrame>
         );
     }
 
     return (
-        <div className={`p-5 glass-panel group relative w-full h-full ${className ?? ''}`} data-state={productiveState}>
+        <WidgetFrame
+            widgetType={widget.type}
+            title={widget.title ?? 'Actividad de Máquina'}
+            frameClassName="glass-panel"
+            className="p-5 group relative w-full h-full"
+            outerClassName={className}
+            data-state={productiveState}
+        >
             <WidgetCenteredContentLayout
                 headerOffsetClassName="-translate-y-1"
                 contentClassName="translate-y-3"
@@ -716,6 +730,6 @@ export default function MachineActivityWidget({
                     {isValid ? `${smoothedPower.toFixed(2)} ${realUnit}` : `-- ${realUnit}`}
                 </div>
             )}
-        </div>
+        </WidgetFrame>
     );
 }

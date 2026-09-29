@@ -7,6 +7,7 @@ import {
     hasNestedInteractiveNavigation,
     supportsCatalogVariable,
     supportsHierarchy,
+    supportsTabFrame,
 } from './widgetCapabilities';
 
 describe('widgetCapabilities', () => {
@@ -140,5 +141,26 @@ describe('widgetCapabilities', () => {
 
     it('returns null as the default icon for unknown widget types', () => {
         expect(getDefaultIcon('unknown-widget')).toBeNull();
+    });
+});
+
+describe('widgetCapabilities tab frame eligibility', () => {
+    it('lets machine-activity use the tab frame shape', () => {
+        expect(supportsTabFrame('machine-activity')).toBe(true);
+    });
+
+    it.each([
+        'activity-analytics',
+        'prod-trend',
+        'prod-history',
+        'trend-chart',
+        'trend-chart-v2',
+        'status',
+        'text-title',
+        'connection-status',
+        'alert-history',
+        'not-a-widget-type',
+    ])('keeps %s on the standard frame', (widgetType) => {
+        expect(supportsTabFrame(widgetType)).toBe(false);
     });
 });

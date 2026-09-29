@@ -6,6 +6,7 @@ import type { ContractMachine, ConnectionHealth } from '../../domain/dataContrac
 import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver';
 import GridSelectionFrame from '../ui/GridSelectionFrame';
 import WidgetHoverActions from '../ui/WidgetHoverActions';
+import { GridFrameScope } from '../ui/GridFrameScope';
 import CursorTooltip from '../ui/CursorTooltip';
 import {
     HEADER_WIDGET_SLOT_COUNT,
@@ -1199,17 +1200,19 @@ export default function BuilderCanvas({
                                     className="pointer-events-none relative z-0 h-full w-full box-border"
                                     style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
-                                    <WidgetPresentationBoundary
-                                        widget={widget}
-                                        equipmentMap={equipmentMap}
-                                        connection={connection}
-                                        machines={machines}
-                                        isLoadingData={false}
-                                        siblingWidgets={widgets}
-                                        hierarchyContext={hierarchyContext}
-                                        renderContext={renderContext}
-                                        className="h-full w-full"
-                                    />
+                                    <GridFrameScope>
+                                        <WidgetPresentationBoundary
+                                            widget={widget}
+                                            equipmentMap={equipmentMap}
+                                            connection={connection}
+                                            machines={machines}
+                                            isLoadingData={false}
+                                            siblingWidgets={widgets}
+                                            hierarchyContext={hierarchyContext}
+                                            renderContext={renderContext}
+                                            className="h-full w-full"
+                                        />
+                                    </GridFrameScope>
                                 </div>
                             </div>
                         );

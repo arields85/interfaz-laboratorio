@@ -92,6 +92,24 @@ export function hasNestedInteractiveNavigation(widgetType: string): boolean {
 }
 
 /**
+ * Widget types whose grid frame may take the tab shape ("Forma del marco" = Pestaña):
+ * titled widgets whose header uses the right-side icon. The single source of truth for
+ * that eligibility -- every excluded type keeps the standard frame in every shape:
+ * charts with period controls (`WidgetHeaderTemporalControls`), `status`, `text-title`,
+ * `connection-status`, `alert-history`, header-slot widgets and non-grid uses.
+ */
+const TAB_FRAME_WIDGET_TYPES: ReadonlySet<string> = new Set<WidgetType>([
+    'machine-activity',
+]);
+
+/**
+ * Returns true when the widget type may render the tab frame shape (see `WidgetFrame`).
+ */
+export function supportsTabFrame(widgetType: string): boolean {
+    return TAB_FRAME_WIDGET_TYPES.has(widgetType);
+}
+
+/**
  * Returns true when a concrete widget config needs nested-interactive navigation handling.
  */
 export function hasNestedInteractiveNavigationForConfig(widget: Pick<WidgetConfig, 'type' | 'hierarchyMode'>): boolean {
