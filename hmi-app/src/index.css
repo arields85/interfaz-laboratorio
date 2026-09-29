@@ -1756,6 +1756,18 @@ h1, h2, h3, h4, h5, h6 {
     );
   }
 
+  /* En el marco estándar el contenido vive DENTRO del borde del propio `.glass-panel`; aquí el borde
+   * lo lleva la superficie, así que el contenido (hermano siguiente) reserva el mismo ancho de borde
+   * transparente y nada se mueve respecto del marco estándar. */
+  .hmi-tab-frame > .hmi-tab-frame-surface + * {
+    border: 1px solid transparent;
+  }
+
+  .hmi-tab-frame > .hmi-tab-frame-surface.widget-state-warning + *,
+  .hmi-tab-frame > .hmi-tab-frame-surface.widget-state-critical + * {
+    border-width: 2px;
+  }
+
   .hmi-tab-frame-surface {
     --tab-frame-stroke-width: 1px;
     --tab-frame-stroke-color: color-mix(in srgb, #fff var(--frame-border), transparent);

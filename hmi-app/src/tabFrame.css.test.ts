@@ -136,4 +136,15 @@ describe('index.css tab frame shape', () => {
             /clip-path:\s*polygon\(\s*0 0,\s*calc\(var\(--tab-frame-tab-base\) - var\(--tab-frame-tab-cut\)\) 0,\s*var\(--tab-frame-tab-base\) var\(--tab-frame-height\),\s*calc\(100% - var\(--tab-frame-body-cut\)\) var\(--tab-frame-height\),\s*100% calc\(var\(--tab-frame-height\) \+ var\(--tab-frame-body-cut\)\),\s*100% 100%,\s*0 100%\s*\);/,
         );
     });
+
+    it('reserves the frame border width on the content element so nothing moves (the border now lives on the surface)', () => {
+        const rest = ruleBody('\\.hmi-tab-frame > \\.hmi-tab-frame-surface \\+ \\*');
+        expect(rest).toContain('border: 1px solid transparent;');
+
+        const state = indexCss.match(
+            /\.hmi-tab-frame > \.hmi-tab-frame-surface\.widget-state-warning \+ \*,\s*\n\s*\.hmi-tab-frame > \.hmi-tab-frame-surface\.widget-state-critical \+ \*\s*{([^}]*)}/,
+        );
+        expect(state).not.toBeNull();
+        expect(state?.[1]).toContain('border-width: 2px;');
+    });
 });
