@@ -124,8 +124,17 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     var(--tab-frame-height)`, `--tab-frame-body-cut: 50px`, `--tab-frame-fill: #a9aaad`, `--tab-frame-text:
     var(--color-industrial-bg)`, `--tab-frame-pad-start: 1.25rem`, `--tab-frame-pad-end: 0.3rem`,
     `--tab-frame-icon-shift-x: 1.25rem`, `--tab-frame-icon-shift-y: 0.5rem`.
+- 2026-09-29 parent: scale check — in `Desktop/00.png` the 6 CSS px data-mode dot measures 10 screen px
+  (≈1.67 px per CSS px; the 24 px icon suggests ≈1.8), so the 37 px reference tab is ≈22 CSS px and the 75 px
+  body cut ≈45 CSS px; the writer's 25 px / 50 px assumed 150 %. The control Chrome reports DPR 2 and the
+  viewer also fits the dashboard to the window, so the final values are decided in the live look.
+  RDD assess `40ad436..bc8fa45` (committed-only, `.gga` excluded): medium, 3030 lines / 42 files,
+  `review_due` (`slice_budget_reached`); user GRANTED consent; START refused with
+  `lens_context_budget_exceeded` (no authority created, nothing to abandon). Review pending as smaller
+  candidates (e.g. one per commit: F1 `cc1450b`, F2 `9e9c187`, F3 `5d98403`, fix `84ee23d`) after the live
+  tuning, so it covers the final code.
 
 ## Next step
 
-F4 live look with the user and tuning (see the token table above; the measured defaults assume the screenshots
-were taken at 150 % display scale).
+F4 live look with the user and tuning (see the token table above; tab height/cut values to be confirmed live,
+see the scale check). Then the native review in smaller slices (the whole branch exceeds the reviewer budget).
