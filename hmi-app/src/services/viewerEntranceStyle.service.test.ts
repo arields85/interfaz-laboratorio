@@ -87,6 +87,19 @@ describe('viewerEntranceStyle.service', () => {
         });
     });
 
+    it('snaps off-step stored values to each control step, like the slider does', () => {
+        localStorage.setItem(
+            VIEWER_ENTRANCE_STORAGE_KEY,
+            JSON.stringify({ outlineWidthPx: 1.13, outlineOpacityPercent: 47, flashIntensityPercent: 20.4 }),
+        );
+
+        expect(readStoredViewerEntranceSettings()).toEqual({
+            outlineWidthPx: 1.25,
+            outlineOpacityPercent: 45,
+            flashIntensityPercent: 20,
+        });
+    });
+
     it('sets a property only for overridden values and removes the ones back at default', () => {
         applyViewerEntranceSettingsToDocument({ ...DEFAULT_VIEWER_ENTRANCE_SETTINGS, outlineWidthPx: 2 }, root);
 

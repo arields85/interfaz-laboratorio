@@ -1,4 +1,5 @@
 import type { ViewerEntranceSettings } from '../domain/viewerEntrance.types';
+import { normalizeStepValue } from '../utils/normalizeStepValue';
 
 /**
  * User-adjustable values of the viewer entrance animation (V9), edited from
@@ -41,10 +42,10 @@ export function viewerEntranceSettingsToCssProperties(settings: ViewerEntranceSe
 
 const DEFAULT_CSS_PROPERTIES = viewerEntranceSettingsToCssProperties(DEFAULT_VIEWER_ENTRANCE_SETTINGS);
 
-function clampToLimits(key: keyof ViewerEntranceSettings, value: number): number {
-    const { min, max } = VIEWER_ENTRANCE_LIMITS[key];
+function snapToLimits(key: keyof ViewerEntranceSettings, value: number): number {
+    const { min, max, step } = VIEWER_ENTRANCE_LIMITS[key];
 
-    return Math.min(max, Math.max(min, value));
+    return normalizeStepValue(value, min, max, step);
 }
 
 function readOverrides(): Partial<ViewerEntranceSettings> {
@@ -59,7 +60,7 @@ function readOverrides(): Partial<ViewerEntranceSettings> {
         for (const key of SETTING_KEYS) {
             const value = (parsed as Record<string, unknown>)[key];
             if (typeof value === 'number' && Number.isFinite(value)) {
-                overrides[key] = clampToLimits(key, value);
+                overrides[key] = snapToLimits(key, value);
             }
         }
 
@@ -69,7 +70,7 @@ function readOverrides(): Partial<ViewerEntranceSettings> {
     }
 }
 
-/** Defaults plus any valid stored override (out-of-range numbers are clamped). */
+/** Defaults plus any valid stored override (out-of-range numbers are clamped, off-step ones snapped to the control step). */
 export function readStoredViewerEntranceSettings(): ViewerEntranceSettings {
     return { ...DEFAULT_VIEWER_ENTRANCE_SETTINGS, ...readOverrides() };
 }

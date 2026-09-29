@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { normalizeStepValue } from '../../utils/normalizeStepValue';
 import AdminNumberInput from './AdminNumberInput';
 import {
     ADMIN_SIDEBAR_LABEL_CLS,
@@ -19,20 +20,6 @@ export interface DockSliderFieldProps {
     unit?: string;
     disabled?: boolean;
     className?: string;
-}
-
-function getStepPrecision(step: number): number {
-    const fractionalDigits = step.toString().split('.')[1];
-
-    return fractionalDigits?.length ?? 0;
-}
-
-function normalizeValue(value: number, min: number, max: number, step: number): number {
-    const clampedValue = Math.min(max, Math.max(min, value));
-    const precision = getStepPrecision(step);
-    const steppedValue = min + Math.round((clampedValue - min) / step) * step;
-
-    return Number(steppedValue.toFixed(precision));
 }
 
 export default function DockSliderField({
@@ -60,7 +47,7 @@ export default function DockSliderField({
             return;
         }
 
-        onChange(normalizeValue(parsedValue, min, max, step));
+        onChange(normalizeStepValue(parsedValue, min, max, step));
     };
 
     return (
