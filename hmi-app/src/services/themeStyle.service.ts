@@ -176,14 +176,14 @@ export const INSTRUMENT_THEME_STYLE: ThemeStyle = {
     frame: {
         baseBackground: 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%)',
         rest: {
-            radiusPx: 3,
+            radiusPx: 5,
             fillPercent: 0,
-            borderPercent: 8,
+            borderPercent: 12,
             blurPx: 3,
-            accent: { lengthPx: 20, thicknessPx: 1.5, color: WHITE, opacityPercent: 0 },
+            accent: { lengthPx: 25, thicknessPx: 1.5, color: WHITE, opacityPercent: 0 },
         },
         hover: {
-            radiusPx: 3,
+            radiusPx: 5,
             fillPercent: 4,
             borderPercent: 20,
             blurPx: 12,

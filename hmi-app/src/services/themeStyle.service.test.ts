@@ -303,14 +303,14 @@ describe('themeStyle.service "Instrumento" preset (P6, user decision 2026-09-28)
     it('matches the user\'s "Instrumento" values from the theme-polish task', () => {
         expect(INSTRUMENT_THEME_STYLE.id).toBe(INSTRUMENT_THEME_STYLE_ID);
         expect(INSTRUMENT_THEME_STYLE.frame.rest).toEqual({
-            radiusPx: 3,
+            radiusPx: 5,
             fillPercent: 0,
-            borderPercent: 8,
+            borderPercent: 12,
             blurPx: 3,
-            accent: { lengthPx: 20, thicknessPx: 1.5, color: '#ffffff', opacityPercent: 0 },
+            accent: { lengthPx: 25, thicknessPx: 1.5, color: '#ffffff', opacityPercent: 0 },
         });
         expect(INSTRUMENT_THEME_STYLE.frame.hover).toEqual({
-            radiusPx: 3,
+            radiusPx: 5,
             fillPercent: 4,
             borderPercent: 20,
             blurPx: 12,
@@ -488,7 +488,7 @@ describe('applyThemeStyleOverrides (boot re-apply)', () => {
 
         applyThemeStyleOverrides();
 
-        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('3px');
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('5px');
         expect(document.documentElement.style.getPropertyValue('--tag-tint')).toBe('14%');
     });
 
