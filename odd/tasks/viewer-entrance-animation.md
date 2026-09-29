@@ -61,7 +61,7 @@ without losing speed.
 - [x] **V3** — Chart draw-in for the five SVG chart widgets (left-to-right reveal of lines, areas and
   bars), same timing tokens.
 - [ ] **V4** — Live tuning with the user (timings/easing) and live acceptance.
-- [ ] **V5** — Review advisories (lineage `review-e44eea326a8f700c`, non-blocking): R3-frame-key-remount
+- [x] **V5** — Review advisories (lineage `review-e44eea326a8f700c`, non-blocking): R3-frame-key-remount
   (WARNING: a view switch remounts every widget subtree — check widget-local state and mount-time
   fetches, add a test), R3-orders-frozen-per-key, R3-unscoped-guard-partial, R3-dashboard-wiring-untested
   (SUGGESTIONS). Evaluate after V4 so tuning and fixes share one pass. PARTIALLY CLOSED 2026-09-29:
@@ -80,6 +80,11 @@ without losing speed.
   `animation-fill-mode: backwards, backwards` (`index.css:855`), so the fade's `from` keyframe (the opacity
   token) already applies during its delay, i.e. through the whole draw phase; the line is drawn at the
   configured opacity, no pop. A test asserting that fill mode would still be a cheap guard.
+  RESOLVED 2026-09-29 (per advisory): R3-late-value-zero-flash FIXED; R3-countup-restart-on-hasvalue-toggle
+  FIXED; R3-orders-frozen-per-key FIXED; R3-stored-values-not-snapped FIXED; R3-dashboard-wiring-untested
+  TEST-ONLY; R3-combined-dirty-untested TEST-ONLY; R3-outline-opacity-fade-only REFUTED with a guard test;
+  R3-frame-key-remount FINDING REPORTED with a proving test (no state loss or refetch added by the key, see the
+  V5 progress entry); R3-unscoped-guard-partial was closed earlier.
 - [x] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
   más dinamismo"): on entrance each frame's background flashes/blinks — a brightness overlay above the
   fill peaks and decays to the theme's rest look; visible in all three presets (correction 2026-09-29,
@@ -220,9 +225,51 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   capture; lineage `review-5db18b108b9679a6` APPROVED, acknowledged, authority burned. Reviewed boundary is
   now `5f02b19`. Findings recorded under V5 (one warning refuted with code evidence).
 
+- 2026-09-29 V5 (route: delegated writer; commits `ff761d8`, `23e65ec`, `da4b6b9`, `e0dc3cb`, `2495324`,
+  `755b632`, `466c9d8`; no visuals, timings or token defaults changed). TDD strict, runner Vitest.
+  - R3-late-value-zero-flash (fixed, `ff761d8`): `useViewerEntranceCountUp` now decides during render (sanctioned
+    render-phase state adjustment) whether the first value arrives inside or after the window, so the first
+    committed render already shows the final value; a layout effect could not do it because the first commit
+    would still contain the scaled-by-0 DOM. RED: the committed-progress recorder saw a 0 commit (test failed);
+    GREEN: all committed values are 1. One `eslint-disable react-hooks/purity` (one-shot clock read stored in state).
+  - R3-countup-restart-on-hasvalue-toggle (fixed, same commit): the count keeps ONE origin in state; a
+    true->false->true toggle resumes on that timeline and ends at the original end. RED: progress restarted
+    (0.0045 vs 0.96 mid-count); GREEN: >= mid value after the toggle and exactly 1 at the original end.
+  - R3-orders-frozen-per-key (fixed, `23e65ec`): `extendViewerEntranceOrders` gives widgets added under the same
+    key a random order (injectable random), never touches existing orders (no reshuffle, no remount), pulls a
+    new locked group container to its earliest member; removed widgets leave gaps on purpose (closing them
+    would reshuffle). RED: util suite (function missing, 3 tests) and viewer order test (0 vs 0.75); the
+    removal test passed immediately (regression guard).
+  - R3-stored-values-not-snapped (fixed, `da4b6b9`): shared `utils/normalizeStepValue.ts` extracted from
+    `DockSliderField` (no duplication) and used on read in the service. RED: off-step 1.13 / 47 / 20.4 came
+    back unsnapped; GREEN: 1.25 / 45 / 20.
+  - R3-outline-opacity-fade-only (refuted, guard `e0dc3cb`): asserts `animation-fill-mode: backwards, backwards`
+    on the outline rect. Passed immediately; fault injection (`none, backwards` in index.css) made it fail, reverted.
+  - R3-combined-dirty-untested (test-only, `2495324`): three tests (preset back to saved while a slider is
+    dirty; slider back while another preset is selected; both back clears). Passed immediately; fault
+    injection on each half of the dirty expression failed the matching tests, reverted.
+  - R3-dashboard-wiring-untested (test-only, `755b632`): the page test mock now exposes the received
+    `entranceKey` (the real viewer needs canvas measurement plus every widget dependency); the key follows
+    the active view and dashboard and survives a data refresh. Passed immediately; fault injections (view
+    id dropped, dashboard id replaced, random suffix) each failed it, reverted. The real keyed-frame remount
+    is covered by `DashboardViewer.entrance.test`.
+  - R3-frame-key-remount (finding + proving test, `466c9d8`): only the grid frame is keyed; widgets are keyed by
+    id inside it, and view/dashboard ids are remapped on clone/duplicate, so a switch already unmounted the
+    previous widgets and mounted the new ones BEFORE this feature: no new local-state loss in practice
+    (range/custom window/groupBy/turno, hover, tabs, filters, KPI glide all reset as they already did; only a
+    widget sharing an id across two views would now also reset). `DashboardViewer`'s own hover state and the
+    page-level `useDataOverview` are outside the keyed frame. Mount-time queries: history and activity-series
+    use `staleTime: 30_000` with param-based keys, the trend-v2 prefetch skips cached keys and cancels on
+    unmount; so a remount within 30 s of the last fetch is served from cache, and older data refetches exactly
+    as on a first entry. Test with a real QueryClient: no extra history/activity requests across view
+    switches (including back), none for a same-id remount, and a counter control that does fetch for uncached
+    data. Fault injection (`staleTime: 0`) failed it, reverted. No redesign needed; a decision is only needed
+    if replay should preserve widget state for same-id widgets (not the case today).
+  - Verification (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 242 files / 3075 tests
+    passed; `npm run build` OK. Pre-commit review PASSED on every commit. Not verified: real browser rendering.
+
 ## Next step
 
-V4: live tuning with the user, now with the Tema controls ("Animación de entrada": outline thickness and
-opacity, flash intensity; the remaining timings stay in the single `:root` block of `index.css`), in all three
-theme presets; check `rx/ry` CSS geometry properties on the outline rect in the target browsers. V5 (the
-remaining review advisories, including the late-value zero flash) after tuning.
+Final live check by the user (late-arriving values no longer flash 0, the count-up survives value toggles,
+widgets added mid-entrance get their own delay), then the merge decision (fast-forward to `main` and push only
+on the user's explicit OK). V4 (live tuning) was accepted by the user ("quedó perfecto").
