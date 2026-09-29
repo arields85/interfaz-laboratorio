@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { HelpCircle, Info, type LucideIcon } from 'lucide-react';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import type { InfoCardWidgetConfig } from '../../domain/admin.types';
 import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
 import {
@@ -180,7 +181,15 @@ export default function InfoCardWidget({ widget, className, presentationData }: 
         : undefined;
 
     return (
-        <article ref={cardRef} className={[className, 'glass-panel group flex h-full w-full min-h-0 flex-col gap-0 p-4'].filter(Boolean).join(' ')}>
+        <WidgetFrame
+            as="article"
+            ref={cardRef}
+            widgetType={widget.type}
+            title={widget.title?.trim() || 'Info card'}
+            frameClassName="glass-panel"
+            className="group flex h-full w-full min-h-0 flex-col gap-0 p-4"
+            outerClassName={className}
+        >
             <div ref={headerRef} data-testid="info-card-header" className="shrink-0">
                 <WidgetHeader
                     title={widget.title?.trim() || 'Info card'}
@@ -233,6 +242,6 @@ export default function InfoCardWidget({ widget, className, presentationData }: 
                     </div>
                 )}
             </div>
-        </article>
+        </WidgetFrame>
     );
 }

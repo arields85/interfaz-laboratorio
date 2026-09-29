@@ -72,7 +72,7 @@ export default function WidgetFrame({
 
     return (
         <div
-            data-frame-shape="tab"
+            data-widget-frame-shape="tab"
             className={['hmi-tab-frame group relative w-full h-full min-h-0', outerClassName].filter(Boolean).join(' ')}
         >
             <div

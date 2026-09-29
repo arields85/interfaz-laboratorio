@@ -1,0 +1,230 @@
+import '@testing-library/jest-dom/vitest';
+import { render, screen, within } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { afterEach, describe, expect, it } from 'vitest';
+import type {
+    GroupWidgetConfig,
+    InfoCardWidgetConfig,
+    KpiWidgetConfig,
+    MetricCardWidgetConfig,
+} from '../../domain/admin.types';
+import { GridFrameScope } from '../../components/ui/GridFrameScope';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
+import GroupWidget from './GroupWidget';
+import InfoCardWidget from './InfoCardWidget';
+import KpiWidget from './KpiWidget';
+import MetricWidget from './MetricWidget';
+
+// Tab frame shape rollout (F2): kpi, metric-card, info-card and titled group take the tab shape
+// inside a dashboard grid; the standard shape keeps today's single framed element.
+
+const kpiWidget = {
+    id: 'kpi-tab',
+    type: 'kpi',
+    title: 'Potencia',
+    position: { x: 0, y: 0 },
+    size: { w: 2, h: 2 },
+    binding: { mode: 'simulated_value', simulatedValue: 5, unit: 'kW' },
+    displayOptions: { kpiMode: 'circular', min: 0, max: 10, subtitle: 'ACTIVA', subtext: 'Pie del KPI' },
+} as KpiWidgetConfig;
+
+const metricWidget = {
+    id: 'metric-tab',
+    type: 'metric-card',
+    title: 'Temperatura',
+    position: { x: 0, y: 0 },
+    size: { w: 2, h: 2 },
+    binding: { mode: 'real_variable', assetId: 'missing-asset', unit: '°C' },
+    displayOptions: { subtitle: 'ZONA 1', subtext: 'Límite 80' },
+} as MetricCardWidgetConfig;
+
+const metricPresentation = {
+    binding: { value: 42, unit: '°C', status: 'normal' as const, source: 'real' as const },
+    value: 42,
+    unit: '°C',
+    status: 'normal' as const,
+    source: 'real' as const,
+};
+
+const infoWidget = {
+    id: 'info-tab',
+    type: 'info-card',
+    title: 'Resumen de línea',
+    position: { x: 0, y: 0 },
+    size: { w: 6, h: 5 },
+    displayOptions: { subtitle: 'Turno A', fields: [{ id: 'batch', label: 'Lote', value: 'B-204' }] },
+} as unknown as InfoCardWidgetConfig;
+
+function makeGroup(overrides?: Partial<GroupWidgetConfig>): GroupWidgetConfig {
+    return {
+        id: 'group-tab',
+        type: 'group',
+        title: 'Compresión 01',
+        position: { x: 0, y: 0 },
+        size: { w: 10, h: 10 },
+        memberWidgetIds: [],
+        locked: false,
+        displayOptions: { icon: 'Group' },
+        ...overrides,
+    };
+}
+
+interface Case {
+    name: string;
+    title: string;
+    element: () => ReactElement;
+    /** Text that must stay in the body header in both shapes. */
+    bodyText: string;
+    frameClasses: string[];
+}
+
+const CASES: Case[] = [
+    {
+        name: 'kpi',
+        title: 'Potencia',
+        element: () => <KpiWidget widget={kpiWidget} equipmentMap={new Map()} className="w-full h-full" />,
+        bodyText: 'ACTIVA',
+        frameClasses: ['glass-panel'],
+    },
+    {
+        name: 'metric-card',
+        title: 'Temperatura',
+        element: () => <MetricWidget widget={metricWidget} equipmentMap={new Map()} presentationData={metricPresentation} />,
+        bodyText: 'ZONA 1',
+        frameClasses: ['glass-panel'],
+    },
+    {
+        name: 'info-card',
+        title: 'Resumen de línea',
+        element: () => <InfoCardWidget widget={infoWidget} className="w-full h-full" />,
+        bodyText: 'Turno A',
+        frameClasses: ['glass-panel'],
+    },
+    {
+        name: 'group',
+        title: 'Compresión 01',
+        element: () => <GroupWidget widget={makeGroup()} className="custom-group" />,
+        bodyText: 'group-header-icon',
+        frameClasses: ['glass-panel', 'glass-panel-group'],
+    },
+];
+
+function renderInGrid(element: ReactElement) {
+    return render(<GridFrameScope>{element}</GridFrameScope>);
+}
+
+describe('tab frame shape rollout', () => {
+    afterEach(() => {
+        resetFrameShapeOnDocument();
+    });
+
+    describe.each(CASES)('$name', ({ title, element, bodyText, frameClasses }) => {
+        it('keeps today\'s single framed element with the title in the body when the standard shape is selected (guard)', () => {
+            const { container } = renderInGrid(element());
+
+            expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+            const framed = container.querySelector('.glass-panel') as HTMLElement;
+            expect(framed).not.toBeNull();
+            expect(framed).toHaveClass(...frameClasses, 'group');
+            expect(within(framed).getByText(title)).toBeInTheDocument();
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+        });
+
+        it('moves the title into the tab and paints the frame on a chamfered surface in the tab shape', () => {
+            previewFrameShape('tab');
+
+            const { container } = renderInGrid(element());
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(shell).not.toBeNull();
+            expect(shell).toHaveClass('hmi-tab-frame', 'group');
+
+            const tab = screen.getByTestId('tab-frame-tab');
+            expect(within(tab).getByText(title)).toBeInTheDocument();
+            expect(screen.getAllByText(title)).toHaveLength(1);
+
+            const surface = screen.getByTestId('tab-frame-surface');
+            expect(surface).toHaveClass(...frameClasses, 'hmi-tab-frame-surface');
+            expect(surface.parentElement).toBe(shell);
+            expect(shell.querySelectorAll('.glass-panel')).toHaveLength(1);
+
+            // Body text (subtitle / icon) stays in the content, not in the tab.
+            const bodyNode = bodyText === 'group-header-icon'
+                ? screen.getByTestId(bodyText)
+                : screen.getByText(bodyText);
+            expect(tab).not.toContainElement(bodyNode);
+            expect(surface).not.toContainElement(bodyNode);
+        });
+    });
+
+    it('kpi keeps its footer subtext and value in the content of the tab shape', () => {
+        previewFrameShape('tab');
+
+        renderInGrid(<KpiWidget widget={kpiWidget} equipmentMap={new Map()} />);
+
+        expect(screen.getByText('Pie del KPI')).toBeInTheDocument();
+        expect(screen.getByTestId('tab-frame-tab')).not.toContainElement(screen.getByText('Pie del KPI'));
+    });
+
+    it('metric-card keeps its measured card ref on the padded content element in the tab shape', () => {
+        previewFrameShape('tab');
+
+        renderInGrid(<MetricWidget widget={metricWidget} equipmentMap={new Map()} presentationData={metricPresentation} />);
+
+        const header = screen.getByTestId('metric-card-header');
+        const content = header.parentElement as HTMLElement;
+        expect(content).toHaveClass('p-5', 'flex', 'flex-col');
+        expect(content).not.toHaveClass('glass-panel');
+        expect(screen.getByText('42')).toBeInTheDocument();
+    });
+
+    it('metric-card keeps the warning state class on the painted surface (border overlay follows it)', () => {
+        previewFrameShape('tab');
+
+        renderInGrid(
+            <MetricWidget
+                widget={metricWidget}
+                equipmentMap={new Map()}
+                presentationData={{ ...metricPresentation, binding: { ...metricPresentation.binding, status: 'warning' } }}
+            />,
+        );
+
+        expect(screen.getByTestId('tab-frame-surface')).toHaveClass('widget-state-warning', 'hmi-tab-frame-surface');
+    });
+
+    it('metric-card loading skeleton and error card keep the standard look in the tab shape', () => {
+        previewFrameShape('tab');
+
+        renderInGrid(<MetricWidget widget={metricWidget} equipmentMap={new Map()} isLoadingData />);
+
+        expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+    });
+
+    it('info-card keeps the scroller and its content stack in the content of the tab shape', () => {
+        previewFrameShape('tab');
+
+        renderInGrid(<InfoCardWidget widget={infoWidget} />);
+
+        const scroller = screen.getByTestId('info-card-content-scroller');
+        expect(within(scroller).getByText('B-204')).toBeInTheDocument();
+        expect(screen.getByTestId('info-card-header')).toBeInTheDocument();
+    });
+
+    it('a group without a title keeps the standard frame even in the tab shape', () => {
+        previewFrameShape('tab');
+
+        const { container } = renderInGrid(<GroupWidget widget={makeGroup({ title: '' })} />);
+
+        expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+        expect(container.firstElementChild).toHaveClass('glass-panel', 'glass-panel-group');
+    });
+
+    it('outside a dashboard grid every widget keeps the standard frame', () => {
+        previewFrameShape('tab');
+
+        const { container } = render(<KpiWidget widget={kpiWidget} equipmentMap={new Map()} />);
+
+        expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+        expect(container.firstElementChild).toHaveClass('glass-panel');
+    });
+});

@@ -100,6 +100,10 @@ export function hasNestedInteractiveNavigation(widgetType: string): boolean {
  */
 const TAB_FRAME_WIDGET_TYPES: ReadonlySet<string> = new Set<WidgetType>([
     'machine-activity',
+    'kpi',
+    'metric-card',
+    'info-card',
+    'group',
 ]);
 
 /**

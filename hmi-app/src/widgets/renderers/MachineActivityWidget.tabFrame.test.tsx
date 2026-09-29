@@ -74,7 +74,7 @@ describe('MachineActivityWidget frame shape', () => {
         const { container } = renderWidget();
 
         const shell = container.firstElementChild as HTMLElement;
-        expect(shell).toHaveAttribute('data-frame-shape', 'tab');
+        expect(shell).toHaveAttribute('data-widget-frame-shape', 'tab');
         expect(shell).toHaveClass('hmi-tab-frame', 'w-full', 'h-full');
 
         const tab = screen.getByTestId('tab-frame-tab');

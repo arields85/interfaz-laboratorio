@@ -199,20 +199,20 @@ export default function DashboardViewer({
                                 >
                                     <ViewerEntranceContext.Provider value={entranceKey !== undefined ? (entranceOrders.get(widget.id) ?? 0) : null}>
                                         <GridFrameScope>
-                                        <WidgetPresentationBoundary
-                                            widget={effectiveWidget}
-                                            equipmentMap={equipmentMap}
-                                            machines={machines}
-                                            connection={connection}
-                                            isLoadingOverview={isLoadingOverview}
-                                            hasOverviewError={hasOverviewError}
-                                            isLoadingData={false}
-                                            siblingWidgets={widgets}
-                                            hierarchyContext={hierarchyContext}
-                                            onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
-                                            onNavigateDashboard={onNavigateDashboard}
-                                            className="w-full h-full"
-                                        />
+                                            <WidgetPresentationBoundary
+                                                widget={effectiveWidget}
+                                                equipmentMap={equipmentMap}
+                                                machines={machines}
+                                                connection={connection}
+                                                isLoadingOverview={isLoadingOverview}
+                                                hasOverviewError={hasOverviewError}
+                                                isLoadingData={false}
+                                                siblingWidgets={widgets}
+                                                hierarchyContext={hierarchyContext}
+                                                onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                                onNavigateDashboard={onNavigateDashboard}
+                                                className="w-full h-full"
+                                            />
                                         </GridFrameScope>
                                     </ViewerEntranceContext.Provider>
                                     {entranceKey !== undefined && widget.type !== 'text-title' ? (

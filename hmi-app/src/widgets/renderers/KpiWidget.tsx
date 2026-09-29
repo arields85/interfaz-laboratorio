@@ -8,6 +8,7 @@ import { Activity, Thermometer, Zap, Droplet, Wind, Settings, Gauge, Fan, FoldVe
 import GaugeDisplay from '../../components/ui/GaugeDisplay';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetCenteredContentLayout from '../../components/ui/WidgetCenteredContentLayout';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import {
     DEFAULT_GAUGE_VALUE_FONT_SIZE,
     resolveActivityAnalyticsDonutCenterValueFontSize,
@@ -309,7 +310,13 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
     }
 
     return (
-        <div className={`p-5 glass-panel group relative w-full h-full ${className ?? ''}`}>
+        <WidgetFrame
+            widgetType={widget.type}
+            title={widget.title ?? 'KPI'}
+            frameClassName="glass-panel"
+            className="p-5 group relative w-full h-full"
+            outerClassName={className}
+        >
             <WidgetCenteredContentLayout
                 headerOffsetClassName="-translate-y-1"
                 contentClassName="translate-y-3"
@@ -356,7 +363,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
                     {footerSubtext}
                 </div>
             )}
-        </div>
+        </WidgetFrame>
     );
 }
 

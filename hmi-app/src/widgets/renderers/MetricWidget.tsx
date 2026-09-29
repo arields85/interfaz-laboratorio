@@ -128,6 +128,7 @@ export default function MetricWidget({
                 icon={Icon}
                 iconColor={iconColor}
                 dataMode={dataMode}
+                widgetType={widget.type}
                 subtitle={subtitle}
                 subtext={subtext}
                 isError={resolved.source === 'error' && resolved.status === 'no-data'}

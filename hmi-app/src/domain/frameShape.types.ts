@@ -8,3 +8,10 @@
  *   body's top-right corner is chamfered (icon in the cut-off corner).
  */
 export type FrameShape = 'standard' | 'tab';
+
+/** Today's frames; a fresh install and anyone who never chooses another shape get this one. */
+export const DEFAULT_FRAME_SHAPE: FrameShape = 'standard';
+
+export function isFrameShape(value: unknown): value is FrameShape {
+    return value === 'standard' || value === 'tab';
+}

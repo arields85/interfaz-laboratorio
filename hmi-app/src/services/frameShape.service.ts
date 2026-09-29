@@ -1,3 +1,4 @@
+import { DEFAULT_FRAME_SHAPE, isFrameShape } from '../domain/frameShape.types';
 import type { FrameShape } from '../domain/frameShape.types';
 import { useFrameShapeStore } from '../store/frameShape.store';
 
@@ -15,11 +16,6 @@ import { useFrameShapeStore } from '../store/frameShape.store';
  */
 export const FRAME_SHAPE_STORAGE_KEY = 'hmi-frame-shape';
 export const FRAME_SHAPE_ATTRIBUTE = 'data-frame-shape';
-export const DEFAULT_FRAME_SHAPE: FrameShape = 'standard';
-
-function isFrameShape(value: unknown): value is FrameShape {
-    return value === 'standard' || value === 'tab';
-}
 
 export function getActiveFrameShape(): FrameShape {
     return useFrameShapeStore.getState().shape;

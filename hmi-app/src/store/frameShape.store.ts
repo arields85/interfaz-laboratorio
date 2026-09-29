@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_FRAME_SHAPE } from '../domain/frameShape.types';
 import type { FrameShape } from '../domain/frameShape.types';
 
 // =============================================================================
@@ -20,7 +21,7 @@ interface FrameShapeStore {
 }
 
 export const useFrameShapeStore = create<FrameShapeStore>()((set) => ({
-    shape: 'standard',
+    shape: DEFAULT_FRAME_SHAPE,
     // Returning the same state object keeps subscribers quiet when the shape does not change.
     setShape: (shape) => set((state) => (state.shape === shape ? state : { shape })),
 }));

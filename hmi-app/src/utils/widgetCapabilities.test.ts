@@ -145,9 +145,12 @@ describe('widgetCapabilities', () => {
 });
 
 describe('widgetCapabilities tab frame eligibility', () => {
-    it('lets machine-activity use the tab frame shape', () => {
-        expect(supportsTabFrame('machine-activity')).toBe(true);
-    });
+    it.each(['machine-activity', 'kpi', 'metric-card', 'info-card', 'group'])(
+        'lets %s use the tab frame shape',
+        (widgetType) => {
+            expect(supportsTabFrame(widgetType)).toBe(true);
+        },
+    );
 
     it.each([
         'activity-analytics',

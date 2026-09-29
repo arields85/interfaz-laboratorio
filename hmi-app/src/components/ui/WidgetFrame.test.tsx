@@ -68,7 +68,7 @@ describe('WidgetFrame', () => {
             const { container } = renderFramed();
 
             const shell = container.firstElementChild as HTMLElement;
-            expect(shell).toHaveAttribute('data-frame-shape', 'tab');
+            expect(shell).toHaveAttribute('data-widget-frame-shape', 'tab');
             expect(shell).toHaveClass('hmi-tab-frame', 'group', 'relative', 'w-full', 'h-full', 'external-layout');
 
             const surface = screen.getByTestId('tab-frame-surface');

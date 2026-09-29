@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_FRAME_SHAPE } from '../domain/frameShape.types';
 import {
     applyFrameShapeOverrides,
-    DEFAULT_FRAME_SHAPE,
     FRAME_SHAPE_ATTRIBUTE,
     FRAME_SHAPE_STORAGE_KEY,
     getActiveFrameShape,

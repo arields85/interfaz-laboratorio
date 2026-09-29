@@ -9,6 +9,7 @@ import {
     getHierarchyTraceExclusionReasonLabel,
 } from '../../widgets/resolvers/hierarchyResolver';
 import WidgetHeader from './WidgetHeader';
+import WidgetFrame from './WidgetFrame';
 import { useViewerEntranceCountUp } from '../../hooks/useViewerEntranceCountUp';
 import { countFractionDigits, resolveViewerCountUpValue } from '../../utils/viewerEntrance';
 
@@ -42,6 +43,12 @@ interface MetricCardProps {
     /** Si true, muestra estado de error */
     isError?: boolean;
     hierarchyTrace?: HierarchyAggregationTrace;
+    /**
+     * Widget type of the dashboard widget this card renders (`MetricWidget` passes it). Only a
+     * type that `supportsTabFrame` can take the tab frame shape; other uses (no type) keep the
+     * standard frame.
+     */
+    widgetType?: string;
     className?: string;
 }
 
@@ -79,6 +86,7 @@ export default function MetricCard({
     isLoading = false,
     isError = false,
     hierarchyTrace,
+    widgetType = '',
     className = '',
 }: MetricCardProps) {
     const [isHierarchyDetailOpen, setIsHierarchyDetailOpen] = useState(false);
@@ -197,7 +205,14 @@ export default function MetricCard({
     const footerSpacingClassName = isCompact ? 'gap-1.5' : 'gap-3';
 
     return (
-        <div ref={cardRef} className={`p-5 flex flex-col w-full h-full min-h-0 transition-colors duration-300 group ${styles.card} ${className}`}>
+        <WidgetFrame
+            ref={cardRef}
+            widgetType={widgetType}
+            title={label}
+            frameClassName={styles.card}
+            className="p-5 flex flex-col w-full h-full min-h-0 transition-colors duration-300 group"
+            outerClassName={className}
+        >
             {/* Header — usa WidgetHeader estándar del sistema */}
             <div ref={headerRef} data-testid="metric-card-header" className="shrink-0">
                 <WidgetHeader
@@ -318,7 +333,7 @@ export default function MetricCard({
                     </div>
                 )}
             </div>
-        </div>
+        </WidgetFrame>
     );
 }
 
