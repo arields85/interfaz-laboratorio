@@ -29,7 +29,18 @@ between them.
 - **Icon-only buttons:** catalog rail and builder toolbar preview; radius, fill, border, accent.
 - **Tags:** style (glass, flat, outline), radius, fill, border and color tint (each tag uses its
   own color).
-- **Presets:** Actual (Clásico), Vidrio con remate, Industrial recto, Contorno (HMI).
+- **Frame shape and "Pestaña" section:** "Forma del marco" switches the widget previews between
+  Estándar and Pestaña (default). The tab silhouette is ONE SVG path (same maths as
+  `hmi-app/src/utils/tabFramePath.ts`) recomputed from the measured size (ResizeObserver): every
+  corner uses the same radius, which is linked to the Widgets radius. Controls: tab fill (color and
+  opacity), tab text color and opacity for rest and hover, radius, tab height, tab cut, body cut,
+  start padding, optional border around the tab, and an alert preview (warning/critical) with
+  tab fill and text taken from the alert color, plus the border and glow along the silhouette.
+  "Reproducir entrada" replays the outline draw-in. "Copiar elección" lists every value with its
+  `--tab-frame-*` token name. The charts widget keeps the standard frame, as in the app.
+- **Presets:** Instrumento (the app's `INSTRUMENT_THEME_STYLE`, and the lab's initial state), Actual
+  (Clásico), Vidrio con remate, Industrial recto, Contorno (HMI). Switching preset keeps the shape
+  and tab settings.
 - A hidden corner accent keeps its length, thickness and color: they are the start point of the
   rest-to-hover animation (registered `@property` custom properties transitioned on the element).
 - "Copiar elección" produces a text summary of every section to turn into a theme.

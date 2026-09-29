@@ -269,6 +269,7 @@
     color: var(--muted);
     margin: 8px 0 20px;
   }
+  .force-note[hidden] { display: none; }
   .force-note {
     display: inline-block;
     margin: 0 0 14px;
@@ -572,8 +573,169 @@
   }
   .panel-note .label { font: 500 10px/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 
+  /* ---------- Frame shape "Pestaña" (tab frame) ----------
+   * Only widgets marked data-tab get it. JS adds the layers (surface, tab fill, border, glow,
+   * entrance outline, tab label) and clips them with ONE SVG path built from the measured box,
+   * the same silhouette idea as hmi-app/src/utils/tabFramePath.ts. */
+  .tf-layer { position: absolute; inset: -1px; pointer-events: none; }
+  .tf-layer svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .card:not(.tf-on) .tf-only { display: none; }
+
+  [data-frame] .card.tf-on {
+    background: none;
+    border-color: transparent;
+    border-radius: 0;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .card.tf-on::after { display: none; }
+
+  .tf-surface {
+    z-index: -1;
+    background:
+      linear-gradient(color-mix(in srgb, #fff var(--w-fill), transparent), color-mix(in srgb, #fff var(--w-fill), transparent)),
+      var(--w-base);
+    -webkit-backdrop-filter: blur(var(--w-blur));
+    backdrop-filter: blur(var(--w-blur));
+  }
+  [data-frame="flat"] .tf-surface { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tf-tabfill {
+    z-index: -1;
+    right: auto;
+    bottom: auto;
+    height: var(--tf-h);
+    background: var(--tf-fill);
+  }
+  .tf-border path {
+    fill: none;
+    stroke: color-mix(in srgb, #fff var(--w-border), transparent);
+    stroke-width: 1px;
+    transition: stroke 0.2s ease;
+  }
+  .tf-tab {
+    position: absolute;
+    left: -1px;
+    top: -1px;
+    z-index: 1;
+    height: var(--tf-h);
+    padding-left: var(--tf-pad);
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    font: 500 10px/1.3 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tf-text-rest);
+    transition: color 0.2s ease;
+  }
+  .card:hover .tf-tab,
+  .force-w .card .tf-tab,
+  .force-t .card .tf-tab { color: var(--tf-text-hover); }
+  .tf-tab-in { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tf-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: var(--tf-gap);
+    border-radius: 50%;
+    vertical-align: middle;
+    background: var(--green);
+  }
+  .tf-dot[data-mode="sim"] { background: #64748b; }
+  /* Header icon: moved into the cut corner, below the tab strip and clear of the 45 degree cut. */
+  .card.tf-on .w-head > span:first-child { visibility: hidden; }
+  .card.tf-on .w-head:has(> svg) { min-height: 18px; }
+  .card.tf-on .w-head > svg {
+    position: absolute;
+    top: calc(var(--tf-h) + 5px);
+    right: calc(var(--tf-bc) - 1px);
+  }
+
+  /* Entrance outline: a stroke that traces itself along the silhouette (pathLength = 1). */
+  .tf-outline { z-index: 2; }
+  /* Same look as the app's entrance outline (--viewer-entrance-outline-*: white, 1px). */
+  .tf-outline path {
+    fill: none;
+    stroke: #ffffff;
+    stroke-width: 1px;
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  .tf-outline.playing path { animation: tf-draw 1.6s ease-out forwards; }
+  @keyframes tf-draw {
+    0% { stroke-dashoffset: 1; opacity: 1; }
+    70% { stroke-dashoffset: 0; opacity: 1; }
+    100% { stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  /* Alert metric card (warning / critical). Standard frame: same recipe as .widget-state-*. */
+  .stage[data-alert="warning"] { --al: #f59e0b; }
+  .stage[data-alert="critical"] { --al: #ef4444; }
+  .card.alert:not(.tf-on) {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--al) 12%, transparent) 0%, color-mix(in srgb, var(--al) 2%, transparent) 100%);
+    border: 2px solid color-mix(in srgb, var(--al) 35%, transparent);
+    box-shadow: 0 0 14px 2px color-mix(in srgb, var(--al) 20%, transparent);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card.alert:not(.tf-on):hover,
+  .force-w .card.alert:not(.tf-on) {
+    border-color: color-mix(in srgb, var(--al) 55%, transparent);
+    box-shadow: 0 0 18px 3px color-mix(in srgb, var(--al) 28%, transparent);
+  }
+  /* Tab frame: alert surface, tab fill = alert color, tab text = alert color, border and glow follow the silhouette. */
+  .card.alert.tf-on .tf-surface {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--al) 12%, transparent) 0%, color-mix(in srgb, var(--al) 2%, transparent) 100%);
+  }
+  .card.alert.tf-on .tf-tabfill { background: color-mix(in srgb, var(--al) var(--tf-alert-fill), transparent); }
+  .card.alert.tf-on .tf-tab { color: color-mix(in srgb, var(--al) var(--tf-alert-text), transparent); }
+  .card.alert.tf-on .tf-border path {
+    stroke: color-mix(in srgb, var(--al) 35%, transparent);
+    stroke-width: 2px;
+  }
+  .card.alert.tf-on:hover .tf-border path,
+  .force-w .card.alert.tf-on .tf-border path { stroke: color-mix(in srgb, var(--al) 55%, transparent); }
+  .tf-glow { z-index: -2; }
+  .tf-glow svg {
+    --gs: 2px;
+    --gb: 7px;
+    opacity: 0.2;
+    filter: blur(var(--gb));
+    transition: filter 0.2s ease, opacity 0.2s ease;
+  }
+  .tf-glow path {
+    fill: var(--al);
+    stroke: var(--al);
+    stroke-width: calc(var(--gs) * 2);
+    transition: stroke-width 0.2s ease;
+  }
+  .card.alert:hover .tf-glow svg,
+  .force-w .card.alert .tf-glow svg { --gs: 3px; --gb: 9px; opacity: 0.28; }
+
+  .tab-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.015);
+  }
+  .range-row.wide label { flex-basis: 12ch; }
+  .color-in {
+    flex: none;
+    width: 34px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .card, .btn, .switch span, .switch span::after { transition: none; }
+    .card, .btn, .switch span, .switch span::after, .tf-tab, .tf-glow svg, .tf-glow path { transition: none; }
+    .tf-outline.playing path { animation-duration: 0.01s; }
   }
 </style>
 
@@ -587,6 +749,7 @@
     <div class="ctl-group">
       <p class="ctl-title">Punto de partida</p>
       <div class="seg" id="presets">
+        <button type="button" data-preset="instrument">Instrumento</button>
         <button type="button" data-preset="current">Actual</button>
         <button type="button" data-preset="glassCorners">Vidrio con remate</button>
         <button type="button" data-preset="industrial">Industrial recto</button>
@@ -661,6 +824,89 @@
         </div>
         <button type="button" class="copy-state" data-copy="w">Copiar desde el otro estado</button>
       </div>
+    </div>
+
+    <!-- Frame shape -->
+    <div class="ctl-group">
+      <p class="ctl-head">Forma del marco</p>
+      <div class="seg" id="shape-seg">
+        <button type="button" data-shape="std">Estándar</button>
+        <button type="button" data-shape="tab">Pestaña</button>
+      </div>
+      <p class="hint">Aplica a los widgets con título. El gráfico con selector de período conserva el marco estándar, como en la app. En Pestaña el remate de esquinas no se dibuja.</p>
+      <button type="button" class="copy-state" id="tf-replay">Reproducir entrada</button>
+    </div>
+
+    <!-- Tab -->
+    <div class="ctl-group" id="tf-group">
+      <p class="ctl-head">Pestaña</p>
+      <p class="hint">Se ve cuando la forma del marco es Pestaña. Los valores equivalen a los tokens --tab-frame-* de la app.</p>
+      <div class="range-row wide">
+        <label for="tf-fillColor">Relleno</label>
+        <input class="color-in" id="tf-fillColor" type="color" aria-label="Color del relleno de la pestaña">
+        <input class="range" id="tf-fillAlpha" type="range" min="0" max="100" step="5" aria-label="Opacidad del relleno de la pestaña">
+        <span class="range-val" id="tf-fillAlpha-val"></span>
+      </div>
+      <div class="tab-box">
+        <div class="state-tabs" role="tablist" aria-label="Estado del texto de la pestaña">
+          <button type="button" role="tab" data-tstate="rest">Texto reposo</button>
+          <button type="button" role="tab" data-tstate="hover">Texto hover</button>
+        </div>
+        <div class="range-row wide">
+          <label for="tf-textColor">Texto</label>
+          <input class="color-in" id="tf-textColor" type="color" aria-label="Color del texto de la pestaña">
+          <input class="range" id="tf-textAlpha" type="range" min="0" max="100" step="5" aria-label="Opacidad del texto de la pestaña">
+          <span class="range-val" id="tf-textAlpha-val"></span>
+        </div>
+        <p class="hint">Mientras edita Hover, la vista previa muestra el texto en hover. La transición es la misma del widget.</p>
+      </div>
+      <div class="range-row wide">
+        <label for="tf-radius">Radio</label>
+        <input class="range" id="tf-radius" type="range" min="0" max="28" step="1">
+        <span class="range-val" id="tf-radius-val"></span>
+      </div>
+      <p class="hint">Radio único de toda la silueta (esquinas de la pestaña, unión, corte del cuerpo y esquinas del widget). Está enlazado con el radio de Widgets: cambiar uno cambia el otro, en reposo y en hover.</p>
+      <div class="range-row wide">
+        <label for="tf-height">Alto pestaña</label>
+        <input class="range" id="tf-height" type="range" min="14" max="60" step="1">
+        <span class="range-val" id="tf-height-val"></span>
+      </div>
+      <div class="range-row wide">
+        <label for="tf-tabCut">Corte pestaña</label>
+        <input class="range" id="tf-tabCut" type="range" min="0" max="60" step="1">
+        <span class="range-val" id="tf-tabCut-val"></span>
+      </div>
+      <div class="range-row wide">
+        <label for="tf-bodyCut">Corte cuerpo</label>
+        <input class="range" id="tf-bodyCut" type="range" min="0" max="100" step="1">
+        <span class="range-val" id="tf-bodyCut-val"></span>
+      </div>
+      <div class="range-row wide">
+        <label for="tf-padStart">Inicio texto</label>
+        <input class="range" id="tf-padStart" type="range" min="0" max="40" step="1">
+        <span class="range-val" id="tf-padStart-val"></span>
+      </div>
+      <p class="hint">Con Corte pestaña igual al Alto, el corte de la pestaña queda a 45°.</p>
+      <label class="switch" for="tf-borderTab">Borde también alrededor de la pestaña <input id="tf-borderTab" type="checkbox"><span aria-hidden="true"></span></label>
+      <p class="hint">Apagado (como la app), el borde sigue solo el cuerpo.</p>
+      <div>
+        <p class="ctl-title">Alerta (vista previa)</p>
+        <div class="seg" id="alert-seg">
+          <button type="button" data-alert="warning">Advertencia</button>
+          <button type="button" data-alert="critical">Crítica</button>
+        </div>
+      </div>
+      <div class="range-row wide">
+        <label for="tf-alertFillAlpha">Relleno alerta</label>
+        <input class="range" id="tf-alertFillAlpha" type="range" min="0" max="100" step="5">
+        <span class="range-val" id="tf-alertFillAlpha-val"></span>
+      </div>
+      <div class="range-row wide">
+        <label for="tf-alertTextAlpha">Texto alerta</label>
+        <input class="range" id="tf-alertTextAlpha" type="range" min="20" max="100" step="5">
+        <span class="range-val" id="tf-alertTextAlpha-val"></span>
+      </div>
+      <p class="hint">En alerta, la pestaña usa el color de alerta como relleno y como texto. Borde (2 px) y brillo siguen la silueta.</p>
     </div>
 
     <!-- Buttons -->
@@ -841,19 +1087,19 @@
     </div>
   </aside>
 
-<main class="stage" id="lab">
+<main class="stage" id="lab" data-alert="warning">
     <h1 class="dash-title">Fette 2000</h1>
     <p class="dash-sub">Lote: BT-2407 · Paracetamol 500 mg</p>
     <p class="force-note" id="force-note" hidden></p>
 
     <div class="grid">
-      <section class="card" tabindex="0" aria-label="Estado de máquina">
+      <section class="card" data-tab="Estado" data-mode="real" tabindex="0" aria-label="Estado de máquina">
         <div class="w-head"><span><span class="dot"></span>Estado</span></div>
         <div class="pill-row"><span class="state">En producción</span></div>
         <div class="foot">Actualizado hace 4 s</div>
       </section>
 
-      <section class="card" tabindex="0" aria-label="Progreso de lote">
+      <section class="card" data-tab="Progreso de lote" data-mode="sim" tabindex="0" aria-label="Progreso de lote">
         <div class="w-head">
           <span><span class="dot"></span>Progreso de lote</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
@@ -864,7 +1110,7 @@
         <div class="scale"><span>0 %</span><span>100 %</span></div>
       </section>
 
-      <section class="card" tabindex="0" aria-label="Actividad de máquina">
+      <section class="card" data-tab="Actividad" data-mode="real" tabindex="0" aria-label="Actividad de máquina">
         <div class="w-head">
           <span><span class="dot"></span>Actividad</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
@@ -881,13 +1127,23 @@
         <div class="foot">Produciendo</div>
       </section>
 
-      <section class="card" tabindex="0" aria-label="Conexión">
+      <section class="card" data-tab="Conexión" data-mode="real" tabindex="0" aria-label="Conexión">
         <div class="w-head">
           <span><span class="dot" style="color: var(--cyan)"></span>Conexión</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.86a10 10 0 0 1 14 0"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/></svg>
         </div>
         <div class="big" style="font-size: 30px">Online</div>
         <div class="foot">Latencia 42 ms</div>
+      </section>
+
+      <section class="card span-2 alert" data-tab="Temperatura" data-mode="real" tabindex="0" aria-label="Métrica en alerta">
+        <div class="w-head">
+          <span><span class="dot"></span>Temperatura</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>
+        </div>
+        <div class="w-sub">ZONA 2 · <span id="alert-kind">ADVERTENCIA</span></div>
+        <div class="big">87.4<small>°C</small></div>
+        <div class="foot">Límite 85 °C</div>
       </section>
 
       <section class="card span-2 chart" tabindex="0" aria-label="Producción de los últimos 7 días">
@@ -1037,7 +1293,28 @@
         cOn: false, cLen: 8, cW: 1, cAlpha: 60, cColor: 'white' }, o);
     }
 
+    // Tab frame defaults: the current --tab-frame-* tokens of the app (hmi-app/src/index.css).
+    const TF_DEFAULT = {
+      fillColor: '#ffffff', fillAlpha: 20,
+      text: { rest: { color: '#94a3b8', alpha: 100 }, hover: { color: '#ffffff', alpha: 100 } },
+      height: 25, tabCut: 25, bodyCut: 50, padStart: 10, padEnd: 5, gap: 6,
+      alertFillAlpha: 40, alertTextAlpha: 100, borderTab: false,
+    };
+
     const PRESETS = {
+      // Reproduces INSTRUMENT_THEME_STYLE (hmi-app/src/services/themeStyle.service.ts).
+      // Hidden accents (opacity 0) keep their length/thickness/color as the animation origin.
+      instrument: {
+        frame: 'glass', button: 'outline', tag: 'flat',
+        w: { rest: wState({ radius: 3, fill: 0, border: 8, blurOn: true, blur: 3, cOn: false, cLen: 20, cW: 1.5, cAlpha: 60, cColor: 'white' }),
+             hover: wState({ radius: 3, fill: 4, border: 20, blurOn: true, blur: 12, cOn: true, cLen: 8, cW: 1, cAlpha: 60, cColor: 'white' }) },
+        b: { rest: bState({ radius: 3, fill: 0, border: 22, cOn: false, cLen: 8, cW: 1, cAlpha: 60, cColor: 'white' }),
+             hover: bState({ radius: 3, fill: 3, border: 50, cOn: false, cLen: 8, cW: 1, cAlpha: 60, cColor: 'white' }) },
+        i: { rest: iState({ radius: 6, fill: 0, border: 0, cOn: false, cLen: 16, cW: 1, cAlpha: 60, cColor: 'white' }),
+             hover: iState({ radius: 3, fill: 5, border: 0, cOn: true, cLen: 5, cW: 1, cAlpha: 60, cColor: 'white' }) },
+        t: tState({ radius: 3, fill: 0, border: 0, tint: 14 }),
+        g: { rest: gState({ base: 20, fill: 0 }), hover: gState({ base: 40, fill: 0 }) },
+      },
       current: {
         frame: 'glass', button: 'glass', tag: 'glass',
         w: { rest: wState({}), hover: wState({ fill: 4, border: 20 }) },
@@ -1076,8 +1353,19 @@
       },
     };
 
-    let state = clone(PRESETS.current);
+    Object.keys(PRESETS).forEach(function (k) { PRESETS[k].shape = 'tab'; PRESETS[k].tf = clone(TF_DEFAULT); });
+
+    let state = clone(PRESETS.instrument);
     const editing = { w: 'rest', b: 'rest', i: 'rest', g: 'rest' };
+    let editingTab = 'rest';
+    let alertKind = 'warning';
+    const ALERT_LABELS = { warning: 'ADVERTENCIA', critical: 'CRÍTICA' };
+    const TF_RANGES = { fillAlpha: ' %', height: ' px', tabCut: ' px', bodyCut: ' px', padStart: ' px', alertFillAlpha: ' %', alertTextAlpha: ' %' };
+
+    // Only the sections a preset defines (the tab frame settings are kept when switching presets).
+    function core(s) {
+      return JSON.stringify({ frame: s.frame, button: s.button, tag: s.tag, w: s.w, b: s.b, i: s.i, t: s.t, g: s.g });
+    }
 
     // State controls: suffix -> [unit or null for checkbox]
     const W_FIELDS = { radius: ' px', fill: ' %', border: ' %', blur: ' px', cLen: ' px', cW: ' px', cAlpha: ' %', blurOn: null, cOn: null };
@@ -1125,6 +1413,22 @@
       setVar('--t-fill', state.t.fill + '%');
       setVar('--t-border', state.t.border + '%');
       setVar('--t-tint', state.t.tint + '%');
+
+      const tf = state.tf;
+      setVar('--tf-h', tf.height + 'px');
+      setVar('--tf-bc', tf.bodyCut + 'px');
+      setVar('--tf-pad', tf.padStart + 'px');
+      setVar('--tf-gap', tf.gap + 'px');
+      setVar('--tf-fill', rgba(tf.fillColor, tf.fillAlpha));
+      setVar('--tf-text-rest', rgba(tf.text.rest.color, tf.text.rest.alpha));
+      setVar('--tf-text-hover', rgba(tf.text.hover.color, tf.text.hover.alpha));
+      setVar('--tf-alert-fill', tf.alertFillAlpha + '%');
+      setVar('--tf-alert-text', tf.alertTextAlpha + '%');
+    }
+
+    function rgba(hex, alpha) {
+      const n = parseInt(hex.slice(1), 16);
+      return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + alpha / 100 + ')';
     }
 
     function describe(s, isWidget) {
@@ -1146,7 +1450,11 @@
       lab.classList.toggle('force-b', editing.b === 'hover');
       lab.classList.toggle('force-i', editing.i === 'hover');
       lab.classList.toggle('force-g', editing.g === 'hover');
+      lab.classList.toggle('force-t', editingTab === 'hover');
+      lab.dataset.alert = alertKind;
+      $('alert-kind').textContent = ALERT_LABELS[alertKind];
       writeVars();
+      renderTabControls();
 
       Object.keys(T_FIELDS).forEach(function (key) {
         $('t-' + key).value = state.t[key];
@@ -1185,7 +1493,7 @@
         });
       });
       document.querySelectorAll('#presets button').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(JSON.stringify(PRESETS[b.dataset.preset]) === JSON.stringify(state)));
+        b.setAttribute('aria-pressed', String(core(PRESETS[b.dataset.preset]) === core(state)));
       });
 
       const forced = [];
@@ -1206,7 +1514,47 @@
         ' · Botones de ícono | reposo: ' + describe(state.i.rest, false) +
         ' | hover: ' + describe(state.i.hover, false) +
         ' · Tags (' + TAG_LABELS[state.tag] + ') | radio ' + state.t.radius + ' px, fondo ' + state.t.fill + ' %, borde ' + state.t.border +
-        ' %, color ' + state.t.tint + ' %';
+        ' %, color ' + state.t.tint + ' %' +
+        ' · Forma del marco: ' + (state.shape === 'tab' ? 'Pestaña' : 'Estándar') +
+        (state.shape === 'tab' ? ' · Pestaña (tokens --tab-frame-*) | ' + tabSummary() : '');
+      layoutAll();
+    }
+
+    function tabSummary() {
+      const tf = state.tf;
+      return '--tab-frame-height: ' + tf.height + 'px, --tab-frame-tab-cut: ' + tf.tabCut + 'px, --tab-frame-body-cut: ' + tf.bodyCut +
+        'px, --tab-frame-pad-start: ' + tf.padStart + 'px, --tab-frame-fill: ' + tf.fillColor + ' al ' + tf.fillAlpha +
+        ' %, --tab-frame-text: ' + tf.text.rest.color + ' al ' + tf.text.rest.alpha + ' % (reposo), --tab-frame-text-hover: ' +
+        tf.text.hover.color + ' al ' + tf.text.hover.alpha + ' % (hover), radio único de la silueta (= --frame-radius): reposo ' +
+        state.w.rest.radius + ' px, hover ' + state.w.hover.radius + ' px, alerta: relleno de la pestaña = color de alerta al ' +
+        tf.alertFillAlpha + ' % (--tab-frame-alert-fill-opacity), texto = color de alerta al ' + tf.alertTextAlpha +
+        ' %, borde ' + (tf.borderTab ? 'rodea también la pestaña' : 'sigue solo el cuerpo');
+    }
+
+    function renderTabControls() {
+      const tf = state.tf;
+      Object.keys(TF_RANGES).forEach(function (k) {
+        $('tf-' + k).value = tf[k];
+        $('tf-' + k + '-val').textContent = tf[k] + TF_RANGES[k];
+      });
+      $('tf-fillColor').value = tf.fillColor;
+      const tx = tf.text[editingTab];
+      $('tf-textColor').value = tx.color;
+      $('tf-textAlpha').value = tx.alpha;
+      $('tf-textAlpha-val').textContent = tx.alpha + ' %';
+      $('tf-radius').value = state.w.rest.radius;
+      $('tf-radius-val').textContent = state.w.rest.radius + ' px';
+      $('tf-borderTab').checked = tf.borderTab;
+      document.querySelectorAll('[data-tstate]').forEach(function (b) {
+        b.setAttribute('aria-selected', String(b.dataset.tstate === editingTab));
+      });
+      document.querySelectorAll('#shape-seg button').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.shape === state.shape));
+      });
+      document.querySelectorAll('#alert-seg button').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.alert === alertKind));
+      });
+      $('tf-group').style.opacity = state.shape === 'tab' ? '1' : '0.5';
     }
 
     // Variant changes load that variant's fill/border for both states; everything else stays.
@@ -1229,7 +1577,8 @@
     $('presets').addEventListener('click', function (e) {
       const b = e.target.closest('button');
       if (!b) return;
-      state = clone(PRESETS[b.dataset.preset]);
+      const keep = { shape: state.shape, tf: state.tf };
+      state = Object.assign(clone(PRESETS[b.dataset.preset]), keep);
       render();
     });
     document.querySelectorAll('.state-box').forEach(function (box) {
@@ -1276,6 +1625,193 @@
         all.forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
       });
     });
+
+    // ---------- Tab frame ----------
+    Object.keys(TF_RANGES).forEach(function (k) {
+      $('tf-' + k).addEventListener('input', function () { state.tf[k] = Number($('tf-' + k).value); render(); });
+    });
+    $('tf-fillColor').addEventListener('input', function () { state.tf.fillColor = $('tf-fillColor').value; render(); });
+    $('tf-textColor').addEventListener('input', function () { state.tf.text[editingTab].color = $('tf-textColor').value; render(); });
+    $('tf-textAlpha').addEventListener('input', function () { state.tf.text[editingTab].alpha = Number($('tf-textAlpha').value); render(); });
+    // One radius for the whole silhouette: it IS the widget radius, so both states follow the slider.
+    $('tf-radius').addEventListener('input', function () {
+      const r = Number($('tf-radius').value);
+      state.w.rest.radius = r;
+      state.w.hover.radius = r;
+      render();
+    });
+    $('tf-borderTab').addEventListener('change', function () { state.tf.borderTab = $('tf-borderTab').checked; render(); });
+    document.querySelector('.tab-box .state-tabs').addEventListener('click', function (e) {
+      const b = e.target.closest('button');
+      if (!b) return;
+      editingTab = b.dataset.tstate;
+      render();
+    });
+    $('shape-seg').addEventListener('click', function (e) {
+      const b = e.target.closest('button');
+      if (!b) return;
+      state.shape = b.dataset.shape;
+      render();
+    });
+    $('alert-seg').addEventListener('click', function (e) {
+      const b = e.target.closest('button');
+      if (!b) return;
+      alertKind = b.dataset.alert;
+      render();
+    });
+    $('tf-replay').addEventListener('click', function () {
+      document.querySelectorAll('.tf-outline').forEach(function (el) {
+        el.classList.remove('playing');
+        void el.getBoundingClientRect();
+        el.classList.add('playing');
+      });
+    });
+
+    // ONE silhouette path, same maths as hmi-app/src/utils/tabFramePath.ts: clockwise from the top-left
+    // corner (tab top edge, tab cut, body top edge, body chamfer, right side, bottom); every vertex,
+    // convex or concave, becomes an arc of the same radius.
+    function fmt(v) { return String(Number(v.toFixed(3))); }
+    function insetPolygon(points, distance) {
+      const n = points.length;
+      return points.map(function (p, i) {
+        const a0 = points[(i - 1 + n) % n], a1 = points[(i + 1) % n];
+        const l1 = Math.hypot(p.x - a0.x, p.y - a0.y), l2 = Math.hypot(a1.x - p.x, a1.y - p.y);
+        const u1 = { x: (p.x - a0.x) / l1, y: (p.y - a0.y) / l1 };
+        const u2 = { x: (a1.x - p.x) / l2, y: (a1.y - p.y) / l2 };
+        const a = { x: p.x - u1.y * distance, y: p.y + u1.x * distance };
+        const b = { x: p.x - u2.y * distance, y: p.y + u2.x * distance };
+        const cross = u1.x * u2.y - u1.y * u2.x;
+        if (Math.abs(cross) < 1e-9) return a;
+        const s = ((b.x - a.x) * u2.y - (b.y - a.y) * u2.x) / cross;
+        return { x: a.x + s * u1.x, y: a.y + s * u1.y };
+      });
+    }
+    function roundedPolygonPath(points, radiusFor) {
+      const n = points.length;
+      const corners = points.map(function (p, i) {
+        const a0 = points[(i - 1 + n) % n], a1 = points[(i + 1) % n];
+        const l1 = Math.hypot(p.x - a0.x, p.y - a0.y), l2 = Math.hypot(a1.x - p.x, a1.y - p.y);
+        const u1 = { x: (p.x - a0.x) / l1, y: (p.y - a0.y) / l1 };
+        const u2 = { x: (a1.x - p.x) / l2, y: (a1.y - p.y) / l2 };
+        const cross = u1.x * u2.y - u1.y * u2.x;
+        const dot = u1.x * u2.x + u1.y * u2.y;
+        const turn = Math.atan2(Math.abs(cross), dot);
+        const radius = radiusFor(cross > 0);
+        if (turn < 1e-6 || radius <= 0) return { start: p, end: p, radius: 0, sweep: 0 };
+        const d = Math.min(radius * Math.tan(turn / 2), l1 / 2, l2 / 2);
+        return {
+          start: { x: p.x - u1.x * d, y: p.y - u1.y * d },
+          end: { x: p.x + u2.x * d, y: p.y + u2.y * d },
+          radius: d / Math.tan(turn / 2),
+          sweep: cross > 0 ? 1 : 0,
+        };
+      });
+      function arc(c) {
+        if (c.radius === 0) return [];
+        const r = fmt(c.radius);
+        return ['A ' + r + ' ' + r + ' 0 0 ' + c.sweep + ' ' + fmt(c.end.x) + ' ' + fmt(c.end.y)];
+      }
+      const first = corners[0];
+      const cmds = ['M ' + fmt(first.end.x) + ' ' + fmt(first.end.y)];
+      corners.slice(1).forEach(function (c) {
+        cmds.push('L ' + fmt(c.start.x) + ' ' + fmt(c.start.y));
+        arc(c).forEach(function (a) { cmds.push(a); });
+      });
+      if (first.radius > 0) {
+        cmds.push('L ' + fmt(first.start.x) + ' ' + fmt(first.start.y));
+        arc(first).forEach(function (a) { cmds.push(a); });
+      }
+      return cmds.join(' ') + ' Z';
+    }
+    function shapePath(points, radius, inset) {
+      const pts = points.filter(function (p, i) {
+        const q = points[(i - 1 + points.length) % points.length];
+        return p.x !== q.x || p.y !== q.y;
+      });
+      const poly = inset === 0 ? pts : insetPolygon(pts, inset);
+      const base = Math.max(0, radius);
+      return roundedPolygonPath(poly, function (convex) { return Math.max(0, convex ? base - inset : base + inset); });
+    }
+    function tabPath(g, inset) {
+      const tabW = Math.max(0, Math.min(g.tabWidth, g.width - g.bodyCut));
+      const tabCut = Math.max(0, Math.min(g.tabCut, tabW));
+      return shapePath([
+        { x: 0, y: 0 }, { x: tabW - tabCut, y: 0 }, { x: tabW, y: g.tabHeight },
+        { x: g.width - g.bodyCut, y: g.tabHeight }, { x: g.width, y: g.tabHeight + g.bodyCut },
+        { x: g.width, y: g.height }, { x: 0, y: g.height },
+      ], g.radius, inset || 0);
+    }
+    function rectPath(w, h, radius, inset) {
+      return shapePath([{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }], radius, inset);
+    }
+
+    const cards = Array.prototype.slice.call(document.querySelectorAll('.card[data-tab]'));
+    cards.forEach(function (card) {
+      const isAlert = card.classList.contains('alert');
+      card.insertAdjacentHTML('afterbegin',
+        (isAlert ? '<div class="tf-layer tf-glow tf-only" aria-hidden="true"><svg><path/></svg></div>' : '') +
+        '<div class="tf-layer tf-surface tf-only" aria-hidden="true"></div>' +
+        '<div class="tf-layer tf-tabfill tf-only" aria-hidden="true"></div>' +
+        '<div class="tf-layer tf-border tf-only" aria-hidden="true"><svg><path/></svg></div>' +
+        '<div class="tf-layer tf-outline" aria-hidden="true"><svg><path pathLength="1"/></svg></div>' +
+        '<div class="tf-tab tf-only" aria-hidden="true"><span class="tf-tab-in"><span class="tf-dot"></span><span class="tf-title"></span></span></div>');
+      card.querySelector('.tf-title').textContent = card.dataset.tab;
+      card.querySelector('.tf-dot').dataset.mode = card.dataset.mode;
+    });
+
+    function setClip(el, value) {
+      el.style.clipPath = value;
+      el.style.webkitClipPath = value;
+    }
+    // Tab width = start padding + measured label + end padding + the cut side; the label truncates before the cuts.
+    function geometry(card, W, H) {
+      const tf = state.tf;
+      const label = card.querySelector('.tf-tab-in');
+      label.style.maxWidth = Math.max(0, W - tf.bodyCut - tf.tabCut - tf.padStart - tf.padEnd) + 'px';
+      return {
+        width: W, height: H, tabHeight: tf.height, tabCut: tf.tabCut, bodyCut: tf.bodyCut,
+        tabWidth: tf.padStart + label.offsetWidth + tf.padEnd + tf.tabCut, radius: state.w.rest.radius,
+      };
+    }
+    function layoutCard(card) {
+      const W = card.offsetWidth, H = card.offsetHeight;
+      if (!W || !H) return;
+      const tf = state.tf;
+      const isTab = state.shape === 'tab';
+      card.classList.toggle('tf-on', isTab);
+      const outline = card.querySelector('.tf-outline path');
+      if (!isTab) {
+        outline.setAttribute('d', rectPath(W, H, state.w.rest.radius, 0.75));
+        return;
+      }
+      const g = geometry(card, W, H);
+      const d = tabPath(g, 0);
+      outline.setAttribute('d', tabPath(g, 0.75));
+      setClip(card.querySelector('.tf-surface'), 'path("' + d + '")');
+      const fill = card.querySelector('.tf-tabfill');
+      fill.style.width = Math.min(W, g.tabWidth + g.radius + 2) + 'px';
+      setClip(fill, 'path("' + d + '")');
+      const sw = card.classList.contains('alert') ? 2 : 1;
+      const border = card.querySelector('.tf-border');
+      border.querySelector('path').setAttribute('d', tabPath(g, sw / 2));
+      setClip(border, tf.borderTab ? 'none' : 'inset(' + tf.height + 'px -10px -10px -10px)');
+      const glow = card.querySelector('.tf-glow');
+      if (glow) {
+        // Even-odd clip: a rectangle 64 px larger on every side with the silhouette punched out,
+        // so only the glow OUTSIDE the shape survives (like a box-shadow).
+        const m = 64;
+        glow.querySelector('path').setAttribute('d', d);
+        setClip(glow, 'path(evenodd, "M ' + -m + ' ' + -m + ' H ' + (W + m) + ' V ' + (H + m) + ' H ' + -m + ' Z ' + d + '")');
+      }
+    }
+    function layoutAll() { cards.forEach(layoutCard); }
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(function (entries) {
+        entries.forEach(function (en) { layoutCard(en.target); });
+      });
+      cards.forEach(function (c) { ro.observe(c); });
+    }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutAll);
 
     const hint = $('copy-hint');
     $('copy').addEventListener('click', function () {
