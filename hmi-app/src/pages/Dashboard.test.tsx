@@ -78,6 +78,7 @@ vi.mock('../components/viewer/DashboardViewer', () => {
         return (
             <div data-testid="dashboard-viewer-root">
                 Viewer canvas
+                <output data-testid="viewer-entrance-key">{String(props.entranceKey)}</output>
                 <output data-testid="dashboard-presentation-frame">{`${frame.dashboardId}:${frame.viewId}:${frame.profileRevision}:${frame.expectedWidgetIds.join(',')}`}</output>
                 </div>
         );
@@ -662,6 +663,70 @@ describe('Dashboard page layout', () => {
                 dashboard: expect.objectContaining({ id: 'dashboard-a', ownerNodeId: 'plant-a' }),
             }),
         );
+    });
+
+    it('gives the viewer an entrance key that follows the active dashboard and view but survives data refreshes', async () => {
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({
+                id: 'dashboard-a',
+                name: 'Dashboard A',
+                status: 'published',
+                views: [makeView('view-main', 'Main'), makeView('view-tech', 'Technical')],
+                activeViewId: 'view-main',
+            }),
+            makeDashboard({
+                id: 'dashboard-b',
+                name: 'Dashboard B',
+                status: 'published',
+                views: [makeView('view-b', 'Dashboard B main')],
+                activeViewId: 'view-b',
+            }),
+        ]);
+        const overview = (dataUpdatedAt: number) => ({
+            connection: { globalStatus: 'online', lastSuccess: null, ageMs: null } satisfies ConnectionHealth,
+            machines: [] as ContractMachine[],
+            isLoading: false,
+            isError: false,
+            error: null,
+            dataUpdatedAt,
+            isEnabled: true,
+        });
+        useDataOverviewMock.mockImplementation(() => overview(0));
+
+        const user = userEvent.setup();
+        const tree = (
+            <MemoryRouter initialEntries={['/?dashboardId=dashboard-a']}>
+                <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                </Routes>
+            </MemoryRouter>
+        );
+        const view = render(tree);
+        const entranceKey = () => screen.getByTestId('viewer-entrance-key').textContent;
+
+        await waitFor(() => {
+            expect(entranceKey()).toBe('dashboard-a:view-main');
+        });
+
+        // A data refresh (new overview object) keeps the key: no replay.
+        useDataOverviewMock.mockImplementation(() => overview(5_000));
+        view.rerender(tree);
+        expect(entranceKey()).toBe('dashboard-a:view-main');
+
+        // Another view of the same dashboard replays.
+        await user.click(screen.getByRole('button', { name: 'Technical' }));
+        await waitFor(() => {
+            expect(entranceKey()).toBe('dashboard-a:view-tech');
+        });
+
+        // Another dashboard replays.
+        const viewerCall = dashboardViewerMock.mock.calls.at(-1)?.[0] as { onNavigateDashboard: (dashboardId: string) => void };
+        act(() => {
+            viewerCall.onNavigateDashboard('dashboard-b');
+        });
+        await waitFor(() => {
+            expect(entranceKey()).toBe('dashboard-b:view-b');
+        });
     });
 
     it('exports the visible dashboard snapshot only after the configured interval without breaking the viewer shell', async () => {
