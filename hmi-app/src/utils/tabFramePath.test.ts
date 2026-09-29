@@ -12,45 +12,68 @@ const GEOMETRY: TabFramePathGeometry = {
 };
 
 describe('buildTabFramePath', () => {
-    it('traces the tab, the chamfered body and the rounded bottom corners at inset 0', () => {
+    it('rounds EVERY corner of the unified tab + body silhouette with the frame radius (concave junction included)', () => {
         expect(buildTabFramePath(GEOMETRY)).toBe(
-            'M 0 0 L 95 0 L 120 25 L 250 25 L 300 75 L 300 196 A 4 4 0 0 1 296 200 L 4 200 A 4 4 0 0 1 0 196 Z',
+            'M 4 0 L 93.343 0 A 4 4 0 0 1 96.172 1.172 L 118.828 23.828 A 4 4 0 0 0 121.657 25 '
+            + 'L 248.343 25 A 4 4 0 0 1 251.172 26.172 L 298.828 73.828 A 4 4 0 0 1 300 76.657 '
+            + 'L 300 196 A 4 4 0 0 1 296 200 L 4 200 A 4 4 0 0 1 0 196 L 0 4 A 4 4 0 0 1 4 0 Z',
         );
     });
 
-    it('draws square bottom corners when the radius is zero', () => {
+    it('uses one arc per vertex: the junction where the tab diagonal meets the body top curves the other way', () => {
+        const arcs = buildTabFramePath(GEOMETRY).match(/A [\d.]+ [\d.]+ 0 0 [01]/g) ?? [];
+
+        expect(arcs).toHaveLength(7);
+        expect(arcs.filter((arc) => arc.endsWith(' 0 0 0'))).toHaveLength(1);
+        expect(arcs.filter((arc) => arc.endsWith(' 0 0 1'))).toHaveLength(6);
+    });
+
+    it('draws straight corners everywhere when the radius is zero', () => {
         expect(buildTabFramePath({ ...GEOMETRY, radius: 0 })).toBe(
             'M 0 0 L 95 0 L 120 25 L 250 25 L 300 75 L 300 200 L 0 200 Z',
         );
     });
 
-    it('insets every edge toward the inside, keeping the 45deg diagonals parallel', () => {
-        const d = 1;
-        const path = buildTabFramePath(GEOMETRY, d);
-        const sqrt2 = Math.SQRT2;
+    it('insets every edge toward the inside: convex corners shrink, the concave junction grows', () => {
+        const path = buildTabFramePath(GEOMETRY, 1);
+        const arcs = path.match(/A [\d.]+ [\d.]+ 0 0 [01]/g) ?? [];
 
-        // Top-left corner, top edge shifted down, left edge shifted right.
-        expect(path.startsWith('M 1 1 ')).toBe(true);
-        // Tab diagonal: x - y = tabWidth - tabCut - d * sqrt2 = 95 - sqrt2.
-        const tabDiagonalTopX = 95 - sqrt2 + d;
-        expect(path).toContain(`L ${Number(tabDiagonalTopX.toFixed(3))} 1 `);
-        // Body top edge sits d below the tab base.
-        expect(path).toContain(' 26 ');
-        // Radius shrinks by the inset.
-        expect(path).toContain('A 3 3 0 0 1');
+        expect(arcs.filter((arc) => arc === 'A 3 3 0 0 1')).toHaveLength(6);
+        expect(arcs.filter((arc) => arc === 'A 5 5 0 0 0')).toHaveLength(1);
     });
 
-    it('clamps a tab wider than the body top edge so the diagonals never cross', () => {
-        const path = buildTabFramePath({ ...GEOMETRY, tabWidth: 400 });
+    it('outsets with a negative inset (glow spread): convex corners grow, the concave junction shrinks', () => {
+        const path = buildTabFramePath(GEOMETRY, -2);
+        const arcs = path.match(/A [\d.]+ [\d.]+ 0 0 [01]/g) ?? [];
 
-        // Tab base ends at width - bodyCut (250): the tab meets the body chamfer start.
-        expect(path).toContain('L 250 25 L 250 25 L 300 75');
+        expect(arcs.filter((arc) => arc === 'A 6 6 0 0 1')).toHaveLength(6);
+        expect(arcs.filter((arc) => arc === 'A 2 2 0 0 0')).toHaveLength(1);
+        expect(path).toContain('L 302 ');
+    });
+
+    it('clamps a tab wider than the body top edge so the diagonals never cross (no junction left to round)', () => {
+        const path = buildTabFramePath({ ...GEOMETRY, tabWidth: 400 });
+        const arcs = path.match(/A [\d.]+ [\d.]+ 0 0 [01]/g) ?? [];
+
+        expect(path).not.toContain('NaN');
+        expect(arcs).toHaveLength(5);
+        expect(arcs.every((arc) => arc.endsWith(' 0 0 1'))).toBe(true);
     });
 
     it('keeps a tab narrower than its own cut from turning inside out', () => {
         const path = buildTabFramePath({ ...GEOMETRY, tabWidth: 10 });
 
-        expect(path.startsWith('M 0 0 L 0 0 L 10 25')).toBe(true);
+        expect(path).not.toContain('NaN');
+        expect(path.endsWith('Z')).toBe(true);
+    });
+
+    it('never rounds past the middle of a short edge', () => {
+        const path = buildTabFramePath({ ...GEOMETRY, tabWidth: 30, radius: 24 });
+        const radii = [...path.matchAll(/A ([\d.]+) /g)].map((match) => Number(match[1]));
+
+        expect(path).not.toContain('NaN');
+        expect(radii.length).toBeGreaterThan(0);
+        expect(Math.max(...radii)).toBeLessThanOrEqual(24);
     });
 });
 

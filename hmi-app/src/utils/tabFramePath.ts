@@ -7,7 +7,9 @@
 //
 // The silhouette runs clockwise from the top-left corner: the tab (top edge, right side cut by
 // `tabCut`), the body top edge, the body's top-right chamfer (`bodyCut`), the right side and the
-// bottom edge, whose two corners keep the preset radius. `tabWidth` is the tab's width at its base.
+// bottom edge. ONE path serves every layer that draws the shape (frame clip, border, glow, builder
+// rings, entrance flash and outline); every corner takes `radius`. `tabWidth` is the tab's width at
+// its base.
 // =============================================================================
 
 export interface TabFramePathGeometry {
@@ -21,7 +23,7 @@ export interface TabFramePathGeometry {
     tabCut: number;
     /** Size of the body's top-right chamfer. */
     bodyCut: number;
-    /** Radius of the two bottom corners. */
+    /** Radius of every corner (the frame radius of the active preset). */
     radius: number;
 }
 
@@ -71,8 +73,71 @@ function insetPolygon(points: Point[], distance: number): Point[] {
 }
 
 /**
- * SVG path (`d`) of the tab silhouette. `inset` moves the outline toward the inside by that many
- * pixels (a stroke centered `inset` px inside the frame edge, like the builder's selection ring).
+ * Rounds a clockwise polygon: every vertex becomes an arc tangent to its two edges. `radiusFor`
+ * gives the radius of each vertex (convex or concave); the tangent distance is capped at half of the
+ * shorter adjacent edge so neighbouring arcs never overlap. Collinear vertices stay plain points.
+ */
+function roundedPolygonPath(points: Point[], radiusFor: (convex: boolean) => number): string {
+    const count = points.length;
+    const corners = points.map((point, index) => {
+        const previous = points[(index - 1 + count) % count];
+        const next = points[(index + 1) % count];
+        const incoming = { x: point.x - previous.x, y: point.y - previous.y };
+        const outgoing = { x: next.x - point.x, y: next.y - point.y };
+        const incomingLength = Math.hypot(incoming.x, incoming.y);
+        const outgoingLength = Math.hypot(outgoing.x, outgoing.y);
+        const u1 = { x: incoming.x / incomingLength, y: incoming.y / incomingLength };
+        const u2 = { x: outgoing.x / outgoingLength, y: outgoing.y / outgoingLength };
+        const cross = u1.x * u2.y - u1.y * u2.x;
+        const dot = u1.x * u2.x + u1.y * u2.y;
+        const turn = Math.atan2(Math.abs(cross), dot);
+        // Clockwise polygon in screen coordinates: a positive cross is a convex vertex.
+        const radius = radiusFor(cross > 0);
+
+        if (turn < 1e-6 || radius <= 0) {
+            return { point, start: point, end: point, radius: 0, sweep: 0 };
+        }
+
+        const distance = Math.min(radius * Math.tan(turn / 2), incomingLength / 2, outgoingLength / 2);
+
+        return {
+            point,
+            start: { x: point.x - u1.x * distance, y: point.y - u1.y * distance },
+            end: { x: point.x + u2.x * distance, y: point.y + u2.y * distance },
+            radius: distance / Math.tan(turn / 2),
+            sweep: cross > 0 ? 1 : 0,
+        };
+    });
+
+    const arc = (corner: (typeof corners)[number]) => {
+        if (corner.radius === 0) {
+            return [];
+        }
+
+        const r = format(corner.radius);
+
+        return [`A ${r} ${r} 0 0 ${corner.sweep} ${format(corner.end.x)} ${format(corner.end.y)}`];
+    };
+    const first = corners[0];
+    const commands = [`M ${format(first.end.x)} ${format(first.end.y)}`];
+
+    for (const corner of corners.slice(1)) {
+        commands.push(`L ${format(corner.start.x)} ${format(corner.start.y)}`, ...arc(corner));
+    }
+
+    if (first.radius > 0) {
+        commands.push(`L ${format(first.start.x)} ${format(first.start.y)}`, ...arc(first));
+    }
+
+    return `${commands.join(' ')} Z`;
+}
+
+/**
+ * SVG path (`d`) of the unified tab + body silhouette: EVERY corner (the tab's two free corners,
+ * the concave junction where the tab diagonal meets the body top, both vertices of the body's
+ * diagonal cut and the bottom/left corners) is rounded with `geometry.radius`. `inset` moves the
+ * outline toward the inside by that many pixels (negative = outward): convex corners follow the
+ * offset curve (`radius - inset`), the concave junction grows (`radius + inset`).
  */
 export function buildTabFramePath(geometry: TabFramePathGeometry, inset = 0): string {
     const { width, height, tabHeight, bodyCut, radius } = geometry;
@@ -89,38 +154,12 @@ export function buildTabFramePath(geometry: TabFramePathGeometry, inset = 0): st
         { x: width, y: height },
         { x: 0, y: height },
     ];
+    // Zero-length edges (a clamped tab) would make the corner maths degenerate: merge them first.
+    const deduped = raw.filter((point, index) => !samePoint(point, raw[(index - 1 + raw.length) % raw.length]));
+    const points = inset === 0 ? deduped : insetPolygon(deduped, inset);
+    const baseRadius = Math.max(0, radius);
 
-    let points = raw;
-    let cornerRadius = Math.max(0, radius);
-
-    if (inset > 0) {
-        // Zero-length edges (a clamped tab) would make the offset lines degenerate: merge them first.
-        const deduped = raw.filter((point, index) => index === 0 || !samePoint(point, raw[index - 1]));
-        points = insetPolygon(deduped, inset);
-        cornerRadius = Math.max(0, cornerRadius - inset);
-    }
-
-    const bottomRight = points[points.length - 2];
-    const bottomLeft = points[points.length - 1];
-    const upper = points.slice(0, -2);
-    const commands = upper.map((point, index) => `${index === 0 ? 'M' : 'L'} ${format(point.x)} ${format(point.y)}`);
-
-    if (cornerRadius > 0) {
-        const r = format(cornerRadius);
-        commands.push(
-            `L ${format(bottomRight.x)} ${format(bottomRight.y - cornerRadius)}`,
-            `A ${r} ${r} 0 0 1 ${format(bottomRight.x - cornerRadius)} ${format(bottomRight.y)}`,
-            `L ${format(bottomLeft.x + cornerRadius)} ${format(bottomLeft.y)}`,
-            `A ${r} ${r} 0 0 1 ${format(bottomLeft.x)} ${format(bottomLeft.y - cornerRadius)}`,
-        );
-    } else {
-        commands.push(
-            `L ${format(bottomRight.x)} ${format(bottomRight.y)}`,
-            `L ${format(bottomLeft.x)} ${format(bottomLeft.y)}`,
-        );
-    }
-
-    return `${commands.join(' ')} Z`;
+    return roundedPolygonPath(points, (convex) => Math.max(0, convex ? baseRadius - inset : baseRadius + inset));
 }
 
 /**
