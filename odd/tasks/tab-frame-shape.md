@@ -105,6 +105,22 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
     the 14px box-shadow blur), state color at 20 % (28 % and blur 9px on hover), and an inline even-odd clip-path
     punches the silhouette out so only the outside survives, like a box-shadow. Approximation: the hover spread
     growth (2px -> 3px) is done with more blur/opacity, not a new path.
+- [ ] **F6** — Port the user's style-lab choice (2026-09-29, pasted "Copiar elección"; lab
+  https://claude.ai/artifact/F3aAjXDvvsCMFKYZxoT6A8, source `tools/style-lab/style-lab.html`). User decision:
+  update the Instrumento preset (not a new preset).
+  - Instrumento widget frame: radius 5 px rest AND hover (was 3), rest border 12 % (was 8), rest hidden accent
+    length 25 px (was 20; thickness unchanged); everything else unchanged (hover fill 4 %, border 20 %, blur
+    3/12 px, hover accent 8 px x 1 px white 60 %; buttons, container, icon buttons and tags identical).
+  - Tab tokens (global): `--tab-frame-tab-cut: 19px` (was = height 25), `--tab-frame-body-cut: 0px` (was 50 —
+    the body keeps NO chamfer), `--tab-frame-fill`: white 15 % (was 20), `--tab-frame-text`: white 70 % (was
+    muted), `--tab-frame-text-hover`: white 100 % (unchanged), height 25 px, pad-start 10 px, alert 40 %/100 %
+    unchanged. The silhouette radius is the preset radius (now 5 px).
+  - Icon rule (from the lab): the header icon keeps a fixed distance from the widget's right edge (never past
+    it); its preferred top is just below the body's top line; when the body cut is too small for the icon to fit
+    inside the cut triangle, it moves up just enough (into the tab strip), never above the widget's top edge.
+    With body cut 0 it sits in the tab strip at the right. The tab (and its truncating title) must then stop
+    before the icon instead of running under it.
+  - The silhouette/path generator must handle body cut 0 (degenerate vertices) everywhere it is used.
 
 ## Acceptance criteria
 
