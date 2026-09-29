@@ -72,7 +72,14 @@ without losing speed.
   passive effect — `useViewerEntranceCountUp.ts:40-65`; fix synchronously, e.g. derive the settled state
   during render or use a layout effect, and cover it with a test that inspects the first committed text)
   and R3-countup-restart-on-hasvalue-toggle (SUGGESTION: a hasValue true→false→true toggle mid-count
-  restarts a full-duration count — `useViewerEntranceCountUp.ts:67-84`).
+  restarts a full-duration count — `useViewerEntranceCountUp.ts:67-84`). Added from the third review
+  (lineage `review-5db18b108b9679a6`, non-blocking): R3-combined-dirty-untested (SUGGESTION: test preset
+  change + dirty slider together in `ThemeSettingsTab.tsx:129`) and R3-stored-values-not-snapped
+  (SUGGESTION: snap stored overrides to the step on read, `viewerEntranceStyle.service.ts:44-48`).
+  NOT ADOPTED: R3-outline-opacity-fade-only (WARNING) — refuted by the code: the outline rect uses
+  `animation-fill-mode: backwards, backwards` (`index.css:855`), so the fade's `from` keyframe (the opacity
+  token) already applies during its delay, i.e. through the whole draw phase; the line is drawn at the
+  configured opacity, no pop. A test asserting that fill mode would still be a cheap guard.
 - [x] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
   más dinamismo"): on entrance each frame's background flashes/blinks — a brightness overlay above the
   fill peaks and decays to the theme's rest look; visible in all three presets (Instrumento has 0 % fill).
@@ -205,6 +212,11 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   `Topbar.test.tsx` failure under parallel load, 16/16 alone); `npm run build` OK. Pre-commit review blocked
   twice with genuine findings ("tres temas" hardcoded count; type outside `domain/`), fixed, then PASSED.
   Not verified: real browser rendering of the outline opacity / new controls.
+- 2026-09-29 parent spot check: `ThemeSettingsTab`, `viewerEntranceStyle.service`, `DockSliderField`,
+  `AdminNumberInput` tests 44/44. RDD assess `3e080a5..5f02b19` (committed-only, `.gga` excluded): medium,
+  697 lines, `review_due` (`slice_budget_reached`); user GRANTED consent; one lens (reliability), in-process
+  capture; lineage `review-5db18b108b9679a6` APPROVED, acknowledged, authority burned. Reviewed boundary is
+  now `5f02b19`. Findings recorded under V5 (one warning refuted with code evidence).
 
 ## Next step
 
