@@ -77,6 +77,47 @@ describe('buildTabFramePath', () => {
     });
 });
 
+describe('buildTabFramePath without a body chamfer (bodyCut 0)', () => {
+    const NO_CUT: TabFramePathGeometry = { ...GEOMETRY, bodyCut: 0 };
+
+    it('merges the two coincident vertices: one straight body top edge, no zero-length segment', () => {
+        expect(buildTabFramePath({ ...NO_CUT, radius: 0 })).toBe(
+            'M 0 0 L 95 0 L 120 25 L 300 25 L 300 200 L 0 200 Z',
+        );
+    });
+
+    it('rounds the remaining six vertices (one concave junction) and never emits NaN', () => {
+        const path = buildTabFramePath(NO_CUT);
+        const arcs = path.match(/A [\d.]+ [\d.]+ 0 0 [01]/g) ?? [];
+
+        expect(path).not.toContain('NaN');
+        expect(arcs).toHaveLength(6);
+        expect(arcs.filter((arc) => arc.endsWith(' 0 0 0'))).toHaveLength(1);
+        expect(path).not.toMatch(/L (-?[\d.]+) (-?[\d.]+) L \1 \2(?: |$)/);
+    });
+
+    it('stays valid when the inset or outset grows the outline', () => {
+        for (const inset of [1, -2]) {
+            const path = buildTabFramePath(NO_CUT, inset);
+
+            expect(path).not.toContain('NaN');
+            expect(path).not.toContain('Infinity');
+        }
+    });
+
+    it('stays valid when the tab spans the whole width (tab base meets the right edge)', () => {
+        const path = buildTabFramePath({ ...NO_CUT, tabWidth: 400 });
+        const arcs = path.match(/A [\d.]+ [\d.]+ 0 0 [01]/g) ?? [];
+
+        expect(path).not.toContain('NaN');
+        expect(arcs).toHaveLength(5);
+    });
+
+    it('builds the glow clip from the same path', () => {
+        expect(buildTabFrameGlowClipPath(NO_CUT, 60)).toBe(`M -60 -60 H 360 V 260 H -60 Z ${buildTabFramePath(NO_CUT)}`);
+    });
+});
+
 describe('buildTabFrameGlowClipPath', () => {
     it('is an even-odd path: a margin rectangle around the frame with the silhouette punched out', () => {
         expect(buildTabFrameGlowClipPath(GEOMETRY, 60)).toBe(
