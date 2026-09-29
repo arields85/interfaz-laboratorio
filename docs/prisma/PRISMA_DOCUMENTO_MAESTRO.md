@@ -2,9 +2,9 @@
 
 > **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Prisma en este repositorio.
 >
-> **Versión documental:** 2.0.21
+> **Versión documental:** 2.0.22
 >
-> **Fecha:** 2026-09-22
+> **Fecha:** 2026-09-29
 >
 > **Estado vigente:** CL cerrado con aceptación manual del usuario: respuestas a las preguntas
 > ejercitadas, Telegram, voz HMI y orbe. PW-005 cerrado por decisión explícita sobre el camino
@@ -45,7 +45,7 @@ pero su validación productiva sigue pendiente.
 
 | Área | Estado (evidencia fechada en §11.1) | Conclusión |
 |---|---|---|
-| Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos, validación productiva del acceso protegido y retiro controlado del legado. |
+| Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Prisma antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos y validación productiva del acceso protegido. El legado externo `C:\hmi_tts` quedó retirado el 2026-09-29. |
 | Voz HMI y orbe | Aceptación manual CL reportada por el usuario | Respuestas a las preguntas ejercitadas, Telegram, voz HMI y orbe aceptados (§11.1); sin prueba separada de cambio de vista/latencia ni garantía universal de continuidad, cancelación o recuperación. |
 | Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
 | Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Prisma. La HMI sí posee rutas publicadas que pueden ser una base futura. |
@@ -520,7 +520,8 @@ El modo Prisma Server/Node-RED anterior queda retirado como objetivo. Su requisi
 histórico de configuración administrada y respuesta 409 está **supersedido para el
 nuevo runtime**; no fue preservado ni corregido por esta documentación. El código o la
 instalación legado solo se eliminarán tras aceptación y decisión explícitas, nunca de
-forma automática.
+forma automática. La instalación externa `C:\hmi_tts` se retiró el 2026-09-29 por decisión
+explícita del usuario, anticipada a la aceptación de producción.
 
 ### 6.2 Canal A — HMI por voz
 
@@ -742,7 +743,8 @@ listo” no prueba autenticación. “Guardado” no prueba conexión. “Audio 
 - API de consulta actual/histórica y límites por fuente;
 - transporte de eventos por sesión y estrategia de cancelación;
 - proceso de servicio durable, recuperación y actualización;
-- criterios y momento de eliminación del legado externo;
+- criterios y momento de eliminación del legado externo (resuelto: retirado el 2026-09-29 por
+  decisión explícita del usuario);
 - estrategia de audio que cumpla latencia, continuidad y audibilidad.
 
 Ninguna decisión abierta debe presentarse como diseño final o estado SDD.
@@ -885,7 +887,7 @@ eliminación.
 | Latencia y audibilidad de respuestas largas | 3 y 4 | corpus medido y aceptación humana, sin universalizar muestras. |
 | Tres máquinas reales no verificadas por esta auditoría | 1.3 y 4 | aceptación sobre una y luego las tres en entorno autorizado. |
 | Histórico no universal | 1.3 | capacidades y rangos declarados por fuente. |
-| Limpieza del legado | 4 | decisión explícita posterior a aceptación; nunca automática. |
+| Limpieza del legado | 4 | resuelta el 2026-09-29: `C:\hmi_tts` retirado por decisión explícita del usuario, anticipada a la aceptación. |
 
 ## 9. Criterios de aceptación transversales
 
@@ -1519,9 +1521,8 @@ Condiciones y límites ya establecidos:
 
 - la adquisición automática aplica a `npm run dev` en Windows; `build`, `preview`, tests y
   plataformas no-Windows no adquieren Prisma;
-- no existe dependencia activa de fuente ni fallback a `C:\hmi_tts`; ese directorio queda como
-  referencia documentada de rollback, no como requisito de runtime (su existencia física no fue
-  reinspectada);
+- no existe dependencia activa de fuente ni fallback a `C:\hmi_tts`; ese directorio se retiró el
+  2026-09-29 por decisión explícita del usuario y ya no hay camino de rollback hacia él;
 - los secretos de proveedor se administran desde la HMI; la clave maestra protegida y su almacén
   permanecen fuera de Git por diseño, y el aprovisionamiento inicial de clave y administrador ya
   está hecho: no repetirlo ni resetearlo;
@@ -1603,6 +1604,16 @@ repositorio es `git log -1 --format=%H -- odd/tasks/prisma-telegram-poll-diagnos
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.22 — 2026-09-29
+
+- Legado externo `C:\hmi_tts` retirado por decisión explícita del usuario, junto con la tarea
+  programada `HMI - Mantener VPN Steigen`, que dependía de él y ya no se usaba. Verificado antes:
+  ningún proceso ni puerto del runtime lo usaba. Sus archivos, sin el entorno virtual, quedaron
+  archivados fuera del repositorio. Ya no hay camino de rollback hacia él.
+- Las variables de entorno de usuario `GEMINI_API_KEY` y `TELEGRAM_BOT_TOKEN` creadas por el
+  legado no se tocaron: `GEMINI_API_KEY` sigue siendo la fuente legacy cuando el modo protegido
+  no está seleccionado.
 
 ### 2.0.21 — 2026-09-22
 

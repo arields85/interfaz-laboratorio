@@ -531,17 +531,10 @@ and a secret-free configuration template. The virtual environment, caches,
 generated audio, snapshots, pairing state, credentials, backups, benchmark
 artifacts, VPN scripts, and Server launchers are intentionally excluded.
 
-## Rollback to `C:\hmi_tts`
+## Legacy installation retired
 
-`C:\hmi_tts` is the frozen rollback reference and is never read, written, or
-modified by this runtime. To fall back to it:
-
-1. Stop the repository-owned services with `.\operations\stop-local.ps1`. It
-   only stops processes recorded in the manifest it owns, and it refuses a
-   manifest belonging to another checkout.
-2. Confirm ports `5056` and `5057` have no listener left.
-3. Start the legacy system from `C:\hmi_tts` using its own launchers and its own
-   `C:\hmi_tts\.venv`.
-
-Rolling back needs no change to this repository. Rolling forward again is
-`.\operations\bootstrap-local.ps1` followed by `.\operations\start-local.ps1`.
+The legacy installation `C:\hmi_tts` was retired on 2026-09-29 by explicit user
+decision, together with its `HMI - Mantener VPN Steigen` scheduled task. There is
+no rollback path to it anymore. Its files, excluding the virtual environment,
+were archived outside the repository; the archive is a historical reference,
+not a runtime source.
