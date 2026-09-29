@@ -22,6 +22,8 @@ import {
 } from '../../utils/kpiTopCapEffects';
 import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
+import { useViewerEntranceCountUp } from '../../hooks/useViewerEntranceCountUp';
+import { countFractionDigits, resolveViewerCountUpValue } from '../../utils/viewerEntrance';
 
 const ICON_MAP: Record<string, LucideIcon> = {
     'Gauge': Gauge,
@@ -108,6 +110,8 @@ type CircularKpiProps = {
     unit?: string;
     dynamicColor?: boolean;
     thresholds?: ThresholdRule[];
+    /** Value shown as text: the entrance count-up scales it; the gauge keeps using `value`. */
+    textValue: number | null;
     valueTextStyle: CSSProperties;
     fixedTopCapEffects: ReturnType<typeof resolveMachineActivityFixedTopCapEffects>;
     fixedTopCapShape: ReturnType<typeof resolveKpiFixedTopCapShape>;
@@ -285,6 +289,16 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
     }, [mode, numericValue, prefersReducedMotion]);
     /* eslint-enable react-hooks/set-state-in-effect */
 
+    // Entrance count-up of the main value text only (viewer, once per entry): gauges and the glide
+    // above keep their own values, and the progress is 1 outside the entrance, so it is inert then.
+    const countUpProgress = useViewerEntranceCountUp(numericValue !== null);
+    const circularTextValue = displayedValue === null
+        ? null
+        : resolveViewerCountUpValue(displayedValue, countUpProgress, Math.min(countFractionDigits(displayedValue), 1));
+    const barTextValue = numericValue === null
+        ? null
+        : resolveViewerCountUpValue(numericValue, countUpProgress, Math.min(countFractionDigits(numericValue), 1));
+
     if (isLoadingData) {
         return (
             <div className={`p-5 rounded-[var(--frame-radius-rest)] bg-industrial-surface border border-industrial-border animate-pulse ${className ?? ''}`}>
@@ -315,6 +329,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
                     {mode === 'circular' ? (
                         <CircularKpi
                             value={displayedValue}
+                            textValue={circularTextValue}
                             min={min}
                             max={max}
                             unit={unit}
@@ -330,7 +345,7 @@ export default function KpiWidget({ widget, equipmentMap, machines, isLoadingDat
                             staticPulseStabilityMax={FIXED_TOP_CAP_TRAVEL_COMPLETION_PULSE_STABILITY_MAX}
                         />
                     ) : (
-                        <BarKpi value={numericValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
+                        <BarKpi value={numericValue} textValue={barTextValue} min={min} max={max} unit={unit} dynamicColor={!!opts?.dynamicColor} thresholds={widget.thresholds} valueTextStyle={valueTextStyle} />
                     )}
                 </div>
             </WidgetCenteredContentLayout>
@@ -422,6 +437,7 @@ function CircularKpi(props: CircularKpiProps) {
         unit,
         dynamicColor,
         thresholds,
+        textValue,
         valueTextStyle,
         circularArcGlowIntensity,
     } = props;
@@ -444,14 +460,14 @@ function CircularKpi(props: CircularKpiProps) {
                 circularTopCap={circularTopCapConfig}
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-white leading-none mb-1" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
+                <span className="text-white leading-none mb-1" style={valueTextStyle}>{textValue === null ? '--' : textValue % 1 !== 0 ? textValue.toFixed(1) : textValue}</span>
                 {unit && value !== null && <span className="text-industrial-muted uppercase" style={WIDGET_UNIT_TEXT_STYLE}>{unit}</span>}
             </div>
         </div>
     );
 }
 
-function BarKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyle }: { value: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties }) {
+function BarKpi({ value, textValue, min, max, unit, dynamicColor, thresholds, valueTextStyle }: { value: number | null, textValue: number | null, min: number, max: number, unit?: string, dynamicColor?: boolean, thresholds?: ThresholdRule[], valueTextStyle: CSSProperties }) {
     const safeValue = value ?? min;
     const clamp = Math.min(Math.max(safeValue, min), max);
     const range = max - min;
@@ -461,7 +477,7 @@ function BarKpi({ value, min, max, unit, dynamicColor, thresholds, valueTextStyl
     return (
         <div className="flex flex-col w-full h-full justify-center px-2">
             <div className="flex items-baseline gap-2 mb-3">
-                <span className="text-white leading-none" style={valueTextStyle}>{value === null ? '--' : value % 1 !== 0 ? value.toFixed(1) : value}</span>
+                <span className="text-white leading-none" style={valueTextStyle}>{textValue === null ? '--' : textValue % 1 !== 0 ? textValue.toFixed(1) : textValue}</span>
                 {unit && value !== null && <span className="text-industrial-muted uppercase" style={WIDGET_UNIT_TEXT_STYLE}>{unit}</span>}
             </div>
             

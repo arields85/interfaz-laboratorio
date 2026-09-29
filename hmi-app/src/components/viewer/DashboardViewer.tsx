@@ -15,6 +15,7 @@ import {
 import { resolveViewerEntranceOrders } from '../../utils/viewerEntrance';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
+import { ViewerEntranceContext } from '../../hooks/useViewerEntranceCountUp';
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -186,20 +187,22 @@ export default function DashboardViewer({
                                     className="relative z-0 h-full w-full box-border"
                                     style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
-                                    <WidgetPresentationBoundary
-                                        widget={effectiveWidget}
-                                        equipmentMap={equipmentMap}
-                                        machines={machines}
-                                        connection={connection}
-                                        isLoadingOverview={isLoadingOverview}
-                                        hasOverviewError={hasOverviewError}
-                                        isLoadingData={false}
-                                        siblingWidgets={widgets}
-                                        hierarchyContext={hierarchyContext}
-                                        onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
-                                        onNavigateDashboard={onNavigateDashboard}
-                                        className="w-full h-full"
-                                    />
+                                    <ViewerEntranceContext.Provider value={entranceKey !== undefined ? (entranceOrders.get(widget.id) ?? 0) : null}>
+                                        <WidgetPresentationBoundary
+                                            widget={effectiveWidget}
+                                            equipmentMap={equipmentMap}
+                                            machines={machines}
+                                            connection={connection}
+                                            isLoadingOverview={isLoadingOverview}
+                                            hasOverviewError={hasOverviewError}
+                                            isLoadingData={false}
+                                            siblingWidgets={widgets}
+                                            hierarchyContext={hierarchyContext}
+                                            onPersistWidgetDisplayOptions={onPersistWidgetDisplayOptions}
+                                            onNavigateDashboard={onNavigateDashboard}
+                                            className="w-full h-full"
+                                        />
+                                    </ViewerEntranceContext.Provider>
                                     {entranceKey !== undefined && widget.type !== 'text-title' ? (
                                         <ViewerEntranceFrameOverlays
                                             widgetId={widget.id}

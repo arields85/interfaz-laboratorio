@@ -23,6 +23,8 @@ import {
 import { resolveStoredTravelingTopCapActualSpeedRange } from '../../utils/travelingTopCapSpeed';
 import { resolveMachineActivityUnits } from '../utils/machineActivityRuntime';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
+import { useViewerEntranceCountUp } from '../../hooks/useViewerEntranceCountUp';
+import { resolveViewerCountUpValue } from '../../utils/viewerEntrance';
 import type { MachineActivityPresentationData } from '../controllers/PresentationControllers';
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -368,7 +370,12 @@ export default function MachineActivityWidget({
         ? retractStartNormalizedRef.current
         : undefined;
     /* eslint-enable react-hooks/refs */
-    const activityIndexLabel = isValid ? String(Math.round(visualActivityIndex)) : '--';
+    // Entrance count-up of the label only (viewer, once per entry); the gauge keeps its own value and
+    // the progress is 1 outside the entrance, so the label is exactly the rounded visual index then.
+    const countUpProgress = useViewerEntranceCountUp(isValid);
+    const activityIndexLabel = isValid
+        ? String(Math.round(resolveViewerCountUpValue(visualActivityIndex, countUpProgress, 0)))
+        : '--';
 
     useEffect(() => {
         displayedActivityIndexRef.current = displayedActivityIndex;

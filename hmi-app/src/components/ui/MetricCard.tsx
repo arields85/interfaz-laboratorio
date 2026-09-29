@@ -9,6 +9,8 @@ import {
     getHierarchyTraceExclusionReasonLabel,
 } from '../../widgets/resolvers/hierarchyResolver';
 import WidgetHeader from './WidgetHeader';
+import { useViewerEntranceCountUp } from '../../hooks/useViewerEntranceCountUp';
+import { countFractionDigits, resolveViewerCountUpValue } from '../../utils/viewerEntrance';
 
 // =============================================================================
 // MetricCard
@@ -91,6 +93,8 @@ export default function MetricCard({
     const styles = STATUS_STYLES[status];
     const hasHierarchyTrace = hierarchyTrace !== undefined;
     const hasFooterContent = Boolean(subtext) || hasHierarchyTrace;
+    // Entrance count-up of a numeric main value (viewer, once per entry); 1 (inert) elsewhere.
+    const countUpProgress = useViewerEntranceCountUp(typeof value === 'number');
 
     useEffect(() => {
         const card = cardRef.current;
@@ -169,7 +173,11 @@ export default function MetricCard({
         );
     }
 
-    const displayValue = value === null || value === undefined ? '--' : value;
+    const displayValue = value === null || value === undefined
+        ? '--'
+        : typeof value === 'number'
+            ? resolveViewerCountUpValue(value, countUpProgress, countFractionDigits(value))
+            : value;
     const isNoData = value === null || value === undefined;
     const valueTypographyStyle = {
         fontFamily: 'var(--font-widget-value)',

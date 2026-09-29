@@ -30,9 +30,24 @@ class MockResizeObserver implements ResizeObserver {
     public disconnect(): void {}
 }
 
-vi.mock('./WidgetPresentationBoundary', () => ({
-    default: (props: { widget: { id: string } }) => <div data-testid={`widget-renderer-${props.widget.id}`} />,
-}));
+// The stub reads the entrance context the way a widget's count-up hook does, so the tests can
+// assert what the viewer provides to its children.
+vi.mock('./WidgetPresentationBoundary', async () => {
+    const { useContext } = await import('react');
+    const { ViewerEntranceContext } = await import('../../hooks/useViewerEntranceCountUp');
+
+    function WidgetStub(props: { widget: { id: string } }) {
+        const order = useContext(ViewerEntranceContext);
+        return (
+            <div
+                data-testid={`widget-renderer-${props.widget.id}`}
+                data-entrance-order={order === null ? 'none' : String(order)}
+            />
+        );
+    }
+
+    return { default: WidgetStub };
+});
 
 function measure(container: HTMLElement) {
     const root = container.querySelector('[data-testid="dashboard-viewer-root"]');
@@ -172,6 +187,36 @@ describe('DashboardViewer entrance', () => {
     });
 });
 
+describe('DashboardViewer entrance count-up context', () => {
+    beforeEach(() => {
+        resizeCallbacks.clear();
+        vi.stubGlobal('ResizeObserver', MockResizeObserver);
+        vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
+            callback(0);
+            return 1;
+        }) as typeof requestAnimationFrame);
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("provides each widget with its own item's stagger order", () => {
+        renderViewer({ entranceKey: 'k', entranceRandom: sequence([0.3, 0.6, 0.1]) });
+
+        for (const id of IDS) {
+            expect(Number(screen.getByTestId(`widget-renderer-${id}`).dataset.entranceOrder)).toBe(orderOf(id));
+        }
+    });
+
+    it('provides no entrance to widgets without an entrance key', () => {
+        renderViewer();
+
+        expect(screen.getByTestId('widget-renderer-a').dataset.entranceOrder).toBe('none');
+    });
+});
+
 describe('DashboardViewer entrance frame overlays (flash + outline)', () => {
     beforeEach(() => {
         resizeCallbacks.clear();
@@ -259,6 +304,12 @@ describe('viewer entrance CSS contract (index.css)', () => {
         expect(body).toContain('--viewer-entrance-ease: cubic-bezier(0.22, 1, 0.36, 1);');
         expect(body).toContain('--viewer-entrance-value-duration: 900ms;');
         expect(body).toContain('--viewer-entrance-value-offset: 150ms;');
+    });
+
+    it('defines the count-up duration token in the same :root block', () => {
+        const block = indexCss.match(/:root\s*{([^}]*--viewer-entrance-frame-duration[^}]*)}/);
+
+        expect(block?.[1] ?? '').toContain('--viewer-entrance-count-duration: 900ms;');
     });
 
     it('animates the item wrapper from tokens, scoped under the viewer frame attribute', () => {
