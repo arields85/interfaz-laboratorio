@@ -711,12 +711,12 @@ h1, h2, h3, h4, h5, h6 {
   --viewer-entrance-value-offset: 150ms;
   --viewer-entrance-ring-segment-fade: 160ms;
   --viewer-entrance-flash-color: #ffffff;
-  --viewer-entrance-flash-peak: 0.16;
+  --viewer-entrance-flash-peak: 0.06;
   --viewer-entrance-flash-duration: 650ms;
   --viewer-entrance-flash-offset: 60ms;
   --viewer-entrance-outline-color: #ffffff;
-  --viewer-entrance-outline-width: 1px;
-  --viewer-entrance-outline-opacity: 1;
+  --viewer-entrance-outline-width: 0.5px;
+  --viewer-entrance-outline-opacity: 0.4;
   --viewer-entrance-outline-duration: 700ms;
   --viewer-entrance-outline-fade: 350ms;
   --viewer-entrance-outline-offset: 0ms;

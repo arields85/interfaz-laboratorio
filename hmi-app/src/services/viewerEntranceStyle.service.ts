@@ -12,11 +12,14 @@ import { normalizeStepValue } from '../utils/normalizeStepValue';
  */
 export const VIEWER_ENTRANCE_STORAGE_KEY = 'hmi-viewer-entrance';
 
-/** Keep equal to the `--viewer-entrance-*` values in `index.css` (a test pins it). */
+/**
+ * Keep equal to the `--viewer-entrance-*` values in `index.css` (a test pins it). Values tuned live
+ * by the user on 2026-09-29.
+ */
 export const DEFAULT_VIEWER_ENTRANCE_SETTINGS: ViewerEntranceSettings = {
-    outlineWidthPx: 1,
-    outlineOpacityPercent: 100,
-    flashIntensityPercent: 16,
+    outlineWidthPx: 0.5,
+    outlineOpacityPercent: 40,
+    flashIntensityPercent: 6,
 };
 
 export const VIEWER_ENTRANCE_LIMITS: Record<keyof ViewerEntranceSettings, { min: number; max: number; step: number }> = {

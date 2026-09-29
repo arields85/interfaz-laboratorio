@@ -308,20 +308,20 @@ describe('ThemeSettingsTab', () => {
             expect(width).toHaveAttribute('min', '0.5');
             expect(width).toHaveAttribute('max', '3');
             expect(width).toHaveAttribute('step', '0.25');
-            expect(width).toHaveValue('1');
-            expect(screen.getByRole('textbox', { name: 'Valor de grosor del contorno' })).toHaveValue('1');
+            expect(width).toHaveValue('0.5');
+            expect(screen.getByRole('textbox', { name: 'Valor de grosor del contorno' })).toHaveValue('0.5');
 
             const opacity = screen.getByRole('slider', { name: 'Opacidad del contorno' });
             expect(opacity).toHaveAttribute('min', '0');
             expect(opacity).toHaveAttribute('max', '100');
             expect(opacity).toHaveAttribute('step', '5');
-            expect(opacity).toHaveValue('100');
+            expect(opacity).toHaveValue('40');
 
             const flash = screen.getByRole('slider', { name: 'Intensidad del destello' });
             expect(flash).toHaveAttribute('min', '0');
             expect(flash).toHaveAttribute('max', '50');
             expect(flash).toHaveAttribute('step', '1');
-            expect(flash).toHaveValue('16');
+            expect(flash).toHaveValue('6');
 
             expect(screen.getByText('px')).toBeInTheDocument();
             expect(screen.getAllByText('%')).toHaveLength(2);
@@ -376,7 +376,7 @@ describe('ThemeSettingsTab', () => {
             const flash = screen.getByRole('slider', { name: 'Intensidad del destello' });
 
             fireEvent.change(flash, { target: { value: '20' } });
-            fireEvent.change(flash, { target: { value: '16' } });
+            fireEvent.change(flash, { target: { value: String(DEFAULT_VIEWER_ENTRANCE_SETTINGS.flashIntensityPercent) } });
 
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
             expect(onSaveStatusChange).toHaveBeenLastCalledWith(null);
@@ -408,7 +408,7 @@ describe('ThemeSettingsTab', () => {
             fireEvent.change(flash, { target: { value: '30' } });
             await user.click(screen.getByRole('radio', { name: /Contorno/ }));
 
-            fireEvent.change(flash, { target: { value: '16' } });
+            fireEvent.change(flash, { target: { value: String(DEFAULT_VIEWER_ENTRANCE_SETTINGS.flashIntensityPercent) } });
 
             expect(onDirtyChange).toHaveBeenLastCalledWith(true);
             expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
@@ -422,7 +422,7 @@ describe('ThemeSettingsTab', () => {
             const flash = screen.getByRole('slider', { name: 'Intensidad del destello' });
             await user.click(screen.getByRole('radio', { name: /Contorno/ }));
             fireEvent.change(flash, { target: { value: '30' } });
-            fireEvent.change(flash, { target: { value: '16' } });
+            fireEvent.change(flash, { target: { value: String(DEFAULT_VIEWER_ENTRANCE_SETTINGS.flashIntensityPercent) } });
             expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 
             await user.click(screen.getByRole('radio', { name: /Clásico/ }));

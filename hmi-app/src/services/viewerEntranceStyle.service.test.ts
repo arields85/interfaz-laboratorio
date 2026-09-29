@@ -26,6 +26,14 @@ describe('viewerEntranceStyle.service', () => {
         resetViewerEntranceSettingsOnDocument(root);
     });
 
+    it('defaults to the values the user tuned live (2026-09-29): outline 0.5 px at 40 %, flash 6 %', () => {
+        expect(DEFAULT_VIEWER_ENTRANCE_SETTINGS).toEqual({
+            outlineWidthPx: 0.5,
+            outlineOpacityPercent: 40,
+            flashIntensityPercent: 6,
+        });
+    });
+
     it('keeps the code defaults equal to the values in the index.css :root block', () => {
         const css = fs.readFileSync(path.resolve(__dirname, '../index.css'), 'utf-8');
         const block = css.match(/:root\s*{([^}]*--viewer-entrance-frame-duration[^}]*)}/)?.[1] ?? '';

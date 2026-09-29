@@ -92,12 +92,12 @@ Todos los tiempos viven en un único bloque `:root` de `hmi-app/src/index.css` p
 | `--viewer-entrance-value-offset` | `150ms` | Espera del valor tras el arranque de su marco |
 | `--viewer-entrance-ring-segment-fade` | `160ms` | Fundido de cada tramo del aro (el barrido completo dura `value-duration`) |
 | `--viewer-entrance-flash-color` | `#ffffff` | Color del destello del fondo del marco |
-| `--viewer-entrance-flash-peak` | `0.16` | Opacidad máxima del destello (sube rápido al pico y decae a 0). Ajustable desde Tema ("Intensidad del destello", 0–50 %) |
+| `--viewer-entrance-flash-peak` | `0.06` | Opacidad máxima del destello (sube rápido al pico y decae a 0). Ajustable desde Tema ("Intensidad del destello", 0–50 %) |
 | `--viewer-entrance-flash-duration` | `650ms` | Duración total del destello |
 | `--viewer-entrance-flash-offset` | `60ms` | Espera del destello tras el arranque de su marco |
 | `--viewer-entrance-outline-color` | `#ffffff` | Color del contorno que se traza por el perímetro |
-| `--viewer-entrance-outline-width` | `1px` | Grosor del contorno. Ajustable desde Tema ("Grosor del contorno", 0,5–3 px) |
-| `--viewer-entrance-outline-opacity` | `1` | Opacidad pico de la línea animada del contorno (de donde parte su fundido; no es el borde en reposo del tema). Ajustable desde Tema ("Opacidad del contorno", 0–100 %) |
+| `--viewer-entrance-outline-width` | `0.5px` | Grosor del contorno. Ajustable desde Tema ("Grosor del contorno", 0,5–3 px) |
+| `--viewer-entrance-outline-opacity` | `0.4` | Opacidad pico de la línea animada del contorno (de donde parte su fundido; no es el borde en reposo del tema). Ajustable desde Tema ("Opacidad del contorno", 0–100 %) |
 | `--viewer-entrance-outline-duration` | `700ms` | Duración del trazado del contorno |
 | `--viewer-entrance-outline-fade` | `350ms` | Fundido del contorno al terminar de trazarse |
 | `--viewer-entrance-outline-offset` | `0ms` | Espera del trazado tras el arranque de su marco |
