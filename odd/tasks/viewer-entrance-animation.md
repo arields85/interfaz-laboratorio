@@ -81,6 +81,12 @@ without losing speed.
 - [x] **V8** — Numbers count up from zero to their value on entrance (main values of `kpi`, `metric-card`,
   `machine-activity`, keeping each widget's decimals and unit); viewer-only, entry-only (refreshes keep
   today's behavior), reduced motion shows the value directly. Reverses the earlier "out of scope" note.
+- [ ] **V9** — Admin controls (user request 2026-09-29, during V4 tuning): a new "Animación de entrada"
+  section in Configuración general → Tema with three sliders, each showing its value, persisted like the
+  rest of the visual configuration and global to the three presets: outline thickness 0.5–3 px (current
+  1 px), outline opacity 0–100 % (the animated white line, NOT the theme's rest border; current 100 %,
+  needs a new token), flash intensity 0–50 % (current 16 %). Changing a dashboard replays the entrance to
+  preview. Live tuning so far (commit `b2df231`): outline white `#ffffff` and 1 px, flash white `#ffffff`.
 
 ## Acceptance criteria
 
