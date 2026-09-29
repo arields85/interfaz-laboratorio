@@ -1296,10 +1296,12 @@
     }
 
     // Tab frame defaults: the current --tab-frame-* tokens of the app (hmi-app/src/index.css).
+    // Starting values: the user's tuning in the lab on 2026-09-29 (fill 15 %, text white 70 %, radius 5,
+    // tab cut 15, body cut 37); the app tokens were white 20 %, muted text, tab cut 25, body cut 50.
     const TF_DEFAULT = {
-      fillColor: '#ffffff', fillAlpha: 20,
-      text: { rest: { color: '#94a3b8', alpha: 100 }, hover: { color: '#ffffff', alpha: 100 } },
-      height: 25, tabCut: 25, bodyCut: 50, padStart: 10, padEnd: 5, gap: 6,
+      fillColor: '#ffffff', fillAlpha: 15,
+      text: { rest: { color: '#ffffff', alpha: 70 }, hover: { color: '#ffffff', alpha: 100 } },
+      height: 25, tabCut: 15, bodyCut: 37, padStart: 10, padEnd: 5, gap: 6,
       alertFillAlpha: 40, alertTextAlpha: 100, borderTab: false,
     };
 
@@ -1357,7 +1359,20 @@
 
     Object.keys(PRESETS).forEach(function (k) { PRESETS[k].shape = 'tab'; PRESETS[k].tf = clone(TF_DEFAULT); });
 
+    const STORE_KEY = 'hmi-style-lab-v1';
+    const TF_START_RADIUS = 5;
     let state = clone(PRESETS.instrument);
+    state.w.rest.radius = TF_START_RADIUS;
+    state.w.hover.radius = TF_START_RADIUS;
+    // The viewer's own tuning survives reloads and republishes (browser storage; optional).
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if (saved && saved.state && saved.state.w && saved.state.tf) {
+        const tf = Object.assign(clone(TF_DEFAULT), saved.state.tf);
+        tf.text = Object.assign(clone(TF_DEFAULT.text), saved.state.tf.text);
+        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf });
+      }
+    } catch (err) { /* storage unavailable: start from the defaults */ }
     const editing = { w: 'rest', b: 'rest', i: 'rest', g: 'rest' };
     let editingTab = 'rest';
     let alertKind = 'warning';
@@ -1520,6 +1535,7 @@
         ' · Forma del marco: ' + (state.shape === 'tab' ? 'Pestaña' : 'Estándar') +
         (state.shape === 'tab' ? ' · Pestaña (tokens --tab-frame-*) | ' + tabSummary() : '');
       layoutAll();
+      try { localStorage.setItem(STORE_KEY, JSON.stringify({ state: state })); } catch (err) { /* optional */ }
     }
 
     function tabSummary() {
@@ -1782,11 +1798,14 @@
       const isTab = state.shape === 'tab';
       card.classList.toggle('tf-on', isTab);
       const outline = card.querySelector('.tf-outline path');
+      const icon = card.querySelector('.w-head > svg');
       if (!isTab) {
+        if (icon) { icon.style.top = ''; icon.style.right = ''; }
         outline.setAttribute('d', rectPath(W, H, state.w.rest.radius, 0.75));
         return;
       }
       const g = geometry(card, W, H);
+      if (icon) placeIcon(icon, g);
       const d = tabPath(g, 0);
       outline.setAttribute('d', tabPath(g, 0.75));
       setClip(card.querySelector('.tf-surface'), 'path("' + d + '")');
@@ -1805,6 +1824,22 @@
         glow.querySelector('path').setAttribute('d', d);
         setClip(glow, 'path(evenodd, "M ' + -m + ' ' + -m + ' H ' + (W + m) + ' V ' + (H + m) + ' H ' + -m + ' Z ' + d + '")');
       }
+    }
+    // Header icon in the cut-off corner: always the same distance from the right edge (never past it).
+    // Its preferred top sits just below the body's top line; when the body cut is too small for the
+    // icon to fit inside the cut triangle there, it moves up just enough (into the tab strip if
+    // needed), never above the widget's top edge. Coordinates are the card's border box.
+    const ICON_RIGHT = 7;   // border-box px from the right edge
+    const ICON_GAP = 4;     // preferred distance below the body's top line
+    const ICON_CLEAR = 3;   // clearance from the diagonal (covers the stroke and the rounded vertex)
+    function placeIcon(icon, g) {
+      const s = icon.getBoundingClientRect().width || 18;
+      // Inside the triangle: (x - (W - bodyCut)) >= (y - tabHeight) + clearance at the icon's bottom-left.
+      const maxTop = g.tabHeight + g.bodyCut - ICON_RIGHT - 2 * s - ICON_CLEAR;
+      const top = Math.max(1, Math.min(g.tabHeight + ICON_GAP, maxTop));
+      // The icon is positioned in the padding box (1px border inside the border box).
+      icon.style.top = (top - 1) + 'px';
+      icon.style.right = (ICON_RIGHT - 1) + 'px';
     }
     function layoutAll() { cards.forEach(layoutCard); }
     if (window.ResizeObserver) {
