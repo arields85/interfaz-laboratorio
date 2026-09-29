@@ -61,6 +61,42 @@ export function resolveViewerEntranceOrders(
     return orders;
 }
 
+/**
+ * Orders for widgets that appear under an already-running entrance (same replay key): every widget
+ * without an order gets a random position in [0, 1] from the injected source, and the existing
+ * orders are never touched (no reshuffle, no replay of what is already on screen). A locked group
+ * container added later is pulled to its earliest member. Returns the SAME map when nothing is new.
+ */
+export function extendViewerEntranceOrders(
+    widgets: readonly WidgetConfig[],
+    existingOrders: ReadonlyMap<string, number>,
+    renderedWidgetIds: readonly string[],
+    random: () => number = Math.random,
+): Map<string, number> {
+    const newIds = renderedWidgetIds.filter((widgetId) => !existingOrders.has(widgetId));
+
+    if (newIds.length === 0) {
+        return existingOrders as Map<string, number>;
+    }
+
+    const orders = new Map(existingOrders);
+    for (const widgetId of newIds) {
+        orders.set(widgetId, random());
+    }
+
+    for (const widgetId of renderedWidgetIds) {
+        const group = findOwningLockedGroup(widgetId, widgets);
+        const memberOrder = orders.get(widgetId);
+        const groupOrder = group ? orders.get(group.id) : undefined;
+
+        if (group && newIds.includes(group.id) && memberOrder !== undefined && groupOrder !== undefined && groupOrder > memberOrder) {
+            orders.set(group.id, memberOrder);
+        }
+    }
+
+    return orders;
+}
+
 // -----------------------------------------------------------------------------
 // Count-up (numbers rising from zero on entrance)
 // The timing has ONE source of truth: the same `--viewer-entrance-*` CSS tokens

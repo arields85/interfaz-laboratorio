@@ -3,6 +3,7 @@ import { makeGroupWidget, makeWidget } from '../test/fixtures/dashboard.fixture'
 import {
     buildViewerEntranceKey,
     countFractionDigits,
+    extendViewerEntranceOrders,
     parseCssTimeMs,
     parseCubicBezier,
     resolveCubicBezierProgress,
@@ -87,6 +88,40 @@ describe('resolveViewerEntranceOrders', () => {
         const orders = resolveViewerEntranceOrders([group, member], ['g', 'm1'], sequence([0, 0]));
 
         expect(orders.size).toBe(2);
+    });
+});
+
+describe('extendViewerEntranceOrders', () => {
+    it('keeps every existing order untouched and returns the same map when nothing is new', () => {
+        const widgets = ['a', 'b'].map((id) => makeWidget({ id }));
+        const existing = new Map([['a', 0], ['b', 1]]);
+
+        const orders = extendViewerEntranceOrders(widgets, existing, ['a', 'b'], sequence([0.5]));
+
+        expect(orders).toBe(existing);
+    });
+
+    it('gives a widget added later an order inside [0, 1] from the random source, without touching the others', () => {
+        const widgets = ['a', 'b', 'c'].map((id) => makeWidget({ id }));
+        const existing = new Map([['a', 0], ['b', 1]]);
+
+        const orders = extendViewerEntranceOrders(widgets, existing, ['a', 'b', 'c'], sequence([0.4]));
+
+        expect(orders.get('a')).toBe(0);
+        expect(orders.get('b')).toBe(1);
+        expect(orders.get('c')).toBe(0.4);
+        expect(existing.has('c')).toBe(false);
+    });
+
+    it('never enters a locked group container added later after its members', () => {
+        const members = ['m1', 'm2'].map((id) => makeWidget({ id }));
+        const group = makeGroupWidget({ id: 'g', locked: true, memberWidgetIds: ['m1', 'm2'] });
+        const existing = new Map([['m1', 0.6], ['m2', 0.3]]);
+
+        const orders = extendViewerEntranceOrders([group, ...members], existing, ['g', 'm1', 'm2'], sequence([0.9]));
+
+        expect(orders.get('g')).toBe(0.3);
+        expect(orders.get('m1')).toBe(0.6);
     });
 });
 

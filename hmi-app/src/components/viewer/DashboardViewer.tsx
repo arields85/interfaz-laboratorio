@@ -12,7 +12,7 @@ import {
     resolveHoveredGroupId,
     resolveWidgetSurfaceInset,
 } from '../../utils/groupWidget';
-import { resolveViewerEntranceOrders } from '../../utils/viewerEntrance';
+import { extendViewerEntranceOrders, resolveViewerEntranceOrders } from '../../utils/viewerEntrance';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 import { ViewerEntranceContext } from '../../hooks/useViewerEntranceCountUp';
@@ -102,18 +102,27 @@ export default function DashboardViewer({
     const orderedLayout = orderRenderItemsWithGroupsFirst(layout, widgets);
 
     // Entrance: the stagger is drawn once per entry (entranceKey) and kept while the key holds, so
-    // a data refresh never reshuffles or replays it. It is pure presentation: data queries are not
+    // a data refresh never reshuffles or replays it (widgets added under the same key only get an order). It is pure presentation: data queries are not
     // gated by it. Render-phase state adjustment is the sanctioned way to reset state on a new key.
     const [entrance, setEntrance] = useState<{ key: string | undefined; orders: Map<string, number> }>(
         () => ({ key: undefined, orders: new Map() }),
     );
     let entranceOrders = entrance.orders;
-    if (entranceKey !== undefined && entrance.key !== entranceKey) {
+    if (entranceKey !== undefined) {
         const renderedWidgetIds = orderedLayout
             .filter((item) => !headerWidgetIds?.has(item.widgetId) && widgetMap.has(item.widgetId))
             .map((item) => item.widgetId);
-        entranceOrders = resolveViewerEntranceOrders(widgets, renderedWidgetIds, entranceRandom);
-        setEntrance({ key: entranceKey, orders: entranceOrders });
+
+        if (entrance.key !== entranceKey) {
+            entranceOrders = resolveViewerEntranceOrders(widgets, renderedWidgetIds, entranceRandom);
+        } else {
+            // Same entry: widgets added meanwhile get their own order; existing ones keep theirs.
+            entranceOrders = extendViewerEntranceOrders(widgets, entrance.orders, renderedWidgetIds, entranceRandom);
+        }
+
+        if (entranceOrders !== entrance.orders || entrance.key !== entranceKey) {
+            setEntrance({ key: entranceKey, orders: entranceOrders });
+        }
     }
 
     return (

@@ -144,6 +144,36 @@ describe('DashboardViewer entrance', () => {
         expect(random.mock.calls.length).toBe(callsBefore);
     });
 
+    it('gives a widget added under the same key its own order without reshuffling or remounting the others', () => {
+        const random = vi.fn(sequence([0.2, 0.9, 0.4]));
+        const { rerender, ui } = renderViewer({ entranceKey: 'dash-1:view-a', entranceRandom: random });
+        const before = screen.getByTestId('dashboard-viewer-item-a');
+        const orders = IDS.map(orderOf);
+        const added = makeWidget({ id: 'e' });
+
+        rerender(ui({
+            widgets: [...widgets, added],
+            layout: [...layout, makeLayout({ widgetId: 'e', x: 0, y: 4 })],
+            entranceRandom: sequence([0.75]),
+        }));
+
+        expect(screen.getByTestId('dashboard-viewer-item-a')).toBe(before);
+        expect(IDS.map(orderOf)).toEqual(orders);
+        expect(orderOf('e')).toBe(0.75);
+        expect(screen.getByTestId('widget-renderer-e')).toHaveAttribute('data-entrance-order', '0.75');
+    });
+
+    it('keeps the orders of the remaining widgets when one is removed under the same key', () => {
+        const { rerender, ui } = renderViewer({ entranceKey: 'dash-1:view-a', entranceRandom: sequence([0.2, 0.9, 0.4]) });
+        const orders = new Map(IDS.map((id) => [id, orderOf(id)]));
+
+        rerender(ui({ widgets: widgets.slice(1), layout: layout.slice(1) }));
+
+        for (const id of ['b', 'c', 'd']) {
+            expect(orderOf(id)).toBe(orders.get(id));
+        }
+    });
+
     it('replays on a new entry: switching dashboard or view remounts the items with a fresh shuffle', () => {
         const random = sequence([0.05, 0.95, 0.5, 0.2, 0.7, 0.35]);
         const { rerender, ui } = renderViewer({ entranceKey: 'dash-1:view-a', entranceRandom: random });
