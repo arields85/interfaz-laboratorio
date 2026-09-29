@@ -81,7 +81,7 @@ without losing speed.
 - [x] **V8** — Numbers count up from zero to their value on entrance (main values of `kpi`, `metric-card`,
   `machine-activity`, keeping each widget's decimals and unit); viewer-only, entry-only (refreshes keep
   today's behavior), reduced motion shows the value directly. Reverses the earlier "out of scope" note.
-- [ ] **V9** — Admin controls (user request 2026-09-29, during V4 tuning): a new "Animación de entrada"
+- [x] **V9** — Admin controls (user request 2026-09-29, during V4 tuning): a new "Animación de entrada"
   section in Configuración general → Tema with three sliders, each showing its value, persisted like the
   rest of the visual configuration and global to the three presets: outline thickness 0.5–3 px (current
   1 px), outline opacity 0–100 % (the animated white line, NOT the theme's rest border; current 100 %,
@@ -180,9 +180,35 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   in-process capture; lineage `review-342fb7268bd30b70` APPROVED, acknowledged, authority burned. Reviewed
   boundary is now `3e080a5`. Two non-blocking advisories added to V5.
 
+- 2026-09-29 V9 (route: delegated writer; commit `ed4f339`): "Animación de entrada" section in
+  Configuración general → Tema (`ThemeSettingsTab`), three `DockSliderField`s (existing primitive, reused per
+  the user's instruction): "Grosor del contorno" 0.5–3 px step 0.25 (default 1) ->
+  `--viewer-entrance-outline-width`; "Opacidad del contorno" 0–100 % step 5 (default 100) -> NEW
+  `--viewer-entrance-outline-opacity` (default `1`, in the single `:root` block; it is the `from` opacity of
+  the outline-fade keyframes, i.e. the PEAK the fade starts from, so draw-then-fade is unchanged);
+  "Intensidad del destello" 0–50 % step 1 (default 16) -> `--viewer-entrance-flash-peak`. Persistence:
+  `services/viewerEntranceStyle.service.ts` (type in `domain/viewerEntrance.types.ts`, flagged by the
+  pre-commit review): code defaults are the source of truth, only overrides are stored (`hmi-viewer-entrance`,
+  key removed when all equal defaults), values at default REMOVE the inline property so the `index.css`
+  default applies, reapplied at boot by `applyViewerEntranceOverrides()` in `main.tsx`; global for the three
+  presets. Tab contract: slider move previews on `:root` and marks dirty (also clears when returning to the
+  saved value), Guardar persists + `saved`, Descartar restores the snapshot without persisting, unmount with an
+  unsaved preview restores the saved values. Replay preview = existing `entranceKey` (change dashboard/view).
+  User request during implementation: each control is slider PLUS precise numeric input (typing, up/down
+  buttons, ArrowUp/ArrowDown, unit, clamp/snap on commit, slider<->input sync). Reused `DockSliderField` +
+  `AdminNumberInput`; the gaps were extended minimally: `DockSliderField` `unit` prop, `AdminNumberInput`
+  ArrowUp/ArrowDown stepping and Spanish aria-labels on the step buttons ("Aumentar valor"/"Disminuir valor").
+  RED: 6 tests failing + 2 suites unresolved (`ThemeSettingsTab.test`, `viewerEntranceStyle.service.test` –
+  module missing) and 2 CSS-contract tests in `DashboardViewer.entrance.test`. GREEN: 89/89 in the six
+  touched suites (+ `GlobalSettingsDialog.test`). Verification (in `hmi-app/`): `npx tsc -b` clean;
+  `npm run lint` clean; `npm test` 240 files / 3056 tests passed (an earlier full run had one
+  `Topbar.test.tsx` failure under parallel load, 16/16 alone); `npm run build` OK. Pre-commit review blocked
+  twice with genuine findings ("tres temas" hardcoded count; type outside `domain/`), fixed, then PASSED.
+  Not verified: real browser rendering of the outline opacity / new controls.
+
 ## Next step
 
-V4: live look and tuning with the user of V6-V8 (flash, outline draw-in, count-up; tokens in the single
-`:root` block of `index.css`) in all three theme presets; check `rx/ry` CSS geometry properties on the
-outline rect in the target browsers. V5 (the remaining review advisories, including the late-value zero
-flash) after tuning.
+V4: live tuning with the user, now with the Tema controls ("Animación de entrada": outline thickness and
+opacity, flash intensity; the remaining timings stay in the single `:root` block of `index.css`), in all three
+theme presets; check `rx/ry` CSS geometry properties on the outline rect in the target browsers. V5 (the
+remaining review advisories, including the late-value zero flash) after tuning.
