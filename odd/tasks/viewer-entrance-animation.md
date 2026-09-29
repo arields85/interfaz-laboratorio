@@ -66,7 +66,13 @@ without losing speed.
   fetches, add a test), R3-orders-frozen-per-key, R3-unscoped-guard-partial, R3-dashboard-wiring-untested
   (SUGGESTIONS). Evaluate after V4 so tuning and fixes share one pass. PARTIALLY CLOSED 2026-09-29:
   R3-unscoped-guard-partial (the builder-safety guard now covers every `.hmi-viewer-*` rule, see V6-V8
-  progress); the other three advisories stay open.
+  progress); the other three advisories stay open. Added from the second review (lineage
+  `review-342fb7268bd30b70`, non-blocking): R3-late-value-zero-flash (WARNING, visible bug: a first value
+  arriving AFTER the entrance window renders as 0 for one painted frame because progress jumps to 1 in a
+  passive effect — `useViewerEntranceCountUp.ts:40-65`; fix synchronously, e.g. derive the settled state
+  during render or use a layout effect, and cover it with a test that inspects the first committed text)
+  and R3-countup-restart-on-hasvalue-toggle (SUGGESTION: a hasValue true→false→true toggle mid-count
+  restarts a full-duration count — `useViewerEntranceCountUp.ts:67-84`).
 - [x] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
   más dinamismo"): on entrance each frame's background flashes/blinks — a brightness overlay above the
   fill peaks and decays to the theme's rest look; visible in all three presets (Instrumento has 0 % fill).
@@ -162,9 +168,15 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   239 files / 3033 tests passed (an earlier full run had one `Topbar.test.tsx` failure under parallel load,
   16/16 twice alone and green on the next full run); `npm run build` OK. Not verified: real browser
   rendering per theme preset (jsdom cannot run CSS animations).
+- 2026-09-29 parent spot check: `DashboardViewer.entrance.test.tsx`, `useViewerEntranceCountUp.test.tsx`,
+  `viewerEntranceCountUp.test.tsx` 46/46. RDD assess `c0bbaee..3e080a5` (committed-only, `.gga` excluded):
+  medium, 1404 lines, `review_due` (`slice_budget_reached`); user GRANTED consent; one lens (reliability),
+  in-process capture; lineage `review-342fb7268bd30b70` APPROVED, acknowledged, authority burned. Reviewed
+  boundary is now `3e080a5`. Two non-blocking advisories added to V5.
 
 ## Next step
 
 V4: live look and tuning with the user of V6-V8 (flash, outline draw-in, count-up; tokens in the single
 `:root` block of `index.css`) in all three theme presets; check `rx/ry` CSS geometry properties on the
-outline rect in the target browsers. V5 (the remaining three review advisories) after tuning.
+outline rect in the target browsers. V5 (the remaining review advisories, including the late-value zero
+flash) after tuning.
