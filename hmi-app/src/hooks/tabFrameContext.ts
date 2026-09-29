@@ -11,6 +11,8 @@ export const GridFrameScopeContext = createContext(false);
 export interface TabFrameContextValue {
     /** The tab element that receives the header title (null until it is mounted). */
     titleHost: HTMLElement | null;
+    /** The shell element that receives the header icon (null until it is mounted). */
+    iconHost: HTMLElement | null;
     /** Alert state of the widget frame (`widget-state-*`): the tab title takes its color. */
     alertState: TabFrameAlertState | null;
 }

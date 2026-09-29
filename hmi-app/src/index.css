@@ -443,25 +443,27 @@ h1, h2, h3, h4, h5, h6 {
  * valores ya convertidos a px CSS). Relleno, desenfoque y color del borde del
  * cuerpo NO están aquí: siguen viniendo de los `--frame-*` del tema activo.
  *   --tab-frame-height       alto de la pestaña (= franja sobre el cuerpo)
- *   --tab-frame-tab-cut      recorte del lado derecho de la pestaña (45° = igual al alto)
- *   --tab-frame-body-cut     chaflán de la esquina superior derecha del cuerpo (45°)
- *   --tab-frame-fill         relleno de la pestaña (blanco al 20 %); con alerta warning/critical
+ *   --tab-frame-tab-cut      recorte del lado derecho de la pestaña
+ *   --tab-frame-body-cut     chaflán de la esquina superior derecha del cuerpo (0 = sin chaflán)
+ *   --tab-frame-fill         relleno de la pestaña (blanco al 15 %); con alerta warning/critical
  *                            pasa a ser el color del estado a --tab-frame-alert-fill-opacity
  *   --tab-frame-text/-hover  color del título de la pestaña en reposo y con el widget en hover
- *                            (por defecto el mismo apagado -> blanco del título del marco estándar)
+ *                            (por defecto blanco al 70 % -> blanco al 100 %)
  *   --tab-frame-pad-*        relleno horizontal de la pestaña (el inicio deja el punto lo más a la izquierda)
  *   --tab-frame-gap          separación entre el punto de modo de dato y el título
  *   --tab-frame-glow-*       brillo de alerta: desenfoque (reposo/hover) y expansión, iguales al
  *                            box-shadow de `.widget-state-warning/-critical`
- *   --tab-frame-icon-shift-* desplazamiento del ícono del header hacia la esquina recortada
+ *   --tab-frame-icon-*       ícono del header: distancia fija al borde derecho, separación preferida bajo la
+ *                            línea superior del cuerpo, holgura respecto de la diagonal, tope superior y
+ *                            separación entre el final de la pestaña y el ícono (ver `utils/tabFrameIcon.ts`)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --tab-frame-height: 25px;
-  --tab-frame-tab-cut: var(--tab-frame-height);
-  --tab-frame-body-cut: 50px;
-  --tab-frame-fill: color-mix(in srgb, #fff 20%, transparent);
+  --tab-frame-tab-cut: 19px;
+  --tab-frame-body-cut: 0px;
+  --tab-frame-fill: color-mix(in srgb, #fff 15%, transparent);
   --tab-frame-alert-fill-opacity: 40%;
-  --tab-frame-text: var(--color-industrial-muted);
+  --tab-frame-text: color-mix(in srgb, #fff 70%, transparent);
   --tab-frame-text-hover: #fff;
   --tab-frame-pad-start: 0.625rem;
   --tab-frame-pad-end: 0.3rem;
@@ -469,8 +471,11 @@ h1, h2, h3, h4, h5, h6 {
   --tab-frame-glow-blur: 7px;
   --tab-frame-glow-blur-hover: 9px;
   --tab-frame-glow-spread: 2px;
-  --tab-frame-icon-shift-x: 1.25rem;
-  --tab-frame-icon-shift-y: 0.5rem;
+  --tab-frame-icon-right: 7px;
+  --tab-frame-icon-gap: 4px;
+  --tab-frame-icon-clearance: 3px;
+  --tab-frame-icon-min-top: 1px;
+  --tab-frame-icon-tab-gap: 8px;
 }
 
 /* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
@@ -1894,14 +1899,24 @@ h1, h2, h3, h4, h5, h6 {
     align-items: center;
     gap: var(--tab-frame-gap);
     height: var(--tab-frame-height);
-    max-width: calc(100% - var(--tab-frame-body-cut));
+    max-width: calc(100% - var(--tab-frame-tab-reserve, var(--tab-frame-body-cut)));
     padding-left: var(--tab-frame-pad-start);
     padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));
     color: var(--tab-frame-text);
   }
 
-  /* El ícono del header sigue en su fila (nada se mueve) y se traslada a la esquina recortada. */
-  .hmi-tab-frame-icon {
-    transform: translate(var(--tab-frame-icon-shift-x), var(--tab-frame-icon-shift-y));
+  /* El ícono del header se dibuja en este anfitrión del envoltorio (el header conserva un hueco
+   * invisible del mismo tamaño, así nada se mueve): distancia fija al borde derecho y `top` que
+   * `WidgetFrame` calcula con la geometría medida (`utils/tabFrameIcon.ts`). */
+  .hmi-tab-frame-icon-host {
+    position: absolute;
+    z-index: 2;
+    top: var(--tab-frame-icon-top, var(--tab-frame-icon-min-top));
+    right: var(--tab-frame-icon-right);
+  }
+
+  /* Con ícono, la pestaña (y su título truncado) se detiene antes de él cuando ocupa la franja. */
+  .hmi-tab-frame:has(> .hmi-tab-frame-icon-host > *) {
+    --tab-frame-tab-reserve: var(--tab-frame-icon-reserve, var(--tab-frame-body-cut));
   }
 }

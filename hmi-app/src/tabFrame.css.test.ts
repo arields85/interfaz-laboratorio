@@ -22,10 +22,10 @@ describe('index.css tab frame shape', () => {
         const root = indexCss.match(/:root\s*{([^}]*--tab-frame-height[^}]*)}/s)?.[1] ?? '';
 
         expect(root).toContain('--tab-frame-height: 25px;');
-        expect(root).toContain('--tab-frame-tab-cut: var(--tab-frame-height);');
-        expect(root).toContain('--tab-frame-body-cut: 50px;');
-        expect(root).toContain('--tab-frame-fill: color-mix(in srgb, #fff 20%, transparent);');
-        expect(root).toContain('--tab-frame-text: var(--color-industrial-muted);');
+        expect(root).toContain('--tab-frame-tab-cut: 19px;');
+        expect(root).toContain('--tab-frame-body-cut: 0px;');
+        expect(root).toContain('--tab-frame-fill: color-mix(in srgb, #fff 15%, transparent);');
+        expect(root).toContain('--tab-frame-text: color-mix(in srgb, #fff 70%, transparent);');
         expect(root).toContain('--tab-frame-text-hover: #fff;');
         expect(root).toContain('--tab-frame-pad-start: 0.625rem;');
         expect(root).toContain('--tab-frame-gap: 0.375rem;');
@@ -34,8 +34,12 @@ describe('index.css tab frame shape', () => {
         expect(root).toContain('--tab-frame-glow-blur-hover: 9px;');
         expect(root).toContain('--tab-frame-glow-spread: 2px;');
         expect(root).toContain('--tab-frame-pad-end:');
-        expect(root).toContain('--tab-frame-icon-shift-x:');
-        expect(root).toContain('--tab-frame-icon-shift-y:');
+        expect(root).toContain('--tab-frame-icon-right: 7px;');
+        expect(root).toContain('--tab-frame-icon-gap: 4px;');
+        expect(root).toContain('--tab-frame-icon-clearance: 3px;');
+        expect(root).toContain('--tab-frame-icon-min-top: 1px;');
+        expect(root).toContain('--tab-frame-icon-tab-gap: 8px;');
+        expect(root).not.toContain('--tab-frame-icon-shift');
     });
 
     it('keeps the base .glass-panel rule untouched by the tab shape (opt-in classes only)', () => {
@@ -145,7 +149,7 @@ describe('index.css tab frame shape', () => {
         expect(body).toContain('top: 0;');
         expect(body).toContain('left: 0;');
         expect(body).toContain('height: var(--tab-frame-height);');
-        expect(body).toContain('max-width: calc(100% - var(--tab-frame-body-cut));');
+        expect(body).toContain('max-width: calc(100% - var(--tab-frame-tab-reserve, var(--tab-frame-body-cut)));');
         expect(body).toContain('gap: var(--tab-frame-gap);');
         expect(body).toContain('padding-left: var(--tab-frame-pad-start);');
         expect(body).toContain('padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));');
@@ -154,10 +158,19 @@ describe('index.css tab frame shape', () => {
         expect(body).not.toContain('clip-path');
     });
 
-    it('moves the header icon into the cut-off corner with the shift tokens', () => {
-        const body = ruleBody('\\.hmi-tab-frame-icon');
+    it('places the header icon in its own host: fixed right distance, top from the measured placement', () => {
+        const body = ruleBody('\\.hmi-tab-frame-icon-host');
 
-        expect(body).toContain('transform: translate(var(--tab-frame-icon-shift-x), var(--tab-frame-icon-shift-y));');
+        expect(body).toContain('position: absolute;');
+        expect(body).toContain('top: var(--tab-frame-icon-top, var(--tab-frame-icon-min-top));');
+        expect(body).toContain('right: var(--tab-frame-icon-right);');
+        expect(indexCss).not.toContain('--tab-frame-icon-shift');
+    });
+
+    it('makes the tab stop before the icon only when the frame holds an icon', () => {
+        const body = ruleBody('\\.hmi-tab-frame:has\\(> \\.hmi-tab-frame-icon-host > \\*\\)');
+
+        expect(body).toContain('--tab-frame-tab-reserve: var(--tab-frame-icon-reserve, var(--tab-frame-body-cut));');
     });
 
     it('does not hardcode colors in the tab rules other than the fill token definition', () => {

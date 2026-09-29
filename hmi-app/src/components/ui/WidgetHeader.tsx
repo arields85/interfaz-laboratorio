@@ -5,6 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import AnalyticsDataModeDot from './AnalyticsDataModeDot';
 import { TabFrameContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
+import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 
 // =============================================================================
 // WidgetHeader
@@ -161,7 +162,7 @@ export default function WidgetHeader({
     ) : null;
     const iconNode = Icon ? (
         <Icon
-            size={24}
+            size={TAB_FRAME_ICON_SIZE_PX}
             strokeWidth={2}
             className={centered
                 ? 'shrink-0 opacity-100'
@@ -221,12 +222,23 @@ export default function WidgetHeader({
                             <span aria-hidden="true" className="invisible min-w-0 flex-1 truncate uppercase">{'\u00A0'}</span>
                         </div>
 
+                        {/* El ícono se dibuja en el anfitrión del marco (`WidgetFrame`); aquí queda un hueco
+                            invisible del mismo tamaño para que la fila conserve su alto y su ancho. */}
+                        {iconNode && tabFrame.iconHost && createPortal(
+                            <span data-tab-frame-slot="icon" className="hmi-tab-frame-icon flex items-center">
+                                {iconNode}
+                            </span>,
+                            tabFrame.iconHost,
+                        )}
                         {(iconNode || trailing) && (
                             <div className="flex items-center gap-2 shrink-0 leading-none">
                                 {iconNode && (
-                                    <span data-tab-frame-slot="icon" className="hmi-tab-frame-icon flex items-center">
-                                        {iconNode}
-                                    </span>
+                                    <span
+                                        data-tab-frame-slot="icon-placeholder"
+                                        aria-hidden="true"
+                                        className="invisible shrink-0"
+                                        style={{ width: TAB_FRAME_ICON_SIZE_PX, height: TAB_FRAME_ICON_SIZE_PX }}
+                                    />
                                 )}
                                 {trailing}
                             </div>

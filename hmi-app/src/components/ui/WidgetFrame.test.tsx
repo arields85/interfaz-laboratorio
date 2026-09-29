@@ -390,4 +390,95 @@ describe('WidgetFrame', () => {
             expect(document.querySelector('.hmi-tab-frame')).not.toHaveAttribute('data-alert-state');
         });
     });
+
+    describe('header icon placement (tab shape)', () => {
+        const BASE_TOKENS: Record<string, string> = {
+            '--tab-frame-height': '25px',
+            '--tab-frame-tab-cut': '19px',
+            '--tab-frame-body-cut': '0px',
+            '--tab-frame-glow-spread': '2px',
+            '--tab-frame-icon-right': '7px',
+            '--tab-frame-icon-gap': '4px',
+            '--tab-frame-icon-clearance': '3px',
+            '--tab-frame-icon-min-top': '1px',
+            '--tab-frame-icon-tab-gap': '8px',
+        };
+
+        function mockTokens(overrides: Record<string, string> = {}) {
+            const tokens = { ...BASE_TOKENS, ...overrides };
+            vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+            vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
+            vi.spyOn(window, 'getComputedStyle').mockImplementation(() => ({
+                getPropertyValue: (name: string) => tokens[name] ?? '',
+                borderTopLeftRadius: '5px',
+                fontSize: '16px',
+            }) as unknown as CSSStyleDeclaration);
+        }
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it('draws the icon in a host of the shell (its border box) and keeps an invisible placeholder in the header row', () => {
+            previewFrameShape('tab');
+            mockTokens();
+
+            const { container } = renderFramed();
+
+            const shell = container.firstElementChild as HTMLElement;
+            const host = within(shell).getByTestId('tab-frame-icon-host');
+            expect(host).toHaveClass('hmi-tab-frame-icon-host');
+            expect(host.parentElement).toBe(shell);
+            expect(within(host).getByTestId('frame-icon')).toBeInTheDocument();
+
+            const subtitle = screen.getByText('PRODUCIENDO');
+            const rowOne = (subtitle.parentElement as HTMLElement).firstElementChild as HTMLElement;
+            const placeholder = rowOne.querySelector('[data-tab-frame-slot="icon-placeholder"]') as HTMLElement;
+            expect(placeholder).not.toBeNull();
+            expect(placeholder).toHaveClass('invisible');
+            expect(placeholder).toHaveAttribute('aria-hidden', 'true');
+            expect(within(rowOne).queryByTestId('frame-icon')).toBeNull();
+        });
+
+        it('with no body chamfer the icon sits in the tab strip at the top edge and the tab reserves its width', () => {
+            previewFrameShape('tab');
+            mockTokens();
+
+            const { container } = renderFramed();
+
+            const shell = container.firstElementChild as HTMLElement;
+            expect(shell.style.getPropertyValue('--tab-frame-icon-top')).toBe('1px');
+            // right 7 + icon 24 + gap 8
+            expect(shell.style.getPropertyValue('--tab-frame-icon-reserve')).toBe('39px');
+        });
+
+        it('with a large body chamfer the icon sits just below the body top line and the tab only clears the chamfer', () => {
+            previewFrameShape('tab');
+            mockTokens({ '--tab-frame-body-cut': '100px' });
+
+            const { container } = renderFramed();
+
+            const shell = container.firstElementChild as HTMLElement;
+            expect(shell.style.getPropertyValue('--tab-frame-icon-top')).toBe('29px');
+            expect(shell.style.getPropertyValue('--tab-frame-icon-reserve')).toBe('100px');
+        });
+
+        it('with a small chamfer the icon moves up just enough to stay inside the cut triangle', () => {
+            previewFrameShape('tab');
+            mockTokens({ '--tab-frame-body-cut': '50px' });
+
+            const { container } = renderFramed();
+
+            expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-icon-top')).toBe('17px');
+        });
+
+        it('publishes no icon placement in the standard shape', () => {
+            mockTokens();
+
+            const { container } = renderFramed();
+
+            expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-icon-top')).toBe('');
+            expect(screen.queryByTestId('tab-frame-icon-host')).toBeNull();
+        });
+    });
 });

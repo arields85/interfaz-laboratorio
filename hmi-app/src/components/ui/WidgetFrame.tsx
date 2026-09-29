@@ -1,7 +1,8 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { HTMLAttributes, ReactNode, Ref } from 'react';
+import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from 'react';
 import { useTabFrameActive } from '../../hooks/useTabFrameActive';
 import { useTabFrameGeometry } from '../../hooks/useTabFrameGeometry';
+import { useTabFrameIconPlacement } from '../../hooks/useTabFrameIconPlacement';
 import { TabFrameContext, TabFrameReporterContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
 import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
 
@@ -30,6 +31,12 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFrame
 // path is stroked for the rest border and grown for the alert glow. Until the box and the tab are
 // measured, the CSS polygon of `index.css` is the fallback.
 // =============================================================================
+
+/** Inline style of the tab shell: the radius plus the icon custom properties computed from the tokens. */
+type TabFrameShellStyle = CSSProperties & {
+    '--tab-frame-icon-top'?: string;
+    '--tab-frame-icon-reserve'?: string;
+};
 
 const ALERT_STATE_PATTERN = /(?:^|\s)widget-state-(warning|critical)(?:\s|$)/;
 
@@ -71,12 +78,21 @@ export default function WidgetFrame({
     const tabActive = useTabFrameActive(widgetType, title);
     const shellRef = useRef<HTMLDivElement>(null);
     const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
+    const [iconHost, setIconHost] = useState<HTMLElement | null>(null);
     const [tabWidth, setTabWidth] = useState(0);
     const alertState = resolveAlertState(frameClassName);
-    const tabContext = useMemo(() => ({ titleHost, alertState }), [titleHost, alertState]);
+    const tabContext = useMemo(() => ({ titleHost, iconHost, alertState }), [titleHost, iconHost, alertState]);
     const reportTabWidth = useContext(TabFrameReporterContext);
     const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null);
     const silhouette = geometry ? buildTabFramePath(geometry) : null;
+    const iconPlacement = useTabFrameIconPlacement(shellRef, tabActive);
+    // Icon top and the space the tab leaves free for it (index.css, `.hmi-tab-frame-icon-host`).
+    const shellStyle: TabFrameShellStyle = { borderRadius: 'var(--frame-radius-rest)' };
+
+    if (iconPlacement) {
+        shellStyle['--tab-frame-icon-top'] = `${iconPlacement.top}px`;
+        shellStyle['--tab-frame-icon-reserve'] = `${iconPlacement.reserve}px`;
+    }
 
     // Publish the tab width (it follows the title) for the layers that trace the silhouette. It is
     // published from the very first layout pass: 0 means "tab shape, width not measured yet" so those
@@ -132,7 +148,7 @@ export default function WidgetFrame({
             ref={shellRef}
             data-widget-frame-shape="tab"
             data-alert-state={alertState ?? undefined}
-            style={{ borderRadius: 'var(--frame-radius-rest)' }}
+            style={shellStyle}
             className={['hmi-tab-frame group relative w-full h-full min-h-0', outerClassName].filter(Boolean).join(' ')}
         >
             {alertState && (
@@ -169,6 +185,7 @@ export default function WidgetFrame({
                 <TabFrameContext.Provider value={tabContext}>{children}</TabFrameContext.Provider>
             </Tag>
             <div ref={setTitleHost} data-testid="tab-frame-tab" className="hmi-tab-frame-tab" />
+            <div ref={setIconHost} data-testid="tab-frame-icon-host" className="hmi-tab-frame-icon-host" />
         </div>
     );
 }
