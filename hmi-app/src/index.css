@@ -839,23 +839,6 @@ h1, h2, h3, h4, h5, h6 {
   animation-fill-mode: backwards;
 }
 
-/* Forma Pestaña: el destello se recorta a la silueta pestaña + cuerpo. El ancho de la pestaña lo
- * informa el propio widget (`ViewerEntranceFrameOverlays` lo escribe en --tab-frame-tab-width); el
- * resto sale de los tokens --tab-frame-*. Solo las esquinas inferiores conservan el radio del tema. */
-[data-viewer-entrance='true'] .hmi-viewer-entrance-flash-tab {
-  --tab-frame-tab-base: min(var(--tab-frame-tab-width), calc(100% - var(--tab-frame-body-cut)));
-  border-radius: 0 0 var(--frame-radius-rest) var(--frame-radius-rest);
-  clip-path: polygon(
-    0 0,
-    calc(var(--tab-frame-tab-base) - var(--tab-frame-tab-cut)) 0,
-    var(--tab-frame-tab-base) var(--tab-frame-height),
-    calc(100% - var(--tab-frame-body-cut)) var(--tab-frame-height),
-    100% calc(var(--tab-frame-height) + var(--tab-frame-body-cut)),
-    100% 100%,
-    0 100%
-  );
-}
-
 /* Contorno que se traza (V7): <rect pathLength="1"> con dash normalizado, así el mismo
  * recorrido 1 -> 0 sirve para cualquier tamaño. rx/ry siguen el radio del tema. Al terminar
  * de trazarse se desvanece sobre el borde propio del tema (o desaparece si no tiene). */

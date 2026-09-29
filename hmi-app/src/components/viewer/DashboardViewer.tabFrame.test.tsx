@@ -5,6 +5,7 @@ import { makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 
 type ResizeCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 const resizeCallbacks = new Map<Element, Set<ResizeCallback>>();
+let pendingWidth = false;
 
 class MockResizeObserver implements ResizeObserver {
     public constructor(private readonly callback: ResizeCallback) {}
@@ -34,7 +35,7 @@ vi.mock('./WidgetPresentationBoundary', async () => {
             if (props.widget.id !== 'a') {
                 return undefined;
             }
-            reportTabWidth?.(180);
+            reportTabWidth?.(pendingWidth ? 0 : 180);
 
             return () => reportTabWidth?.(null);
         }, [props.widget.id, reportTabWidth]);
@@ -61,6 +62,7 @@ function measure(container: HTMLElement) {
 describe('DashboardViewer frame shape scope', () => {
     beforeEach(() => {
         resizeCallbacks.clear();
+        pendingWidth = false;
         vi.stubGlobal('ResizeObserver', MockResizeObserver);
         vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
             callback(0);
@@ -86,7 +88,7 @@ describe('DashboardViewer frame shape scope', () => {
         expect(screen.getByTestId('widget-renderer-b')).toHaveAttribute('data-in-grid', 'true');
     });
 
-    it('gives the entrance overlays of a tab-frame widget its tab width, and only that widget', () => {
+    it('draws no rectangle for a tab-frame widget (its overlays wait for the silhouette), only for the standard ones', () => {
         const widgets = [makeWidget({ id: 'a' }), makeWidget({ id: 'b' })];
         const layout = [makeLayout({ widgetId: 'a', x: 0, y: 0 }), makeLayout({ widgetId: 'b', x: 4, y: 0 })];
 
@@ -102,11 +104,35 @@ describe('DashboardViewer frame shape scope', () => {
         );
         measure(container);
 
-        const flashA = screen.getByTestId('dashboard-viewer-entrance-flash-a');
-        expect(flashA).toHaveClass('hmi-viewer-entrance-flash-tab');
-        expect(flashA.style.getPropertyValue('--tab-frame-tab-width')).toBe('180px');
+        // Widget "a" reported a tab width: jsdom has no layout, so the silhouette is not measurable and
+        // its overlays draw nothing (a rect would be the wrong shape).
+        expect(screen.queryByTestId('dashboard-viewer-entrance-flash-a')).toBeNull();
+        expect(screen.getByTestId('dashboard-viewer-entrance-outline-a').querySelector('rect')).toBeNull();
+        expect(screen.getByTestId('dashboard-viewer-entrance-outline-a').querySelector('path')).toBeNull();
 
-        const flashB = screen.getByTestId('dashboard-viewer-entrance-flash-b');
-        expect(flashB).not.toHaveClass('hmi-viewer-entrance-flash-tab');
+        // Widget "b" is a standard frame: flash and traced rect as always.
+        expect(screen.getByTestId('dashboard-viewer-entrance-flash-b')).toBeInTheDocument();
+        expect(screen.getByTestId('dashboard-viewer-entrance-outline-b').querySelector('rect')).not.toBeNull();
+    });
+
+    it('treats a tab that reported width 0 (pending) as tab shape: no rectangle in the meantime', () => {
+        const widgets = [makeWidget({ id: 'a' })];
+        const layout = [makeLayout({ widgetId: 'a', x: 0, y: 0 })];
+        pendingWidth = true;
+
+        const { container } = render(
+            <DashboardViewer
+                widgets={widgets}
+                layout={layout}
+                equipmentMap={new Map()}
+                cols={24}
+                rows={12}
+                entranceKey="dash:view"
+            />,
+        );
+        measure(container);
+
+        expect(screen.getByTestId('dashboard-viewer-entrance-outline-a').querySelector('rect')).toBeNull();
+        expect(screen.queryByTestId('dashboard-viewer-entrance-flash-a')).toBeNull();
     });
 });

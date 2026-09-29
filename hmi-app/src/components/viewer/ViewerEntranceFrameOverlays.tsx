@@ -15,12 +15,12 @@ import { buildTabFramePath } from '../../utils/tabFramePath';
 // (timings: `--viewer-entrance-*` tokens); this component only supplies the
 // elements, and is only rendered by the viewer.
 //
-// Tab frame shape ("Forma del marco" = Pestaña): when the widget reports the width of its tab
-// (`tabWidth`), the flash is clipped to the tab + chamfered body silhouette (CSS polygon over the
-// `--tab-frame-*` tokens, the tab width in a custom property) and the outline traces a `<path>` of
-// that silhouette instead of the rect. The path takes the SAME animated stroke rule as the rect
-// (`hmi-viewer-entrance-outline-rect`), so the timings, the fade and the reduced-motion handling
-// need no second copy. The standard shape is unchanged.
+// Tab frame shape ("Forma del marco" = Pestaña): `tabWidth !== null` means the widget's frame IS the
+// tab shape (0 = its tab is not measured yet). Both layers then draw the SAME unified rounded path
+// as the frame (`buildTabFramePath`): the flash is clipped to it (`clip-path: path()`) and the
+// outline traces it (a `<path>` sharing the rect's animated stroke rule, so timings, fade and
+// reduced motion need no second copy). Until the tab width and the box are measured the layers draw
+// NOTHING -- a tab-shape widget never shows the rectangle. The standard shape is unchanged.
 // =============================================================================
 
 interface ViewerEntranceFrameOverlaysProps {
@@ -31,23 +31,23 @@ interface ViewerEntranceFrameOverlaysProps {
     tabWidth?: number | null;
 }
 
-type FlashStyle = CSSProperties & { '--tab-frame-tab-width'?: string };
-
 export default function ViewerEntranceFrameOverlays({ widgetId, inset, tabWidth = null }: ViewerEntranceFrameOverlaysProps) {
     const outlineRef = useRef<HTMLDivElement>(null);
     const tabGeometry = useTabFrameGeometry(outlineRef, tabWidth);
-    const flashStyle: FlashStyle = tabWidth === null
-        ? { inset }
-        : { inset, '--tab-frame-tab-width': `${tabWidth}px` };
+    const isTabShape = tabWidth !== null;
+    const silhouette = tabGeometry ? buildTabFramePath(tabGeometry) : null;
+    const flashStyle: CSSProperties = silhouette ? { inset, clipPath: `path('${silhouette}')` } : { inset };
 
     return (
         <>
-            <div
-                data-testid={`dashboard-viewer-entrance-flash-${widgetId}`}
-                aria-hidden="true"
-                className={tabWidth === null ? 'hmi-viewer-entrance-flash' : 'hmi-viewer-entrance-flash hmi-viewer-entrance-flash-tab'}
-                style={flashStyle}
-            />
+            {(!isTabShape || silhouette) && (
+                <div
+                    data-testid={`dashboard-viewer-entrance-flash-${widgetId}`}
+                    aria-hidden="true"
+                    className="hmi-viewer-entrance-flash"
+                    style={flashStyle}
+                />
+            )}
             {/* A replaced element (svg) does not stretch between insets, so a div carries the inset.
                 In the tab shape the div also carries the frame radius the geometry hook reads. */}
             <div
@@ -55,19 +55,19 @@ export default function ViewerEntranceFrameOverlays({ widgetId, inset, tabWidth 
                 data-testid={`dashboard-viewer-entrance-outline-${widgetId}`}
                 aria-hidden="true"
                 className="hmi-viewer-entrance-outline"
-                style={tabWidth === null ? { inset } : { inset, borderRadius: 'var(--frame-radius-rest)' }}
+                style={isTabShape ? { inset, borderRadius: 'var(--frame-radius-rest)' } : { inset }}
             >
                 <svg className="hmi-viewer-entrance-outline-svg">
                     {/* pathLength=1 normalizes the dash keyframes: the same 1 -> 0 offset traces any size. */}
-                    {tabGeometry ? (
+                    {silhouette ? (
                         <path
                             className="hmi-viewer-entrance-outline-rect hmi-viewer-entrance-outline-path"
-                            d={buildTabFramePath(tabGeometry)}
+                            d={silhouette}
                             pathLength="1"
                         />
-                    ) : (
+                    ) : !isTabShape ? (
                         <rect className="hmi-viewer-entrance-outline-rect" x="0" y="0" width="100%" height="100%" pathLength="1" />
-                    )}
+                    ) : null}
                 </svg>
             </div>
         </>

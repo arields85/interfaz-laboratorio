@@ -40,7 +40,7 @@ describe('ViewerEntranceFrameOverlays', () => {
             const flash = screen.getByTestId('dashboard-viewer-entrance-flash-w');
             expect(flash).toHaveClass('hmi-viewer-entrance-flash');
             expect(flash).not.toHaveClass('hmi-viewer-entrance-flash-tab');
-            expect(flash.style.getPropertyValue('--tab-frame-tab-width')).toBe('');
+            expect(flash.style.clipPath).toBe('');
 
             const outline = screen.getByTestId('dashboard-viewer-entrance-outline-w');
             const rect = outline.querySelector('rect');
@@ -51,16 +51,17 @@ describe('ViewerEntranceFrameOverlays', () => {
     });
 
     describe('tab shape', () => {
-        it('clips the flash to the silhouette using the reported tab width', () => {
+        it('clips the flash to the same rounded path as the silhouette (inline clip-path, no polygon class)', () => {
             render(<ViewerEntranceFrameOverlays widgetId="w" inset="var(--widget-spacing)" tabWidth={180} />);
 
             const flash = screen.getByTestId('dashboard-viewer-entrance-flash-w');
-            expect(flash).toHaveClass('hmi-viewer-entrance-flash', 'hmi-viewer-entrance-flash-tab');
-            expect(flash.style.getPropertyValue('--tab-frame-tab-width')).toBe('180px');
+            expect(flash).toHaveClass('hmi-viewer-entrance-flash');
+            expect(flash).not.toHaveClass('hmi-viewer-entrance-flash-tab');
+            expect(flash.style.clipPath).toBe(`path('${buildTabFramePath(GEOMETRY)}')`);
             expect(flash.style.inset).toBe('var(--widget-spacing)');
         });
 
-        it('traces the outline along a path of the silhouette, normalized with pathLength=1', () => {
+        it('traces the outline along the rounded path of the silhouette, normalized with pathLength=1', () => {
             render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={180} />);
 
             const outline = screen.getByTestId('dashboard-viewer-entrance-outline-w');
@@ -75,15 +76,36 @@ describe('ViewerEntranceFrameOverlays', () => {
             expect(outline.style.inset).toBe('0px');
         });
 
-        it('keeps the traced rect until the box has been measured', () => {
+        it('never draws a rectangle while the tab width is pending (frame is the tab shape, width not measured yet)', () => {
+            render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={0} />);
+
+            const outline = screen.getByTestId('dashboard-viewer-entrance-outline-w');
+            expect(outline.querySelector('rect')).toBeNull();
+            expect(outline.querySelector('path')).toBeNull();
+            expect(screen.queryByTestId('dashboard-viewer-entrance-flash-w')).toBeNull();
+        });
+
+        it('never draws a rectangle while the box has not been measured either', () => {
             vi.restoreAllMocks();
             mockLayout({ width: 0, height: 0 });
 
             render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={180} />);
 
             const outline = screen.getByTestId('dashboard-viewer-entrance-outline-w');
-            expect(outline.querySelector('rect')).not.toBeNull();
+            expect(outline.querySelector('rect')).toBeNull();
             expect(outline.querySelector('path')).toBeNull();
+            expect(screen.queryByTestId('dashboard-viewer-entrance-flash-w')).toBeNull();
+        });
+
+        it('swaps from nothing to the rounded path (never a rect) once the width is reported', () => {
+            const { rerender } = render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={0} />);
+            const outline = () => screen.getByTestId('dashboard-viewer-entrance-outline-w');
+            expect(outline().querySelector('rect')).toBeNull();
+
+            rerender(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={180} />);
+
+            expect(outline().querySelector('rect')).toBeNull();
+            expect(outline().querySelector('path')?.getAttribute('d')).toBe(buildTabFramePath(GEOMETRY));
         });
     });
 });

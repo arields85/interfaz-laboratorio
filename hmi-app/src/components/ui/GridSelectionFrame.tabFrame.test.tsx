@@ -75,14 +75,21 @@ describe('GridSelectionFrame in the tab frame shape', () => {
         expect(hover.getAttribute('stroke-opacity')).toBe('0.18');
     });
 
-    it('falls back to the rounded rects until the box has been measured', () => {
+    it('draws no rectangle for a tab-shape widget until its silhouette is measured (box or tab width pending)', () => {
         vi.restoreAllMocks();
         mockLayout({ width: 0, height: 0 });
 
-        const { container } = render(<GridSelectionFrame isSelected tabWidth={180} />);
+        const unmeasuredBox = render(<GridSelectionFrame isSelected tabWidth={180} />);
+        expect(unmeasuredBox.container.querySelectorAll('rect')).toHaveLength(0);
+        expect(unmeasuredBox.container.querySelector('path')).toBeNull();
+        unmeasuredBox.unmount();
 
-        expect(container.querySelectorAll('rect')).toHaveLength(2);
-        expect(container.querySelector('path')).toBeNull();
+        vi.restoreAllMocks();
+        mockLayout({ width: 300, height: 200 });
+
+        const pendingTab = render(<GridSelectionFrame isSelected tabWidth={0} />);
+        expect(pendingTab.container.querySelectorAll('rect')).toHaveLength(0);
+        expect(pendingTab.container.querySelector('path')).toBeNull();
     });
 
     it('resolves the bottom-corner radius from the frame radius of the widget (no radius = square corners)', () => {

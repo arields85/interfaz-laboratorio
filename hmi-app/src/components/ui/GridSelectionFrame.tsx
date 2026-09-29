@@ -95,7 +95,8 @@ export default function GridSelectionFrame({
                     overflow: 'visible',
                 }}
             >
-                {tabGeometry ? (
+                {tabWidth !== null ? (
+                    tabGeometry && (
                     <>
                         {/* Pestaña: mismos dos anillos (hover y foco) sobre la silueta pestaña + cuerpo. */}
                         <path
@@ -127,6 +128,7 @@ export default function GridSelectionFrame({
                             }}
                         />
                     </>
+                    )
                 ) : (
                     <>
                         {/* hover-rect: borde sutil visible durante drag-over (isHighlighted).
