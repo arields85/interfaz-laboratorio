@@ -17,9 +17,9 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFrame
 //    element the renderers used to build by hand.
 //  - Tab ("Forma del marco" = Pestaña): a shell of the same outer size holding, as siblings,
 //      1. the PAINTED surface (`frameClassName` + `hmi-tab-frame-surface`): the same glass classes
-//         clipped to the chamfered body silhouette, plus the diagonal-border overlay;
-//      2. the CONTENT element (`className`, padding/flex/refs): unclipped, so the header icon can
-//         sit in the cut-off corner and every child keeps the position it has in the standard frame;
+//         clipped to the tab + body silhouette (the body chamfer may be 0), plus the border stroke;
+//      2. the CONTENT element (`className`, padding/flex/refs): unclipped; the header icon is drawn in an icon host of the shell, and
+//         every child keeps the position it has in the standard frame;
 //      3. the TAB, which receives the header title through `TabFrameContext` (WidgetHeader portals
 //         it there).
 //    Fill, blur and border colors keep coming from the active preset's `--frame-*` tokens because

@@ -105,7 +105,7 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
     the 14px box-shadow blur), state color at 20 % (28 % and blur 9px on hover), and an inline even-odd clip-path
     punches the silhouette out so only the outside survives, like a box-shadow. Approximation: the hover spread
     growth (2px -> 3px) is done with more blur/opacity, not a new path.
-- [ ] **F6** — Port the user's style-lab choice (2026-09-29, pasted "Copiar elección"; lab
+- [x] **F6** — Port the user's style-lab choice (2026-09-29, pasted "Copiar elección"; lab
   https://claude.ai/artifact/F3aAjXDvvsCMFKYZxoT6A8, source `tools/style-lab/style-lab.html`). User decision:
   update the Instrumento preset (not a new preset).
   - Instrumento widget frame: radius 5 px rest AND hover (was 3), rest border 12 % (was 8), rest hidden accent
@@ -121,6 +121,28 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
     With body cut 0 it sits in the tab strip at the right. The tab (and its truncating title) must then stop
     before the icon instead of running under it.
   - The silhouette/path generator must handle body cut 0 (degenerate vertices) everywhere it is used.
+  - Outcome per item (commits `05df958`, `c8fc113`, `271317c`, `dd3e8eb`, `1a6698d`):
+    - [x] Instrumento preset updated in place (radius 5 rest and hover, rest border 12 %, rest hidden accent 25 px;
+      nothing else changed); tests and `docs/DESIGN_SYSTEM.md` follow.
+    - [x] Tab tokens: tab cut 19px, body cut 0px, fill white 15 %, text white 70 %, hover text white 100 %; height,
+      pad-start, alert 40 %/100 % and glow tokens unchanged; the title keeps `transition-colors`.
+    - [x] Body cut 0: `buildTabFramePath` already merged the two coincident vertices (its dedupe of zero-length edges),
+      so no code change was needed; characterization tests pin it (straight body top, 6 arcs with 1 concave, no NaN,
+      inset/outset, tab spanning the width, glow clip). Every consumer derives from that generator, so the surface
+      clip, border, glow, builder rings/ghosts and entrance flash/outline need no special case; the CSS polygon
+      fallback stays valid (`calc(100% - 0px)`).
+    - [x] Icon rule: pure `resolveTabFrameIconPlacement` (`utils/tabFrameIcon.ts`) = the lab's `placeIcon()`
+      (`top = max(minTop, min(tabHeight + gap, tabHeight + bodyCut - right - 2*size - clearance))`, fixed right
+      distance) plus the tab reserve. `useTabFrameIconPlacement` reads the tokens (no size dependency),
+      `WidgetFrame` publishes `--tab-frame-icon-top` / `--tab-frame-icon-reserve` on the shell and renders an icon host;
+      `WidgetHeader` portals the icon into the host and keeps an invisible same-size placeholder in the header row so
+      nothing moves. CSS: `.hmi-tab-frame-icon-host` (absolute, `top`/`right` from tokens) and
+      `.hmi-tab-frame:has(> .hmi-tab-frame-icon-host > *)` sets `--tab-frame-tab-reserve` so the tab `max-width`
+      (`calc(100% - var(--tab-frame-tab-reserve, var(--tab-frame-body-cut)))`) stops before the icon (icon width +
+      right distance + tab gap, or the chamfer if larger) only when the frame has an icon. The old
+      `--tab-frame-icon-shift-x/y` tokens are removed.
+    - [x] Estándar untouched (no standard-frame code path changed; full suite green); charts/excluded widgets stay
+      standard; builder and entrance use the same generator and keep working.
 
 ## Acceptance criteria
 
@@ -214,7 +236,35 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     (border starts at the tab base by design), the `blur` glow intensity vs the box-shadow of the standard alert
     card, the 20 % tab legibility with the muted title, the dot on the alert tab, and the entrance sequence.
 
-- 2026-09-29 current token list after F5 (`index.css` `:root`): `--tab-frame-height: 25px`, `--tab-frame-tab-cut:
+- 2026-09-29 (F6, delegated writer, strict TDD, Vitest). Route: delegated writer (writer trigger: 2+ non-trivial files).
+  - `05df958` feat(theme): update the Instrumento frame to the style lab choice (10+/10-). RED: `themeStyle.service`
+    2 failing (preset values, persisted-preset radius) before the preset changed; GREEN 38/38. `c8fc113` test(theme):
+    the Tema tab test pinned the old 3 px radius (1+/1-), found by the focused run after the commit.
+  - `271317c` test(theme): silhouette without a body chamfer (41+). No RED possible: the generator already handled
+    bodyCut 0 (characterization tests, 17/17 pass).
+  - `dd3e8eb` feat(theme): add the tab frame icon placement rule (127+). RED: `tabFrameIcon.test.ts` failed on the
+    missing module; GREEN 8/8.
+  - `1a6698d` feat(theme): port the style lab tab tokens and place the header icon by rule (254+/40-, includes the docs).
+    RED: 8 failing (`tabFrame.css.test.ts` 4: tokens, tab max-width, icon host, tab reserve; `WidgetFrame.test.tsx` 4:
+    icon host + placeholder, top/reserve for body cut 0 / 50 / 100); GREEN 56/56.
+  - GGA passed every commit (advice only: `WidgetFrame.tsx` header comment updated; `resolveAlertState` regex on the
+    class name noted, unchanged).
+  - Final commands (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 254 files / 3237 tests
+    passed; `npm run build` ok.
+  - Not verifiable without a browser (needs the live look): the icon position in the tab strip at the right with body
+    cut 0 (vs the lab), the tab/title truncation against the icon with a long title, the 5 px rounding at the tab
+    junction and bottom corners, the 15 % fill and 70 % text legibility, the 12 % rest border on the body only.
+
+- 2026-09-29 token list after F6 (`index.css` `:root`): `--tab-frame-height: 25px`, `--tab-frame-tab-cut: 19px`,
+  `--tab-frame-body-cut: 0px`, `--tab-frame-fill: color-mix(in srgb, #fff 15%, transparent)`,
+  `--tab-frame-alert-fill-opacity: 40%`, `--tab-frame-text: color-mix(in srgb, #fff 70%, transparent)`,
+  `--tab-frame-text-hover: #fff`, `--tab-frame-pad-start: 0.625rem`, `--tab-frame-pad-end: 0.3rem`,
+  `--tab-frame-gap: 0.375rem`, `--tab-frame-glow-blur: 7px`, `--tab-frame-glow-blur-hover: 9px`,
+  `--tab-frame-glow-spread: 2px`, `--tab-frame-icon-right: 7px`, `--tab-frame-icon-gap: 4px`,
+  `--tab-frame-icon-clearance: 3px`, `--tab-frame-icon-min-top: 1px`, `--tab-frame-icon-tab-gap: 8px`
+  (`--tab-frame-icon-shift-x/y` removed).
+
+- 2026-09-29 token list after F5 (`index.css` `:root`): `--tab-frame-height: 25px`, `--tab-frame-tab-cut:
   var(--tab-frame-height)`, `--tab-frame-body-cut: 50px`, `--tab-frame-fill: color-mix(in srgb, #fff 20%,
   transparent)`, `--tab-frame-alert-fill-opacity: 40%`, `--tab-frame-text: var(--color-industrial-muted)`,
   `--tab-frame-text-hover: #fff`, `--tab-frame-pad-start: 0.625rem`, `--tab-frame-pad-end: 0.3rem`,
@@ -224,6 +274,6 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
 
 ## Next step
 
-Second live look (F4) with the user on the rounded unified silhouette, the tab colors, the alert glow and the
-entrance (tokens above are the tuning knobs). Then the native review in smaller slices (the whole branch exceeds
+Live look (F4) with the user on the F6 result (Instrumento 5 px, body cut 0, icon in the tab strip, tab stopping
+before the icon, tab colors, alert glow, entrance; tokens above are the tuning knobs). Then the native review in smaller slices (the whole branch exceeds
 the reviewer budget): one candidate per work-unit commit, from the F1 boundary `40ad436`.
