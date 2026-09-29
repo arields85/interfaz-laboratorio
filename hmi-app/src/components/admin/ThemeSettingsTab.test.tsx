@@ -77,7 +77,7 @@ describe('ThemeSettingsTab', () => {
 
         await user.click(screen.getByRole('radio', { name: /Instrumento/ }));
 
-        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('3px');
+        expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('5px');
         expect(document.documentElement.style.getPropertyValue('--tag-tint')).toBe('14%');
         expect(screen.getByRole('radio', { name: /Instrumento/ })).toHaveAttribute('aria-checked', 'true');
     });
