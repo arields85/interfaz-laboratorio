@@ -82,9 +82,11 @@ without losing speed.
   configured opacity, no pop. A test asserting that fill mode would still be a cheap guard.
 - [x] **V6** — Frame background flash (user feedback 2026-09-29 after the first live look: "mucho mejor,
   más dinamismo"): on entrance each frame's background flashes/blinks — a brightness overlay above the
-  fill peaks and decays to the theme's rest look; visible in all three presets (Instrumento has 0 % fill).
+  fill peaks and decays to the theme's rest look; visible in all three presets (correction 2026-09-29,
+  verified in `themeStyle.service.ts:174-189`: Instrumento's rest frame has a 5 %→1 % white gradient base,
+  3 px blur and an 8 % border; only its extra fill layer is 0 %).
 - [x] **V7** — Frame outline draw-in: a line traces the frame perimeter (following its corner radius) and
-  then blends into the theme's own border; in Instrumento (0 % border) it traces and fades out.
+  then blends into the theme's own border (all three presets have a rest border; Instrumento's is 8 %).
 - [x] **V8** — Numbers count up from zero to their value on entrance (main values of `kpi`, `metric-card`,
   `machine-activity`, keeping each widget's decimals and unit); viewer-only, entry-only (refreshes keep
   today's behavior), reduced motion shows the value directly. Reverses the earlier "out of scope" note.
@@ -154,7 +156,7 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
   Outline = a `div` (carries the inset, because a replaced `svg` does not stretch between insets) holding
   an `svg` with `<rect pathLength="1" width/height 100 %>`; `rx/ry` come from CSS
   (`rx: var(--frame-radius-rest)`), `stroke-dashoffset` 1 -> 0 then an opacity fade over the theme's own
-  border (Instrumento traces and disappears). Neither animates the `--frame-*` tokens. `text-title`
+  border. Neither animates the `--frame-*` tokens. `text-title`
   (frameless) gets no overlays. Reduced motion: both `animation: none` (base opacity 0 = invisible).
   RED: `DashboardViewer.entrance.test.tsx` 6 failing (overlays missing, tokens/keyframes/rules/reduced
   motion absent); GREEN: 19/19 at that point. Guard test: every selector mentioning `.hmi-viewer-` (comments and
