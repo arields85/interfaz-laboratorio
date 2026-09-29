@@ -1,9 +1,8 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import {
     readViewerEntranceCountUpTiming,
     resolveCountUpStartOffsetMs,
     resolveCubicBezierProgress,
-    type ViewerEntranceCountUpTiming,
 } from '../utils/viewerEntrance';
 
 // =============================================================================
@@ -32,48 +31,57 @@ function prefersReducedMotion(): boolean {
  * - Outside the viewer, with reduced motion or without timing tokens: always 1.
  * - `hasValue` false: stays 0 until the first value arrives.
  * - The value arrives inside the entrance window: counts from the later of the item start and the
- *   arrival; after the window it is shown directly (1).
+ *   arrival; after the window it is shown directly (1), already in the render that first sees the
+ *   value, so no zero frame is ever committed.
+ * - The count has ONE origin: a `hasValue` toggle mid-count resumes on that timeline, never restarts.
  * - Once complete it never restarts.
  */
 export function useViewerEntranceCountUp(hasValue: boolean): number {
     const order = useContext(ViewerEntranceContext);
-    const [progress, setProgress] = useState(() => (
-        order === null || prefersReducedMotion() || readViewerEntranceCountUpTiming() === null ? 1 : 0
+    const [progress, setProgress] = useState(0);
+    const [settled, setSettled] = useState(() => (
+        order === null || prefersReducedMotion() || readViewerEntranceCountUpTiming() === null
     ));
-    const mountedAtRef = useRef(0);
-    const settledRef = useRef(false);
+    const [mountedAt] = useState(() => performance.now());
+    const [countFrom, setCountFrom] = useState<number | null>(null);
+    let isSettled = settled;
+    let origin = countFrom;
+
+    // The first value decides, during render (sanctioned render-phase state adjustment), whether the
+    // count still runs or is already over: an effect would commit one frame of the value scaled by 0.
+    if (!isSettled && origin === null && order !== null && hasValue) {
+        const timing = readViewerEntranceCountUpTiming();
+        const startAt = timing ? mountedAt + resolveCountUpStartOffsetMs(order, timing) : 0;
+        // eslint-disable-next-line react-hooks/purity -- one-shot read of the clock to place the first value on the entrance timeline; the outcome is stored in state.
+        const now = performance.now();
+
+        if (!timing || now >= startAt + timing.durationMs) {
+            isSettled = true;
+            setSettled(true);
+        } else {
+            origin = Math.max(startAt, now);
+            setCountFrom(origin);
+        }
+    }
 
     useEffect(() => {
-        mountedAtRef.current = performance.now();
-    }, []);
-
-    /* eslint-disable react-hooks/set-state-in-effect -- the count-up settles immediately when its value arrives after the entrance window. */
-    useEffect(() => {
-        if (order === null || !hasValue || settledRef.current) {
+        if (isSettled || origin === null || !hasValue) {
             return undefined;
         }
 
-        const timing: ViewerEntranceCountUpTiming | null = prefersReducedMotion()
-            ? null
-            : readViewerEntranceCountUpTiming();
-        const startAt = timing ? mountedAtRef.current + resolveCountUpStartOffsetMs(order, timing) : 0;
-
-        if (!timing || performance.now() >= startAt + timing.durationMs) {
-            settledRef.current = true;
-            setProgress(1);
+        const timing = readViewerEntranceCountUpTiming();
+        if (!timing) {
             return undefined;
         }
 
-        const countFrom = Math.max(startAt, performance.now());
         let frameId: number | null = null;
 
         const tick = () => {
-            const linear = Math.min(Math.max((performance.now() - countFrom) / timing.durationMs, 0), 1);
+            const linear = Math.min(Math.max((performance.now() - origin) / timing.durationMs, 0), 1);
 
             if (linear >= 1) {
-                settledRef.current = true;
                 frameId = null;
-                setProgress(1);
+                setSettled(true);
                 return;
             }
 
@@ -88,8 +96,7 @@ export function useViewerEntranceCountUp(hasValue: boolean): number {
                 cancelAnimationFrame(frameId);
             }
         };
-    }, [hasValue, order]);
-    /* eslint-enable react-hooks/set-state-in-effect */
+    }, [hasValue, isSettled, origin]);
 
-    return progress;
+    return isSettled ? 1 : progress;
 }

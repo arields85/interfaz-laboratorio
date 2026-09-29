@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ENTRANCE_TEST_TOKENS, installEntranceClock, stubReducedMotion } from '../test/entranceClock';
@@ -87,6 +87,51 @@ describe('useViewerEntranceCountUp', () => {
         clock.advance(1500); // window (100 + 1000) is over
         rerender({ hasValue: true });
 
+        expect(result.current).toBe(1);
+        expect(clock.pendingFrames()).toBe(0);
+    });
+
+    it('never commits a zero for a value that arrives after the entrance window', () => {
+        const committed: number[] = [];
+        const { rerender } = renderHook(
+            ({ hasValue }) => {
+                const progress = useViewerEntranceCountUp(hasValue);
+                // Layout effects run in the commit phase: only committed (paintable) progress is recorded.
+                useLayoutEffect(() => {
+                    committed.push(progress);
+                });
+                return progress;
+            },
+            { wrapper: providerFor(0), initialProps: { hasValue: false } },
+        );
+
+        clock.advance(1500); // window (100 + 1000) is over
+        committed.length = 0;
+        rerender({ hasValue: true });
+
+        expect(committed.length).toBeGreaterThan(0);
+        expect(committed.every((progress) => progress === 1)).toBe(true);
+    });
+
+    it('resumes on the original timeline when the value toggles mid-count instead of restarting', () => {
+        const { result, rerender } = renderHook(
+            ({ hasValue }) => useViewerEntranceCountUp(hasValue),
+            { wrapper: providerFor(0), initialProps: { hasValue: true } },
+        );
+
+        clock.advance(600); // count started at 100ms -> 500ms in
+        const midCount = result.current;
+        expect(midCount).toBeGreaterThan(0);
+        expect(midCount).toBeLessThan(1);
+
+        rerender({ hasValue: false });
+        clock.advance(200); // t = 800
+        rerender({ hasValue: true });
+        clock.advance(1); // first frame after the toggle
+
+        expect(result.current).toBeGreaterThanOrEqual(midCount);
+
+        clock.advance(300); // t = 1101 -> past the original end (1100)
         expect(result.current).toBe(1);
         expect(clock.pendingFrames()).toBe(0);
     });
