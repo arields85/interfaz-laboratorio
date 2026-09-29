@@ -144,6 +144,17 @@ function clampNormalizedValue(value: number) {
     return Math.min(Math.max(value, 0), 1);
 }
 
+type SegmentEntranceStyle = CSSProperties & { '--viewer-gauge-segment-fraction': number };
+
+/**
+ * Position of a ring segment along the sweep of the viewer entrance (0 = first, 1 = last).
+ * It only depends on the segment index — never on the value — so a data refresh cannot change
+ * an animation delay (which would replay the entrance). Inert outside the viewer scope.
+ */
+function resolveSegmentEntranceStyle(index: number): SegmentEntranceStyle {
+    return { '--viewer-gauge-segment-fraction': index / (CIRCULAR_SEGMENT_COUNT - 1) };
+}
+
 function clamp(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
 }
@@ -424,7 +435,7 @@ export default function GaugeDisplay({
                     style={{ height: `${barHeight}px` }}
                 >
                     <div
-                        className="absolute top-0 left-0 h-full rounded-full transition-all duration-500 ease-out"
+                        className="absolute top-0 left-0 h-full rounded-full transition-all duration-500 ease-out hmi-viewer-gauge-bar-fill"
                         data-testid="gauge-bar-fill"
                         style={{
                             width: `${normalized * 100}%`,
@@ -521,8 +532,10 @@ export default function GaugeDisplay({
                             strokeDashoffset={segment.strokeDashoffset}
                             strokeLinecap={segmentLinecap}
                             data-testid="gauge-circular-arc-segment"
+                            className="hmi-viewer-gauge-ring-segment"
                             filter={preserveLegacyArcGlowFilter ? `url(#${glowFilterId})` : undefined}
                             style={{
+                                ...resolveSegmentEntranceStyle(index),
                                 opacity: arcOpacity,
                                 transition: `opacity ${animationDuration}ms ease-out`,
                             }}
@@ -536,7 +549,7 @@ export default function GaugeDisplay({
                     pointerEvents="none"
                     aria-hidden="true"
                 >
-                    {circularSegments.map((segment) => (
+                    {circularSegments.map((segment, index) => (
                         <circle
                             key={`glow-${segment.key}`}
                             cx={center}
@@ -549,8 +562,10 @@ export default function GaugeDisplay({
                             strokeDashoffset={segment.strokeDashoffset}
                             strokeLinecap="butt"
                             data-testid="gauge-circular-arc-glow-segment"
+                            className="hmi-viewer-gauge-ring-segment"
                             filter={`url(#${glowFilterId})`}
                             style={{
+                                ...resolveSegmentEntranceStyle(index),
                                 opacity: arcOpacity == null
                                     ? circularArcGlowOpacity
                                     : Number((arcOpacity * circularArcGlowOpacity).toFixed(2)),
@@ -562,6 +577,7 @@ export default function GaugeDisplay({
             ) : null}
             {staticTopCapModel ? (
                 <g
+                    className="hmi-viewer-gauge-ring-cap"
                     pointerEvents="none"
                     aria-hidden="true"
                     data-testid="gauge-circular-static-top-cap"

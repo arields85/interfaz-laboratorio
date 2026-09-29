@@ -649,6 +649,7 @@ h1, h2, h3, h4, h5, h6 {
  *   --viewer-entrance-ease            curva compartida por marcos, indicadores y gráficos
  *   --viewer-entrance-value-duration  duración del llenado/trazado de valores
  *   --viewer-entrance-value-offset    espera del valor tras el arranque de su marco
+ *   --viewer-entrance-ring-segment-fade  fundido de cada tramo del aro (el barrido dura value-duration)
  * ──────────────────────────────────────────────────────────────────────── */
 :root {
   --viewer-entrance-frame-duration: 450ms;
@@ -656,6 +657,7 @@ h1, h2, h3, h4, h5, h6 {
   --viewer-entrance-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --viewer-entrance-value-duration: 900ms;
   --viewer-entrance-value-offset: 150ms;
+  --viewer-entrance-ring-segment-fade: 160ms;
 }
 
 @keyframes hmi-viewer-frame-entrance {
@@ -675,6 +677,54 @@ h1, h2, h3, h4, h5, h6 {
   animation-duration: var(--viewer-entrance-frame-duration);
   animation-timing-function: var(--viewer-entrance-ease);
   animation-delay: var(--viewer-entrance-item-delay);
+  animation-fill-mode: backwards;
+}
+
+/* Indicadores (GaugeDisplay). El delay parte del delay de su item (variable heredada) más
+ * `value-offset`. Los keyframes son solo `from`: terminan en el valor inline del propio
+ * elemento (ancho / opacidad), así que un refresco de datos nunca los reproduce de nuevo. */
+@keyframes hmi-viewer-gauge-bar-fill {
+  from {
+    width: 0%;
+  }
+}
+
+@keyframes hmi-viewer-gauge-ring-segment {
+  from {
+    opacity: 0;
+  }
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-gauge-bar-fill {
+  animation-name: hmi-viewer-gauge-bar-fill;
+  animation-duration: var(--viewer-entrance-value-duration);
+  animation-timing-function: var(--viewer-entrance-ease);
+  animation-delay: calc(var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-value-offset));
+  animation-fill-mode: backwards;
+}
+
+/* Aro: cada tramo aparece en orden angular; el último termina justo al cumplirse value-duration.
+ * El remate estático aparece cuando el barrido termina. */
+[data-viewer-entrance='true'] .hmi-viewer-gauge-ring-segment {
+  animation-name: hmi-viewer-gauge-ring-segment;
+  animation-duration: var(--viewer-entrance-ring-segment-fade);
+  animation-timing-function: var(--viewer-entrance-ease);
+  animation-delay: calc(
+    var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-value-offset) +
+      (var(--viewer-entrance-value-duration) - var(--viewer-entrance-ring-segment-fade)) *
+      var(--viewer-gauge-segment-fraction, 0)
+  );
+  animation-fill-mode: backwards;
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-gauge-ring-cap {
+  animation-name: hmi-viewer-gauge-ring-segment;
+  animation-duration: var(--viewer-entrance-ring-segment-fade);
+  animation-timing-function: var(--viewer-entrance-ease);
+  animation-delay: calc(
+    var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-value-offset) +
+      var(--viewer-entrance-value-duration) - var(--viewer-entrance-ring-segment-fade)
+  );
   animation-fill-mode: backwards;
 }
 
@@ -788,7 +838,10 @@ h1, h2, h3, h4, h5, h6 {
     animation-delay: 0ms;
   }
 
-  [data-viewer-entrance='true'] > .hmi-viewer-entrance-item {
+  [data-viewer-entrance='true'] > .hmi-viewer-entrance-item,
+  [data-viewer-entrance='true'] .hmi-viewer-gauge-bar-fill,
+  [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-segment,
+  [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-cap {
     animation: none;
   }
 

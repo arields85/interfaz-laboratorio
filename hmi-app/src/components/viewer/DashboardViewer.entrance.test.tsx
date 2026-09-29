@@ -211,6 +211,6 @@ describe('viewer entrance CSS contract (index.css)', () => {
         const reduced = [...indexCss.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*{([\s\S]*?)\r?\n}\r?\n/g)]
             .map((match) => match[1])
             .join('\n');
-        expect(reduced).toMatch(/\[data-viewer-entrance='true'\] > \.hmi-viewer-entrance-item\s*{[^}]*animation: none;/);
+        expect(reduced).toMatch(/\[data-viewer-entrance='true'\] > \.hmi-viewer-entrance-item\s*[,{][^}]*animation: none;/);
     });
 });
