@@ -327,6 +327,15 @@ describe('ThemeSettingsTab', () => {
             expect(screen.getAllByText('%')).toHaveLength(2);
         });
 
+        it('stacks the three controls one per row so the number inputs never cover their labels', () => {
+            render(<ThemeSettingsTab />);
+
+            const controls = screen.getByTestId('theme-entrance-controls');
+            expect(controls).toHaveClass('flex', 'flex-col');
+            expect(controls.className).not.toMatch(/grid-cols/);
+            expect(within(controls).getAllByRole('slider')).toHaveLength(3);
+        });
+
         it('does not touch the document or storage when nothing changes (fresh install)', () => {
             render(<ThemeSettingsTab />);
 

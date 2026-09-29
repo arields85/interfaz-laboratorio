@@ -362,7 +362,9 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                     valores se aplican a todos los temas. Para previsualizarlos, cambie de dashboard o de vista en el visor.
                 </p>
 
-                <div className="grid gap-4 sm:grid-cols-3">
+                {/* One control per row, like the other admin panels: in narrow columns the number input
+                    covered the label. */}
+                <div data-testid="theme-entrance-controls" className="flex flex-col gap-4">
                     {ENTRANCE_CONTROLS.map(({ key, label, numberInputAriaLabel, unit }) => (
                         <DockSliderField
                             key={key}
