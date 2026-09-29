@@ -373,6 +373,53 @@ describe('ThemeSettingsTab', () => {
             expect(rootStyle().getPropertyValue('--viewer-entrance-flash-peak')).toBe('');
         });
 
+        it('stays dirty when the preset returns to the saved one while a slider is still changed', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+            fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del destello' }), { target: { value: '30' } });
+
+            await user.click(screen.getByRole('radio', { name: /Clásico/ }));
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+            expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+        });
+
+        it('stays dirty when the slider returns to the saved value while another preset is still selected', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+            const flash = screen.getByRole('slider', { name: 'Intensidad del destello' });
+            fireEvent.change(flash, { target: { value: '30' } });
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+
+            fireEvent.change(flash, { target: { value: '16' } });
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+            expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+        });
+
+        it('clears dirty only when BOTH the preset and the sliders are back at the saved values', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+            const flash = screen.getByRole('slider', { name: 'Intensidad del destello' });
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+            fireEvent.change(flash, { target: { value: '30' } });
+            fireEvent.change(flash, { target: { value: '16' } });
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+            await user.click(screen.getByRole('radio', { name: /Clásico/ }));
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
         it('persists only the overrides on save and reports saved', () => {
             const saveRef = createRef<() => void>();
             const onDirtyChange = vi.fn();
