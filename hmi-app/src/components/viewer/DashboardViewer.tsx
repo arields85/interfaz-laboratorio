@@ -14,6 +14,7 @@ import {
 } from '../../utils/groupWidget';
 import { resolveViewerEntranceOrders } from '../../utils/viewerEntrance';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
+import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -199,6 +200,12 @@ export default function DashboardViewer({
                                         onNavigateDashboard={onNavigateDashboard}
                                         className="w-full h-full"
                                     />
+                                    {entranceKey !== undefined && widget.type !== 'text-title' ? (
+                                        <ViewerEntranceFrameOverlays
+                                            widgetId={widget.id}
+                                            inset={resolveWidgetSurfaceInset(widget)}
+                                        />
+                                    ) : null}
                                 </div>
                             </div>
                         );

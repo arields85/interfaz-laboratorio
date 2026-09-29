@@ -56,6 +56,17 @@ Todos los tiempos viven en un único bloque `:root` de `hmi-app/src/index.css` p
 | `--viewer-entrance-value-duration` | `900ms` | Duración del llenado de indicadores y del revelado de gráficos |
 | `--viewer-entrance-value-offset` | `150ms` | Espera del valor tras el arranque de su marco |
 | `--viewer-entrance-ring-segment-fade` | `160ms` | Fundido de cada tramo del aro (el barrido completo dura `value-duration`) |
+| `--viewer-entrance-flash-color` | `var(--color-accent-blue-glow)` | Color del destello del fondo del marco |
+| `--viewer-entrance-flash-peak` | `0.16` | Opacidad máxima del destello (sube rápido al pico y decae a 0) |
+| `--viewer-entrance-flash-duration` | `650ms` | Duración total del destello |
+| `--viewer-entrance-flash-offset` | `60ms` | Espera del destello tras el arranque de su marco |
+| `--viewer-entrance-outline-color` | `var(--color-accent-blue-glow)` | Color del contorno que se traza por el perímetro |
+| `--viewer-entrance-outline-width` | `1.5px` | Grosor del contorno |
+| `--viewer-entrance-outline-duration` | `700ms` | Duración del trazado del contorno |
+| `--viewer-entrance-outline-fade` | `350ms` | Fundido del contorno al terminar de trazarse |
+| `--viewer-entrance-outline-offset` | `0ms` | Espera del trazado tras el arranque de su marco |
+
+**Destello y contorno de marco.** Son dos capas decorativas (`ViewerEntranceFrameOverlays`, solo bajo el visor) dentro de la superficie de cada item, hermanas del widget y no parte de ningún renderer: no chocan con `.glass-panel::after` (remate de esquinas) ni con `.glass-panel-group::before` (fondo del grupo) y usan el mismo inset de superficie (`resolveWidgetSurfaceInset`) y el radio `--frame-radius-rest` del tema. El destello es una capa con gradiente del color del token cuya opacidad sube al pico y decae; el contorno es un `<rect pathLength="1">` cuyo `stroke-dashoffset` va de 1 a 0 (sirve para cualquier tamaño) y luego se desvanece sobre el borde propio del tema (en Instrumento, sin borde, se traza y desaparece). Ninguna anima los `--frame-*` (llevan las transiciones de hover), así que se ven igual en Clásico, Contorno e Instrumento. Los widgets sin marco (`text-title`) no las reciben. `rx`/`ry` del `<rect>` se resuelven por CSS (`rx: var(--frame-radius-rest)`) para no hardcodear el radio.
 
 La repetición por entrada se controla con `entranceKey` de `DashboardViewer` (`buildViewerEntranceKey`: id de dashboard + id de vista); el orden aleatorio se calcula una vez por clave (`utils/viewerEntrance.ts`).
 

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardViewer from './DashboardViewer';
 import { makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
@@ -172,6 +172,82 @@ describe('DashboardViewer entrance', () => {
     });
 });
 
+describe('DashboardViewer entrance frame overlays (flash + outline)', () => {
+    beforeEach(() => {
+        resizeCallbacks.clear();
+        vi.stubGlobal('ResizeObserver', MockResizeObserver);
+        vi.stubGlobal('requestAnimationFrame', ((callback: FrameRequestCallback) => {
+            callback(0);
+            return 1;
+        }) as typeof requestAnimationFrame);
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('renders a flash layer and an outline rect inside every framed item surface', () => {
+        renderViewer({ entranceKey: 'k', entranceRandom: sequence([0.5]) });
+
+        for (const id of IDS) {
+            const surface = screen.getByTestId(`dashboard-viewer-item-surface-${id}`);
+            const flash = within(surface).getByTestId(`dashboard-viewer-entrance-flash-${id}`);
+            const outline = within(surface).getByTestId(`dashboard-viewer-entrance-outline-${id}`);
+
+            expect(flash).toHaveClass('hmi-viewer-entrance-flash');
+            expect(flash).toHaveAttribute('aria-hidden', 'true');
+            expect(outline).toHaveClass('hmi-viewer-entrance-outline');
+            expect(outline).toHaveAttribute('aria-hidden', 'true');
+            // The rect is normalized to a path length of 1 so the dash keyframes never depend on size.
+            const rect = outline.querySelector('rect');
+            expect(rect).not.toBeNull();
+            expect(rect).toHaveAttribute('pathLength', '1');
+            expect(rect).toHaveClass('hmi-viewer-entrance-outline-rect');
+            // Overlays sit after the widget so they paint above the frame fill.
+            expect(flash.compareDocumentPosition(screen.getByTestId(`widget-renderer-${id}`)))
+                .toBe(Node.DOCUMENT_POSITION_PRECEDING);
+        }
+    });
+
+    it('matches the frame box: same surface inset as the padding of the surface', () => {
+        const group = makeGroupWidget({ id: 'g', locked: true, memberWidgetIds: ['a'] });
+        renderViewer({
+            widgets: [group, ...widgets],
+            layout: [makeLayout({ widgetId: 'g', x: 0, y: 0, w: 10, h: 10 }), ...layout],
+            entranceKey: 'k',
+        });
+
+        for (const id of ['g', 'a']) {
+            const surface = screen.getByTestId(`dashboard-viewer-item-surface-${id}`);
+            const expectedInset = surface.style.padding;
+            expect(screen.getByTestId(`dashboard-viewer-entrance-flash-${id}`).style.inset).toBe(expectedInset);
+            expect(screen.getByTestId(`dashboard-viewer-entrance-outline-${id}`).style.inset).toBe(expectedInset);
+        }
+        expect(screen.getByTestId('dashboard-viewer-entrance-flash-g').style.inset).toBe('0px');
+        expect(screen.getByTestId('dashboard-viewer-entrance-flash-a').style.inset).toBe('var(--widget-spacing)');
+    });
+
+    it('draws no overlay on frameless text titles', () => {
+        const title = makeWidget({ id: 't', type: 'text-title' });
+        renderViewer({
+            widgets: [title],
+            layout: [makeLayout({ widgetId: 't', x: 0, y: 0 })],
+            entranceKey: 'k',
+        });
+
+        expect(screen.queryByTestId('dashboard-viewer-entrance-flash-t')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('dashboard-viewer-entrance-outline-t')).not.toBeInTheDocument();
+    });
+
+    it('renders no overlay without an entrance key (builder-like static render)', () => {
+        renderViewer();
+
+        expect(screen.queryByTestId('dashboard-viewer-entrance-flash-a')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('dashboard-viewer-entrance-outline-a')).not.toBeInTheDocument();
+    });
+});
+
 describe('viewer entrance CSS contract (index.css)', () => {
     it('defines the tunable timing tokens in a single :root block', () => {
         const block = indexCss.match(/:root\s*{([^}]*--viewer-entrance-frame-duration[^}]*)}/);
@@ -212,5 +288,86 @@ describe('viewer entrance CSS contract (index.css)', () => {
             .map((match) => match[1])
             .join('\n');
         expect(reduced).toMatch(/\[data-viewer-entrance='true'\] > \.hmi-viewer-entrance-item\s*[,{][^}]*animation: none;/);
+    });
+    it('defines the flash and outline tokens in the same single :root block', () => {
+        const block = indexCss.match(/:root\s*{([^}]*--viewer-entrance-frame-duration[^}]*)}/);
+        const body = block?.[1] ?? '';
+
+        for (const token of [
+            '--viewer-entrance-flash-color',
+            '--viewer-entrance-flash-peak',
+            '--viewer-entrance-flash-duration',
+            '--viewer-entrance-flash-offset',
+            '--viewer-entrance-outline-color',
+            '--viewer-entrance-outline-width',
+            '--viewer-entrance-outline-duration',
+            '--viewer-entrance-outline-fade',
+            '--viewer-entrance-outline-offset',
+        ]) {
+            expect(body).toContain(`${token}:`);
+        }
+    });
+
+    it('flashes an overlay layer (never the --frame-* tokens) timed off the item delay', () => {
+        expect(indexCss).toMatch(/@keyframes hmi-viewer-entrance-flash\s*{[\s\S]*?var\(--viewer-entrance-flash-peak\)/);
+        const rule = indexCss.match(/\[data-viewer-entrance='true'\] \.hmi-viewer-entrance-flash\s*{([\s\S]*?)}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        expect(body).toContain('pointer-events: none;');
+        expect(body).toContain('animation-name: hmi-viewer-entrance-flash;');
+        expect(body).toContain('animation-duration: var(--viewer-entrance-flash-duration);');
+        expect(body).toContain('var(--viewer-entrance-item-delay, 0ms)');
+        expect(body).toContain('var(--viewer-entrance-flash-offset)');
+        expect(body).toContain('opacity: 0;');
+        // Only the corner radius is read; the animated frame tokens (fill/border/blur) are never touched.
+        expect(body).not.toMatch(/--frame-(fill|border|blur|accent)/);
+        expect(body).not.toContain('transition');
+    });
+
+    it('traces the outline with a normalized dash offset and then fades it out', () => {
+        expect(indexCss).toMatch(/@keyframes hmi-viewer-entrance-outline-draw\s*{[\s\S]*?stroke-dashoffset: 1;[\s\S]*?stroke-dashoffset: 0;/);
+        expect(indexCss).toMatch(/@keyframes hmi-viewer-entrance-outline-fade\s*{[\s\S]*?opacity: 1;[\s\S]*?opacity: 0;/);
+        const rule = indexCss.match(/\[data-viewer-entrance='true'\] \.hmi-viewer-entrance-outline-rect\s*{([\s\S]*?)}/);
+        expect(rule).not.toBeNull();
+        const body = rule?.[1] ?? '';
+
+        // Corner radius follows the theme's frame radius (SVG geometry property), not a literal.
+        expect(body).toContain('rx: var(--frame-radius-rest);');
+        expect(body).toContain('ry: var(--frame-radius-rest);');
+        expect(body).toContain('stroke-dasharray: 1 1;');
+        expect(body).toContain('stroke: var(--viewer-entrance-outline-color);');
+        expect(body).toContain('stroke-width: var(--viewer-entrance-outline-width);');
+        expect(body).toContain('hmi-viewer-entrance-outline-draw');
+        expect(body).toContain('hmi-viewer-entrance-outline-fade');
+        expect(body).toContain('var(--viewer-entrance-item-delay, 0ms)');
+        expect(body).toContain('opacity: 0;');
+    });
+
+    it('turns the flash and the outline off for reduced motion', () => {
+        const reduced = [...indexCss.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*{([\s\S]*?)\r?\n}\r?\n/g)]
+            .map((match) => match[1])
+            .join('\n');
+        expect(reduced).toMatch(/\[data-viewer-entrance='true'\] \.hmi-viewer-entrance-flash\s*[,{][^}]*animation: none;/);
+        expect(reduced).toMatch(/\[data-viewer-entrance='true'\] \.hmi-viewer-entrance-outline-rect\s*[,{][^}]*animation: none;/);
+    });
+
+    it('scopes EVERY entrance class rule under the viewer frame attribute (builder-safety guard)', () => {
+        // Drop comments and keyframes bodies, then inspect every selector that mentions an
+        // entrance class: each comma-separated part must carry the viewer scope.
+        const withoutNoise = indexCss
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/@keyframes [\w-]+\s*{(?:[^{}]*{[^{}]*})*[^{}]*}/g, '');
+        const selectors = [...withoutNoise.matchAll(/([^{}]+){/g)].map((match) => match[1].trim());
+        const entranceSelectors = selectors
+            .filter((selector) => selector.includes('.hmi-viewer-') && !selector.startsWith('@'))
+            .flatMap((selector) => selector.split(','))
+            .map((part) => part.trim())
+            .filter((part) => part.includes('.hmi-viewer-'));
+
+        expect(entranceSelectors.length).toBeGreaterThan(8);
+        for (const part of entranceSelectors) {
+            expect(part).toContain("[data-viewer-entrance='true']");
+        }
     });
 });

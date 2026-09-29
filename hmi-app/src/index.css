@@ -650,6 +650,10 @@ h1, h2, h3, h4, h5, h6 {
  *   --viewer-entrance-value-duration  duración del llenado/trazado de valores
  *   --viewer-entrance-value-offset    espera del valor tras el arranque de su marco
  *   --viewer-entrance-ring-segment-fade  fundido de cada tramo del aro (el barrido dura value-duration)
+ *   --viewer-entrance-flash-*         destello del fondo del marco: color, opacidad pico, duración y
+ *                                     espera tras el arranque del marco (capa superpuesta, no toca --frame-*)
+ *   --viewer-entrance-outline-*       contorno que se traza por el perímetro del marco: color, grosor,
+ *                                     duración del trazado, fundido posterior y espera tras el arranque
  * ──────────────────────────────────────────────────────────────────────── */
 :root {
   --viewer-entrance-frame-duration: 450ms;
@@ -658,6 +662,15 @@ h1, h2, h3, h4, h5, h6 {
   --viewer-entrance-value-duration: 900ms;
   --viewer-entrance-value-offset: 150ms;
   --viewer-entrance-ring-segment-fade: 160ms;
+  --viewer-entrance-flash-color: var(--color-accent-blue-glow);
+  --viewer-entrance-flash-peak: 0.16;
+  --viewer-entrance-flash-duration: 650ms;
+  --viewer-entrance-flash-offset: 60ms;
+  --viewer-entrance-outline-color: var(--color-accent-blue-glow);
+  --viewer-entrance-outline-width: 1.5px;
+  --viewer-entrance-outline-duration: 700ms;
+  --viewer-entrance-outline-fade: 350ms;
+  --viewer-entrance-outline-offset: 0ms;
 }
 
 @keyframes hmi-viewer-frame-entrance {
@@ -747,6 +760,95 @@ h1, h2, h3, h4, h5, h6 {
   animation-timing-function: var(--viewer-entrance-ease);
   animation-delay: calc(var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-value-offset));
   animation-fill-mode: backwards;
+}
+
+/* Destello del fondo del marco (V6): capa superpuesta dentro de la superficie del item (mismo inset
+ * y radio que el marco). No anima los --frame-* del tema (llevan las transiciones de hover), así
+ * que se ve igual con relleno 0 % (Instrumento). Reposo = opacidad 0. */
+@keyframes hmi-viewer-entrance-flash {
+  0% {
+    opacity: 0;
+  }
+
+  18% {
+    opacity: var(--viewer-entrance-flash-peak);
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-entrance-flash {
+  position: absolute;
+  pointer-events: none;
+  border-radius: var(--frame-radius-rest);
+  background: linear-gradient(
+    135deg,
+    var(--viewer-entrance-flash-color),
+    color-mix(in srgb, var(--viewer-entrance-flash-color) 25%, transparent)
+  );
+  opacity: 0;
+  animation-name: hmi-viewer-entrance-flash;
+  animation-duration: var(--viewer-entrance-flash-duration);
+  animation-timing-function: var(--viewer-entrance-ease);
+  animation-delay: calc(var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-flash-offset));
+  animation-fill-mode: backwards;
+}
+
+/* Contorno que se traza (V7): <rect pathLength="1"> con dash normalizado, así el mismo
+ * recorrido 1 -> 0 sirve para cualquier tamaño. rx/ry siguen el radio del tema. Al terminar
+ * de trazarse se desvanece sobre el borde propio del tema (o desaparece si no tiene). */
+@keyframes hmi-viewer-entrance-outline-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes hmi-viewer-entrance-outline-fade {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-entrance-outline {
+  position: absolute;
+  pointer-events: none;
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-entrance-outline-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+[data-viewer-entrance='true'] .hmi-viewer-entrance-outline-rect {
+  rx: var(--frame-radius-rest);
+  ry: var(--frame-radius-rest);
+  fill: none;
+  stroke: var(--viewer-entrance-outline-color);
+  stroke-width: var(--viewer-entrance-outline-width);
+  stroke-dasharray: 1 1;
+  opacity: 0;
+  animation-name: hmi-viewer-entrance-outline-draw, hmi-viewer-entrance-outline-fade;
+  animation-duration: var(--viewer-entrance-outline-duration), var(--viewer-entrance-outline-fade);
+  animation-timing-function: var(--viewer-entrance-ease), ease-out;
+  animation-delay:
+    calc(var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-outline-offset)),
+    calc(
+      var(--viewer-entrance-item-delay, 0ms) + var(--viewer-entrance-outline-offset) +
+        var(--viewer-entrance-outline-duration)
+    );
+  animation-fill-mode: backwards, backwards;
 }
 
 @keyframes widget-runtime-state-caret-blink {
@@ -863,7 +965,9 @@ h1, h2, h3, h4, h5, h6 {
   [data-viewer-entrance='true'] .hmi-viewer-gauge-bar-fill,
   [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-segment,
   [data-viewer-entrance='true'] .hmi-viewer-gauge-ring-cap,
-  [data-viewer-entrance='true'] .hmi-viewer-chart-reveal {
+  [data-viewer-entrance='true'] .hmi-viewer-chart-reveal,
+  [data-viewer-entrance='true'] .hmi-viewer-entrance-flash,
+  [data-viewer-entrance='true'] .hmi-viewer-entrance-outline-rect {
     animation: none;
   }
 
