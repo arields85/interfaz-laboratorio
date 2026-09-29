@@ -42,6 +42,23 @@ La pestaña **Tema** de Configuración general elige un tema predefinido que def
 - **Reglas:** no hardcodear radios, bordes ni fondos de marco, botón o tag en componentes; usar las clases del tema. Para agregar un tema, sumar un preset al modelo y su tarjeta en la pestaña.
 - **Diseño de temas nuevos:** el laboratorio de estilos (`tools/style-lab/`) permite probar combinaciones y copiar la elección para convertirla en preset.
 
+## Entrada animada del visor
+
+Al entrar a un dashboard o cambiar de vista, el visor arma la pantalla con movimiento: los marcos aparecen en orden aleatorio, los indicadores (barra y aro) se llenan hasta su valor y los gráficos SVG se revelan de izquierda a derecha. Es CSS puro, no retrasa ni condiciona la carga de datos, no se reproduce con el refresco periódico y queda desactivada con `prefers-reduced-motion`. Solo aplica bajo el marco del visor (`[data-viewer-entrance='true']`): el builder nunca anima.
+
+Todos los tiempos viven en un único bloque `:root` de `hmi-app/src/index.css` para afinarlos en vivo:
+
+| Token | Valor inicial | Uso |
+|-------|---------------|-----|
+| `--viewer-entrance-frame-duration` | `450ms` | Duración de la aparición de cada marco |
+| `--viewer-entrance-spread` | `700ms` | Ventana aleatoria en la que arrancan los marcos (el grupo nunca después de sus miembros) |
+| `--viewer-entrance-ease` | `cubic-bezier(0.22, 1, 0.36, 1)` | Curva compartida por marcos, indicadores y gráficos |
+| `--viewer-entrance-value-duration` | `900ms` | Duración del llenado de indicadores y del revelado de gráficos |
+| `--viewer-entrance-value-offset` | `150ms` | Espera del valor tras el arranque de su marco |
+| `--viewer-entrance-ring-segment-fade` | `160ms` | Fundido de cada tramo del aro (el barrido completo dura `value-duration`) |
+
+La repetición por entrada se controla con `entranceKey` de `DashboardViewer` (`buildViewerEntranceKey`: id de dashboard + id de vista); el orden aleatorio se calcula una vez por clave (`utils/viewerEntrance.ts`).
+
 ## Convención para widgets nuevos
 
 Ver guía completa: [`hmi-app/src/widgets/WIDGET_AUTHORING.md`](../hmi-app/src/widgets/WIDGET_AUTHORING.md)

@@ -53,12 +53,12 @@ without losing speed.
 
 ## Tasks
 
-- [ ] **V1** — Frame entrance: timing tokens block in `index.css`; per-entry replay key (dashboard id
+- [x] **V1** — Frame entrance: timing tokens block in `index.css`; per-entry replay key (dashboard id
   + active view); random stagger (shuffled order per entry, delay via CSS variable); group
   container before its members; reduced-motion off switch; builder unaffected.
-- [ ] **V2** — Gauge value draw-in: bar fills from zero, ring fills from empty, to the current value;
+- [x] **V2** — Gauge value draw-in: bar fills from zero, ring fills from empty, to the current value;
   starts after its frame; late data grows when it arrives; refreshes do not replay.
-- [ ] **V3** — Chart draw-in for the five SVG chart widgets (left-to-right reveal of lines, areas and
+- [x] **V3** — Chart draw-in for the five SVG chart widgets (left-to-right reveal of lines, areas and
   bars), same timing tokens.
 - [ ] **V4** — Live tuning with the user (timings/easing) and live acceptance.
 
@@ -83,6 +83,29 @@ assessed (`--committed-only`, base = last reviewed boundary, first boundary `b18
 - 2026-09-29: feature document created; exploration done (delegated mapper). Route for V1–V3:
   delegated writer (writer trigger: 2+ non-trivial files).
 
+- 2026-09-29 V1 (route: delegated writer; commit `6ca7b92`): `entranceKey` prop on `DashboardViewer`
+  (`buildViewerEntranceKey(dashboardId, activeViewId)` from `Dashboard.tsx`) keys the grid frame, so a new
+  dashboard/view remounts and replays while a data refresh keeps the nodes. Stagger orders come from
+  `utils/viewerEntrance.ts` (shuffle with injectable random, evenly spread fractions in [0,1], locked group
+  pulled to its earliest member), cached per key in render-phase state; CSS multiplies the fraction by
+  `--viewer-entrance-spread`. RED: `viewerEntrance.test.ts` (module missing) and
+  `DashboardViewer.entrance.test.tsx` (9/10 failing). GREEN: `npx vitest run` on both, 8/8 and 10/10.
+  Tokens block + `hmi-viewer-frame-entrance` (fade + scale 0.96 -> 1) in `index.css`, reduced motion off.
+- 2026-09-29 V2 (route: delegated writer; commit `4419d07`): bar fill `width: 0%` -> inline width
+  (`from`-only keyframes); ring segments fade in sequentially by angular fraction (index based, never value
+  based, so refreshes cannot change a delay and replay); static top cap appears when the sweep ends. RED:
+  `GaugeDisplay.entrance.test.tsx` 6/6 failing. GREEN: 6/6; existing `GaugeDisplay`, `KpiWidget`,
+  `MachineActivityWidget` suites unchanged and green.
+- 2026-09-29 V3 (route: delegated writer; commit `7799a36`): one hook, class `hmi-viewer-chart-reveal`
+  on the shared `WidgetChartLayout` svgs (covers `trend-chart`, `trend-chart-v2`, `prod-history`,
+  `prod-trend`) and on the `activity-analytics` % PROD trend, its overlay and the groups chart; keyframes
+  `clip-path: inset(-100% 100% -100% 0)` -> `inset(-100% -100% -100% 0)` (explicit end: `none` is not
+  interpolable). The donut summary is intentionally not animated. RED: `WidgetChartLayout.entrance.test.tsx`
+  4/4 and the new ActivityAnalytics test failing. GREEN: all pass.
+- 2026-09-29 verification (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 237 files /
+  2981 tests passed; `npm run build` OK. Not verified: real browser rendering (jsdom cannot run CSS animations).
+
 ## Next step
 
-V1–V3 via one delegated writer, then V4 live tuning with the user.
+V4: live tuning with the user (timings/easing in the single `:root` block of `index.css`) and live acceptance
+in all three theme presets.
