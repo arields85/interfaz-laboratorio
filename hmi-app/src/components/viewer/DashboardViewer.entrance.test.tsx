@@ -426,6 +426,15 @@ describe('viewer entrance CSS contract (index.css)', () => {
         expect(body).toContain('opacity: 0;');
     });
 
+    it('keeps the outline fade backwards-filled so the opacity token applies through the draw phase', () => {
+        const rule = indexCss.match(/\[data-viewer-entrance='true'\] \.hmi-viewer-entrance-outline-rect\s*{([\s\S]*?)}/);
+        const body = rule?.[1] ?? '';
+
+        // Draw and fade share the element: without `backwards` on the fade, the line would be drawn at
+        // the base opacity (0) instead of the configured --viewer-entrance-outline-opacity peak.
+        expect(body).toMatch(/animation-fill-mode:\s*backwards,\s*backwards;/);
+    });
+
     it('turns the flash and the outline off for reduced motion', () => {
         const reduced = [...indexCss.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*{([\s\S]*?)\r?\n}\r?\n/g)]
             .map((match) => match[1])
