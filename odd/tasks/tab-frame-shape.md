@@ -67,7 +67,23 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
   widgets stay standard.
 - [x] **F3** — Builder and entrance follow the shape: selection frame, placement ghosts, hover actions,
   viewer entrance flash + outline.
-- [ ] **F4** — Live look with the user and tuning.
+- [ ] **F4** — Live look with the user and tuning. First live look 2026-09-29: "se ve todo muy bien", with
+  the corrections in F5.
+- [ ] **F5** — Corrections from the first live look (user, 2026-09-29):
+  - Tab colors, normal widgets: tab fill WHITE at 40 % opacity; title text white at 70 %, 100 % while the
+    widget is hovered (interpretation: text shares the tab's hue, by analogy with the alert case).
+  - Tab colors, metric-card in warning/critical (any alert state): tab fill = the alert color at 40 %; title
+    text = the alert color at 100 %.
+  - The data-mode dot keeps its meaning (dark simulated / green real).
+  - Dot + title start further left inside the tab (less start padding) so longer titles fit.
+  - One unified silhouette (tab + body): EVERY corner gets the same radius as the widget's corners
+    (`--frame-radius-rest` of the active preset) — the tab's free corners, both vertices of the body's
+    diagonal cut, and the junction where the tab meets the body top (concave fillet). The rest border keeps
+    following the body as today unless the unified path makes it natural to include the tab (report).
+  - The viewer entrance outline draws that unified rounded silhouette, never a rectangle (the user saw a
+    rectangle — verify where the rect is still used and fix).
+  - Recover the warning/critical glow (lost to the clip-path) following the unified silhouette (e.g. a
+    `filter: drop-shadow` on an unclipped shell or an SVG glow), including its hover growth.
 
 ## Acceptance criteria
 
