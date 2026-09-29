@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import type { EquipmentSummary } from '../../domain/equipment.types';
 import type { ContractMachine, ConnectionHealth } from '../../domain/dataContract.types';
@@ -11,6 +12,7 @@ import {
     resolveHoveredGroupId,
     resolveWidgetSurfaceInset,
 } from '../../utils/groupWidget';
+import { resolveViewerEntranceOrders } from '../../utils/viewerEntrance';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 
 interface DashboardViewerProps {
@@ -32,7 +34,19 @@ interface DashboardViewerProps {
     rows?: number;
     onPersistWidgetDisplayOptions?: (widgetId: string, displayOptions: ViewerPersistedWidgetDisplayPatch) => void;
     onNavigateDashboard?: (dashboardId: string) => void;
+    /**
+     * Replay key of the entrance animation (see `buildViewerEntranceKey`): dashboard id + active
+     * view id. A new key remounts the grid and replays the entrance; a data refresh keeps it.
+     * Omit it to render without any entrance animation.
+     */
+    entranceKey?: string;
+    /** Random source of the entrance stagger; injectable so tests are deterministic. */
+    entranceRandom?: () => number;
 }
+
+type ViewerEntranceItemStyle = CSSProperties & {
+    '--viewer-entrance-order'?: number;
+};
 
 // =============================================================================
 // DashboardViewer
@@ -64,6 +78,8 @@ export default function DashboardViewer({
     rows = DEFAULT_ROWS,
     onPersistWidgetDisplayOptions,
     onNavigateDashboard,
+    entranceKey,
+    entranceRandom,
 }: DashboardViewerProps) {
     const { containerRef, width, height, rowHeight, hasFirstValidMeasurement } = useCanvasReference({
         cols,
@@ -83,6 +99,21 @@ export default function DashboardViewer({
     // order — a group container must ALWAYS paint beneath every other widget, locked or not.
     const orderedLayout = orderRenderItemsWithGroupsFirst(layout, widgets);
 
+    // Entrance: the stagger is drawn once per entry (entranceKey) and kept while the key holds, so
+    // a data refresh never reshuffles or replays it. It is pure presentation: data queries are not
+    // gated by it. Render-phase state adjustment is the sanctioned way to reset state on a new key.
+    const [entrance, setEntrance] = useState<{ key: string | undefined; orders: Map<string, number> }>(
+        () => ({ key: undefined, orders: new Map() }),
+    );
+    let entranceOrders = entrance.orders;
+    if (entranceKey !== undefined && entrance.key !== entranceKey) {
+        const renderedWidgetIds = orderedLayout
+            .filter((item) => !headerWidgetIds?.has(item.widgetId) && widgetMap.has(item.widgetId))
+            .map((item) => item.widgetId);
+        entranceOrders = resolveViewerEntranceOrders(widgets, renderedWidgetIds, entranceRandom);
+        setEntrance({ key: entranceKey, orders: entranceOrders });
+    }
+
     return (
         <div
             ref={containerRef}
@@ -91,7 +122,9 @@ export default function DashboardViewer({
         >
             {hasFirstValidMeasurement ? (
                 <div
+                    key={entranceKey}
                     data-testid="dashboard-viewer-frame"
+                    data-viewer-entrance={entranceKey !== undefined ? 'true' : undefined}
                     className="grid shrink-0"
                     style={{
                         ...getGridTemplateStyle(cols),
@@ -121,13 +154,18 @@ export default function DashboardViewer({
                         // id for a member.
                         const hoverGroupIdForThisItem = resolveHoveredGroupId(widget.id, widgets);
 
+                        const entranceStyle: ViewerEntranceItemStyle | undefined = entranceKey !== undefined
+                            ? { '--viewer-entrance-order': entranceOrders.get(widget.id) ?? 0 }
+                            : undefined;
+
                         return (
                             <div
                                 key={widget.id}
                                 data-testid={`dashboard-viewer-item-${widget.id}`}
                                 data-group-hover-target={hoveredGroup?.groupId === widget.id ? 'true' : undefined}
-                                className="h-full relative"
+                                className={entranceKey !== undefined ? 'h-full relative hmi-viewer-entrance-item' : 'h-full relative'}
                                 style={{
+                                    ...entranceStyle,
                                     gridColumnStart: item.x + 1,
                                     gridColumnEnd: `span ${item.w}`,
                                     gridRowStart: item.y + 1,

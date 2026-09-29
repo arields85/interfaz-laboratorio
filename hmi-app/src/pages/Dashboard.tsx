@@ -6,6 +6,7 @@ import { hierarchyStorage } from '../services/HierarchyStorageService';
 import type { Dashboard, HierarchyNode, ViewerPersistedWidgetDisplayPatch } from '../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
 import DashboardViewer from '../components/viewer/DashboardViewer';
+import { buildViewerEntranceKey } from '../utils/viewerEntrance';
 import DashboardHeader from '../components/viewer/DashboardHeader';
 import { mockEquipmentList } from '../mocks/equipment.mock';
 import type { EquipmentSummary } from '../domain/equipment.types';
@@ -471,6 +472,7 @@ export default function Dashboard() {
                     hierarchyContext={hierarchyContext}
                     cols={activeDashboard.cols}
                     rows={activeDashboard.rows}
+                    entranceKey={buildViewerEntranceKey(activeDashboard.id, activeDashboard.activeViewId)}
                      onPersistWidgetDisplayOptions={handlePersistWidgetDisplayOptions}
                       onNavigateDashboard={handleNavigateDashboard}
                   />

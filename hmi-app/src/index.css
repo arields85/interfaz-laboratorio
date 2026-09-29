@@ -640,6 +640,44 @@ h1, h2, h3, h4, h5, h6 {
   animation-delay: var(--header-widget-entrance-delay, 0ms);
 }
 
+/* ── Entrada del dashboard en el visor ───────────────────────────────────────
+ * Todos los tiempos de la animación de entrada viven en ESTE bloque para poder
+ * afinarlos en vivo. Solo aplica bajo `[data-viewer-entrance='true']` (marco del
+ * DashboardViewer): el builder nunca lo recibe. Es CSS puro y no bloquea datos.
+ *   --viewer-entrance-frame-duration  duración de la aparición de cada marco
+ *   --viewer-entrance-spread          ventana aleatoria en la que arrancan los marcos
+ *   --viewer-entrance-ease            curva compartida por marcos, indicadores y gráficos
+ *   --viewer-entrance-value-duration  duración del llenado/trazado de valores
+ *   --viewer-entrance-value-offset    espera del valor tras el arranque de su marco
+ * ──────────────────────────────────────────────────────────────────────── */
+:root {
+  --viewer-entrance-frame-duration: 450ms;
+  --viewer-entrance-spread: 700ms;
+  --viewer-entrance-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --viewer-entrance-value-duration: 900ms;
+  --viewer-entrance-value-offset: 150ms;
+}
+
+@keyframes hmi-viewer-frame-entrance {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Se anima el contenedor del item (no los --frame-* del tema, que llevan las
+ * transiciones de hover). `backwards` cubre la espera inicial sin dejar la
+ * animación "en efecto" al terminar: así no queda un stacking context
+ * residual sobre los tooltips de los widgets vecinos. */
+[data-viewer-entrance='true'] > .hmi-viewer-entrance-item {
+  --viewer-entrance-item-delay: calc(var(--viewer-entrance-spread) * var(--viewer-entrance-order, 0));
+  animation-name: hmi-viewer-frame-entrance;
+  animation-duration: var(--viewer-entrance-frame-duration);
+  animation-timing-function: var(--viewer-entrance-ease);
+  animation-delay: var(--viewer-entrance-item-delay);
+  animation-fill-mode: backwards;
+}
+
 @keyframes widget-runtime-state-caret-blink {
   0%,
   49% {
@@ -748,6 +786,10 @@ h1, h2, h3, h4, h5, h6 {
   .hmi-header-widget-entrance {
     animation: none;
     animation-delay: 0ms;
+  }
+
+  [data-viewer-entrance='true'] > .hmi-viewer-entrance-item {
+    animation: none;
   }
 
   .activity-analytics-prod-trend-traveling-glow {
