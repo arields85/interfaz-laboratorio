@@ -642,13 +642,15 @@
     background: var(--green);
   }
   .tf-dot[data-mode="sim"] { background: #64748b; }
-  /* Header icon: moved into the cut corner, below the tab strip and clear of the 45 degree cut. */
+  /* Header icon: inside the cut-off corner triangle (outside the body), near the outer right edge and
+   * just below the body's top line, as in the app. */
   .card.tf-on .w-head > span:first-child { visibility: hidden; }
   .card.tf-on .w-head:has(> svg) { min-height: 18px; }
   .card.tf-on .w-head > svg {
     position: absolute;
-    top: calc(var(--tf-h) + 5px);
-    right: calc(var(--tf-bc) - 1px);
+    top: calc(var(--tf-h) + 4px);
+    right: 6px;
+    z-index: 1;
   }
 
   /* Entrance outline: a stroke that traces itself along the silhouette (pathLength = 1). */
