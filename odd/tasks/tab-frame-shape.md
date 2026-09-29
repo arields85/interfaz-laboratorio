@@ -282,7 +282,9 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     old saved flash value now use the constant. RED 2 -> GREEN 76/76; `npx tsc -b` clean, `npm run lint` clean,
     `npm test` 3238/3238. Commit `917cb83`.
   - Observed in the user's screenshot of Tema → "Animación de entrada": the three controls sit in narrow columns and
-    the numeric inputs overlap their labels ("Grosor del cont[0.5]rno") — pending the user's OK to fix.
+    the numeric inputs overlap their labels ("Grosor del cont[0.5]rno"). Fixed with the user's OK: one control per
+    row (`flex flex-col`, like the other admin panels). RED 1 -> GREEN 65/65 (`ThemeSettingsTab`,
+    `GlobalSettingsDialog`). Commit `7955394`.
 
 ## Next step
 
