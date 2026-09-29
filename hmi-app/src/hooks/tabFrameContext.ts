@@ -15,3 +15,13 @@ export interface TabFrameContextValue {
 
 /** `null` whenever the enclosing frame is not the tab shape: headers then render as today. */
 export const TabFrameContext = createContext<TabFrameContextValue | null>(null);
+
+/**
+ * Receives the width of the tab (px, at its base) of the enclosing `WidgetFrame` while it renders
+ * the tab shape, and `null` when it stops (standard shape, unmount). The grids provide one per
+ * widget so sibling layers that cannot see the tab (builder selection ring, placement ghost, viewer
+ * entrance overlays) can follow the tab + body silhouette.
+ */
+export type TabFrameReporter = (tabWidthPx: number | null) => void;
+
+export const TabFrameReporterContext = createContext<TabFrameReporter | null>(null);

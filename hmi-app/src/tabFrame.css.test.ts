@@ -120,4 +120,20 @@ describe('index.css tab frame shape', () => {
         expect(block.length).toBeGreaterThan(0);
         expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b(?!\s*var)/);
     });
+
+    it('clips the viewer entrance flash to the silhouette using the reported tab width, after the base flash rule', () => {
+        const base = indexCss.indexOf(".hmi-viewer-entrance-flash {");
+        const tabRuleStart = indexCss.indexOf(".hmi-viewer-entrance-flash-tab {");
+        expect(base).toBeGreaterThan(-1);
+        expect(tabRuleStart).toBeGreaterThan(base);
+
+        const body = ruleBody("\\[data-viewer-entrance='true'\\] \\.hmi-viewer-entrance-flash-tab");
+
+        // Only the bottom corners keep the preset radius; the top ones belong to the tab and the chamfer.
+        expect(body).toContain('border-radius: 0 0 var(--frame-radius-rest) var(--frame-radius-rest);');
+        expect(body).toContain('--tab-frame-tab-base: min(var(--tab-frame-tab-width), calc(100% - var(--tab-frame-body-cut)));');
+        expect(body).toMatch(
+            /clip-path:\s*polygon\(\s*0 0,\s*calc\(var\(--tab-frame-tab-base\) - var\(--tab-frame-tab-cut\)\) 0,\s*var\(--tab-frame-tab-base\) var\(--tab-frame-height\),\s*calc\(100% - var\(--tab-frame-body-cut\)\) var\(--tab-frame-height\),\s*100% calc\(var\(--tab-frame-height\) \+ var\(--tab-frame-body-cut\)\),\s*100% 100%,\s*0 100%\s*\);/,
+        );
+    });
 });

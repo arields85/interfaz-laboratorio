@@ -1,6 +1,6 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { Activity } from 'lucide-react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { GridFrameScope } from './GridFrameScope';
 import WidgetFrame from './WidgetFrame';
@@ -198,6 +198,70 @@ describe('WidgetFrame', () => {
 
             expect(container.firstElementChild).toHaveClass('glass-panel');
             expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+        });
+    });
+
+    describe('tab width reporting (for the layers that follow the silhouette)', () => {
+        function mockTabWidth(width: number) {
+            return vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
+                return this.dataset.testid === 'tab-frame-tab' ? width : 0;
+            });
+        }
+
+        function renderReporting(onTabWidth: (width: number | null) => void) {
+            return render(
+                <GridFrameScope onTabWidth={onTabWidth}>
+                    <WidgetFrame widgetType="machine-activity" title="Actividad" frameClassName="glass-panel" className="p-5">
+                        <WidgetHeader title="Actividad" icon={Activity} />
+                    </WidgetFrame>
+                </GridFrameScope>,
+            );
+        }
+
+        it('reports the tab width while the tab shape is rendered and null when it goes away', () => {
+            previewFrameShape('tab');
+            const offsetWidth = mockTabWidth(180);
+            const onTabWidth = vi.fn();
+
+            const { unmount } = renderReporting(onTabWidth);
+
+            expect(onTabWidth).toHaveBeenLastCalledWith(180);
+
+            unmount();
+            expect(onTabWidth).toHaveBeenLastCalledWith(null);
+            offsetWidth.mockRestore();
+        });
+
+        it('treats an unmeasured tab (width 0) as unknown', () => {
+            previewFrameShape('tab');
+            const offsetWidth = mockTabWidth(0);
+            const onTabWidth = vi.fn();
+
+            renderReporting(onTabWidth);
+
+            expect(onTabWidth).toHaveBeenLastCalledWith(null);
+            offsetWidth.mockRestore();
+        });
+
+        it('reports nothing in the standard shape', () => {
+            const onTabWidth = vi.fn();
+
+            renderReporting(onTabWidth);
+
+            expect(onTabWidth).not.toHaveBeenCalled();
+        });
+
+        it('reports null when the shape switches back to standard', () => {
+            previewFrameShape('tab');
+            const offsetWidth = mockTabWidth(180);
+            const onTabWidth = vi.fn();
+
+            renderReporting(onTabWidth);
+            expect(onTabWidth).toHaveBeenLastCalledWith(180);
+
+            act(() => previewFrameShape('standard'));
+            expect(onTabWidth).toHaveBeenLastCalledWith(null);
+            offsetWidth.mockRestore();
         });
     });
 });

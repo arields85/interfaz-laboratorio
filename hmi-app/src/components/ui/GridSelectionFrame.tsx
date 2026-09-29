@@ -1,3 +1,7 @@
+import { useRef } from 'react';
+import { useTabFrameGeometry } from '../../hooks/useTabFrameGeometry';
+import { buildTabFramePath } from '../../utils/tabFramePath';
+
 interface GridSelectionFrameProps {
     isSelected: boolean;
     isHighlighted?: boolean;
@@ -15,6 +19,12 @@ interface GridSelectionFrameProps {
      * inset.
      */
     inset?: string;
+    /**
+     * Tab width (px) of the widget's tab frame, when its frame is the tab shape ("Forma del marco"
+     * = Pestaña; reported by `WidgetFrame` through `useTabFrameWidths`). The rings then trace the
+     * tab + chamfered body silhouette instead of the rounded rect; `null`/absent keeps the rect.
+     */
+    tabWidth?: number | null;
 }
 
 const GRID_RADIUS_DELTA_PX = 0;
@@ -41,7 +51,10 @@ export default function GridSelectionFrame({
     radius = 'var(--frame-radius-rest)',
     className = '',
     inset = 'var(--widget-spacing)',
+    tabWidth = null,
 }: GridSelectionFrameProps) {
+    const frameRef = useRef<HTMLDivElement>(null);
+    const tabGeometry = useTabFrameGeometry(frameRef, tabWidth);
     const outerRadius = outerRingRadius(radius, GRID_RADIUS_DELTA_PX);
     // rx/ry del hover-rect (trazo de 1px, centrado 0.5px hacia adentro del outer edge).
     const hoverRingRadius = strokeCenterRadius(radius, GRID_RADIUS_DELTA_PX, 0.5);
@@ -59,6 +72,7 @@ export default function GridSelectionFrame({
     // ───────────────────────────────────────────────────────────────────────────
     return (
         <div
+            ref={frameRef}
             data-testid="grid-selection-frame"
             className={`pointer-events-none absolute z-10 ${className}`}
             style={{
@@ -81,51 +95,87 @@ export default function GridSelectionFrame({
                     overflow: 'visible',
                 }}
             >
-                {/* hover-rect: borde sutil visible durante drag-over (isHighlighted).
-                    Stroke blanco semitransparente, solo el grosor de 1px. */}
-                <rect
-                    x={0.5}
-                    y={0.5}
-                    width="calc(100% - 1px)"
-                    height="calc(100% - 1px)"
-                    fill={isHighlighted ? 'color-mix(in srgb, var(--color-admin-accent) 10%, transparent)' : 'none'}
-                    stroke="white"
-                    strokeWidth={1}
-                    strokeOpacity={isHighlighted ? 0.18 : 0}
-                    style={{
-                        rx: hoverRingRadius,
-                        ry: hoverRingRadius,
-                        transition: 'stroke-opacity 120ms ease, fill-opacity 120ms ease, rx 0.2s ease, ry 0.2s ease',
-                    }}
-                />
+                {tabGeometry ? (
+                    <>
+                        {/* Pestaña: mismos dos anillos (hover y foco) sobre la silueta pestaña + cuerpo. */}
+                        <path
+                            data-ring="hover"
+                            d={buildTabFramePath(tabGeometry, 0.5)}
+                            fill={isHighlighted ? 'color-mix(in srgb, var(--color-admin-accent) 10%, transparent)' : 'none'}
+                            stroke="white"
+                            strokeWidth={1}
+                            strokeOpacity={isHighlighted ? 0.18 : 0}
+                            style={{
+                                transition: 'stroke-opacity 120ms ease, fill-opacity 120ms ease',
+                            }}
+                        />
+                        <path
+                            data-ring="focus"
+                            d={buildTabFramePath(tabGeometry, GRID_BORDER_WIDTH_PX / 2)}
+                            fill="none"
+                            stroke="var(--color-admin-accent)"
+                            strokeWidth={GRID_BORDER_WIDTH_PX}
+                            strokeOpacity={isSelected ? 1 : 0}
+                            style={{
+                                transition: 'stroke-opacity 150ms ease, filter 150ms ease',
+                                filter: isSelected
+                                    ? [
+                                        'drop-shadow(0 0 8px color-mix(in srgb, var(--color-admin-accent) 40%, transparent))',
+                                        'drop-shadow(0 0 3px color-mix(in srgb, var(--color-admin-accent) 30%, transparent))',
+                                      ].join(' ')
+                                    : 'none',
+                            }}
+                        />
+                    </>
+                ) : (
+                    <>
+                        {/* hover-rect: borde sutil visible durante drag-over (isHighlighted).
+                            Stroke blanco semitransparente, solo el grosor de 1px. */}
+                        <rect
+                            x={0.5}
+                            y={0.5}
+                            width="calc(100% - 1px)"
+                            height="calc(100% - 1px)"
+                            fill={isHighlighted ? 'color-mix(in srgb, var(--color-admin-accent) 10%, transparent)' : 'none'}
+                            stroke="white"
+                            strokeWidth={1}
+                            strokeOpacity={isHighlighted ? 0.18 : 0}
+                            style={{
+                                rx: hoverRingRadius,
+                                ry: hoverRingRadius,
+                                transition: 'stroke-opacity 120ms ease, fill-opacity 120ms ease, rx 0.2s ease, ry 0.2s ease',
+                            }}
+                        />
 
-                {/* focus-rect: anillo al seleccionar, en el color de acento admin editable desde
-                    la pestaña Diseño (--color-admin-accent) — el mismo token que colorea los
-                    botones primarios (.admin-accent-ghost). Antes usaba
-                    --color-admin-selection-from/-to, que no es editable ahí. Color sólido: un
-                    degradado de dos paradas del MISMO token no aportaría variación visual.
-                    stroke centrado sobre el borde del rect; x/y = BORDER/2 para no recortar. */}
-                <rect
-                    x={GRID_BORDER_WIDTH_PX / 2}
-                    y={GRID_BORDER_WIDTH_PX / 2}
-                    width={`calc(100% - ${GRID_BORDER_WIDTH_PX}px)`}
-                    height={`calc(100% - ${GRID_BORDER_WIDTH_PX}px)`}
-                    fill="none"
-                    stroke="var(--color-admin-accent)"
-                    strokeWidth={GRID_BORDER_WIDTH_PX}
-                    strokeOpacity={isSelected ? 1 : 0}
-                    style={{
-                        rx: focusRingRadius,
-                        ry: focusRingRadius,
-                        transition: 'stroke-opacity 150ms ease, filter 150ms ease, rx 0.2s ease, ry 0.2s ease',
-                        filter: isSelected
-                            ? [
-                                'drop-shadow(0 0 8px color-mix(in srgb, var(--color-admin-accent) 40%, transparent))',
-                                'drop-shadow(0 0 3px color-mix(in srgb, var(--color-admin-accent) 30%, transparent))',
-                              ].join(' ')
-                            : 'none',
-                    }}
-                />
+                        {/* focus-rect: anillo al seleccionar, en el color de acento admin editable desde
+                            la pestaña Diseño (--color-admin-accent) — el mismo token que colorea los
+                            botones primarios (.admin-accent-ghost). Antes usaba
+                            --color-admin-selection-from/-to, que no es editable ahí. Color sólido: un
+                            degradado de dos paradas del MISMO token no aportaría variación visual.
+                            stroke centrado sobre el borde del rect; x/y = BORDER/2 para no recortar. */}
+                        <rect
+                            x={GRID_BORDER_WIDTH_PX / 2}
+                            y={GRID_BORDER_WIDTH_PX / 2}
+                            width={`calc(100% - ${GRID_BORDER_WIDTH_PX}px)`}
+                            height={`calc(100% - ${GRID_BORDER_WIDTH_PX}px)`}
+                            fill="none"
+                            stroke="var(--color-admin-accent)"
+                            strokeWidth={GRID_BORDER_WIDTH_PX}
+                            strokeOpacity={isSelected ? 1 : 0}
+                            style={{
+                                rx: focusRingRadius,
+                                ry: focusRingRadius,
+                                transition: 'stroke-opacity 150ms ease, filter 150ms ease, rx 0.2s ease, ry 0.2s ease',
+                                filter: isSelected
+                                    ? [
+                                        'drop-shadow(0 0 8px color-mix(in srgb, var(--color-admin-accent) 40%, transparent))',
+                                        'drop-shadow(0 0 3px color-mix(in srgb, var(--color-admin-accent) 30%, transparent))',
+                                      ].join(' ')
+                                    : 'none',
+                            }}
+                        />
+                    </>
+                )}
             </svg>
         </div>
     );

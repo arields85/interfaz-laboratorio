@@ -220,9 +220,11 @@ function renderBuilderCanvasWithoutMeasurement(overrides?: {
 }
 
 vi.mock('../viewer/WidgetPresentationBoundary', async () => {
-    const { useContext } = await import('react');
-    const { GridFrameScopeContext } = await import('../../hooks/tabFrameContext');
+    const { useContext, useEffect } = await import('react');
+    const { GridFrameScopeContext, TabFrameReporterContext } = await import('../../hooks/tabFrameContext');
 
+    // A widget titled 'Tab Widget' behaves like a tab-frame widget: it reports a tab width the way
+    // `WidgetFrame` does, so the selection ring / ghost / hover actions can follow the silhouette.
     function WidgetStub({
         widget,
         renderContext,
@@ -231,6 +233,17 @@ vi.mock('../viewer/WidgetPresentationBoundary', async () => {
         renderContext?: { surface?: string; isTransientResizeActive?: boolean };
     }) {
         const inGrid = useContext(GridFrameScopeContext);
+        const reportTabWidth = useContext(TabFrameReporterContext);
+        const hasTab = widget.title === 'Tab Widget';
+
+        useEffect(() => {
+            if (!hasTab) {
+                return undefined;
+            }
+            reportTabWidth?.(120);
+
+            return () => reportTabWidth?.(null);
+        }, [hasTab, reportTabWidth]);
 
         return widget.title === 'Editable Input'
             ? <input data-testid={`widget-renderer-input-${widget.id}`} defaultValue="editable" />
@@ -2791,6 +2804,66 @@ describe('BuilderCanvas', () => {
             expect(onDuplicatePlacementCommit).toHaveBeenCalledTimes(1);
             expect(onDuplicatePlacementCommit).toHaveBeenCalledWith({ x: 5, y: 4 });
             expect(onLayoutCommit).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('tab frame shape (Forma del marco = Pestaña)', () => {
+        function withMeasuredBoxes<T>(run: () => Promise<T>): Promise<T> {
+            // jsdom has no layout: give every box a size so the silhouette can be measured, then restore.
+            const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(180);
+            const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(120);
+
+            return run().finally(() => {
+                clientWidth.mockRestore();
+                clientHeight.mockRestore();
+            });
+        }
+
+        it('keeps the rounded selection rings and the standard hover actions offset for a standard-frame widget', async () => {
+            await renderInteractiveCanvas({ selectedWidgetId: 'widget-1' });
+
+            const item = screen.getByTestId('builder-canvas-item-widget-1');
+            expect(within(item).getByTestId('grid-selection-frame').querySelector('path')).toBeNull();
+            expect(within(item).getByTestId('widget-hover-actions').getAttribute('style')).toContain('top: var(--widget-spacing);');
+        });
+
+        it('traces the selection ring along the tab silhouette for a widget that reports a tab', async () => {
+            await withMeasuredBoxes(() => renderInteractiveCanvas({
+                selectedWidgetId: 'widget-1',
+                widgets: [makeWidget({ id: 'widget-1', title: 'Tab Widget' })],
+            }));
+
+            const item = screen.getByTestId('builder-canvas-item-widget-1');
+            const frame = within(item).getByTestId('grid-selection-frame');
+            expect(frame.querySelector('rect')).toBeNull();
+            expect(frame.querySelector('path[data-ring="focus"]')).not.toBeNull();
+            expect(frame.querySelector('path[data-ring="hover"]')).not.toBeNull();
+        });
+
+        it('keeps the hover actions on the visible top edge: below the tab strip for a tab widget', async () => {
+            await renderInteractiveCanvas({
+                widgets: [makeWidget({ id: 'widget-1', title: 'Tab Widget' })],
+            });
+
+            const item = screen.getByTestId('builder-canvas-item-widget-1');
+            expect(within(item).getByTestId('widget-hover-actions').getAttribute('style'))
+                .toContain('top: calc(var(--widget-spacing) + var(--tab-frame-height));');
+        });
+
+        it('draws the placement ghost of a tab widget with the silhouette too', async () => {
+            await withMeasuredBoxes(() => renderInteractiveCanvas({
+                cols: 20,
+                rows: 12,
+                resizeWidth: 1200,
+                resizeHeight: 720,
+                layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+                widgets: [makeWidget({ id: 'widget-1', title: 'Tab Widget' })],
+                placementSourceWidgetId: 'widget-1',
+            }));
+
+            const ghost = screen.getByTestId('builder-canvas-placement-ghost-source');
+            expect(ghost.querySelector('rect')).toBeNull();
+            expect(ghost.querySelector('path[data-ring="hover"]')).not.toBeNull();
         });
     });
 });

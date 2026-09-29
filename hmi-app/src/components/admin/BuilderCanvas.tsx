@@ -7,6 +7,7 @@ import type { HierarchyContext } from '../../widgets/resolvers/hierarchyResolver
 import GridSelectionFrame from '../ui/GridSelectionFrame';
 import WidgetHoverActions from '../ui/WidgetHoverActions';
 import { GridFrameScope } from '../ui/GridFrameScope';
+import { useTabFrameWidths } from '../../hooks/useTabFrameWidths';
 import CursorTooltip from '../ui/CursorTooltip';
 import {
     HEADER_WIDGET_SLOT_COUNT,
@@ -194,10 +195,13 @@ function PlacementGhostRect({
     testId,
     px,
     widgetType,
+    tabWidth = null,
 }: {
     testId: string;
     px: WidgetPixelBounds;
     widgetType: WidgetConfig['type'];
+    /** Tab width (px) of the source widget when its frame is the tab shape: the ghost follows it. */
+    tabWidth?: number | null;
 }) {
     return (
         <div
@@ -215,6 +219,7 @@ function PlacementGhostRect({
                 isHighlighted
                 radius={getWidgetCornerRadius(widgetType)}
                 inset={resolveWidgetSurfaceInset({ type: widgetType })}
+                tabWidth={tabWidth}
             />
         </div>
     );
@@ -410,6 +415,9 @@ export default function BuilderCanvas({
     const rightEdgeUsesMajorLine = cols % GRID_MAJOR_INTERVAL_CELLS === 0;
     const bottomEdgeUsesMajorLine = rows % GRID_MAJOR_INTERVAL_CELLS === 0;
     const isGridVisible = useUIStore((state) => state.isGridVisible);
+    // Tab frame shape: each widget reports the width of its tab so the selection ring, the placement
+    // ghosts and the hover actions follow the tab + chamfered body silhouette (WYSIWYG with the viewer).
+    const { widths: tabWidths, reporterFor: tabWidthReporterFor } = useTabFrameWidths();
     const { containerRef, width, height, rowHeight, cellWidth, hasFirstValidMeasurement } = useCanvasReference({
         cols,
         rows,
@@ -1117,6 +1125,7 @@ export default function BuilderCanvas({
                                     isHighlighted={false}
                                     radius={getWidgetCornerRadius(widget.type)}
                                     inset={resolveWidgetSurfaceInset(widget)}
+                                    tabWidth={tabWidths[widget.id] ?? null}
                                 />
 
                                 <WidgetHoverActions
@@ -1124,7 +1133,10 @@ export default function BuilderCanvas({
                                     // visible top border — a group container's border now sits
                                     // at the grid line (no inset), so its actions must not use
                                     // the standard --widget-spacing offset either.
-                                    top={resolveWidgetSurfaceInset(widget)}
+                                    // Tab shape: the visible top edge under the tab strip is the body's.
+                                    top={tabWidths[widget.id] !== undefined
+                                        ? `calc(${resolveWidgetSurfaceInset(widget)} + var(--tab-frame-height))`
+                                        : resolveWidgetSurfaceInset(widget)}
                                     // D6: a member of a locked group NOT in edit mode acts as
                                     // part of the container — it gets no hover actions of its
                                     // own; the container's own actions (copy/delete/lock/pencil,
@@ -1200,7 +1212,7 @@ export default function BuilderCanvas({
                                     className="pointer-events-none relative z-0 h-full w-full box-border"
                                     style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
-                                    <GridFrameScope>
+                                    <GridFrameScope onTabWidth={tabWidthReporterFor(widget.id)}>
                                         <WidgetPresentationBoundary
                                             widget={widget}
                                             equipmentMap={equipmentMap}
@@ -1244,6 +1256,7 @@ export default function BuilderCanvas({
                                     testId="builder-canvas-placement-ghost-source"
                                     px={containerPx}
                                     widgetType={placementSource.type}
+                                    tabWidth={tabWidths[placementSourceWidgetId] ?? null}
                                 />
                                 {placementSource.memberGhosts.map((member) => {
                                     const memberPx = layoutToPixelBounds(
@@ -1261,6 +1274,7 @@ export default function BuilderCanvas({
                                             testId={`builder-canvas-placement-ghost-member-${member.id}`}
                                             px={memberPx}
                                             widgetType={member.type}
+                                            tabWidth={tabWidths[member.id] ?? null}
                                         />
                                     );
                                 })}

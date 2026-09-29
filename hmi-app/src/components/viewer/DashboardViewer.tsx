@@ -17,6 +17,7 @@ import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 import { ViewerEntranceContext } from '../../hooks/useViewerEntranceCountUp';
 import { GridFrameScope } from '../ui/GridFrameScope';
+import { useTabFrameWidths } from '../../hooks/useTabFrameWidths';
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -90,6 +91,10 @@ export default function DashboardViewer({
     });
 
     const widgetMap = new Map(widgets.map(w => [w.id, w]));
+
+    // Tab frame shape: each widget reports the width of its tab so the entrance overlays follow the
+    // tab + chamfered body silhouette (only widgets whose frame is the tab shape appear here).
+    const { widths: tabWidths, reporterFor } = useTabFrameWidths();
 
     // G5 group hover: shared state so a locked group's container can show its hover look while
     // the pointer is anywhere over the group (container or any member) — they are sibling grid
@@ -198,7 +203,7 @@ export default function DashboardViewer({
                                     style={{ padding: resolveWidgetSurfaceInset(widget) }}
                                 >
                                     <ViewerEntranceContext.Provider value={entranceKey !== undefined ? (entranceOrders.get(widget.id) ?? 0) : null}>
-                                        <GridFrameScope>
+                                        <GridFrameScope onTabWidth={reporterFor(widget.id)}>
                                             <WidgetPresentationBoundary
                                                 widget={effectiveWidget}
                                                 equipmentMap={equipmentMap}
@@ -219,6 +224,7 @@ export default function DashboardViewer({
                                         <ViewerEntranceFrameOverlays
                                             widgetId={widget.id}
                                             inset={resolveWidgetSurfaceInset(widget)}
+                                            tabWidth={tabWidths[widget.id] ?? null}
                                         />
                                     ) : null}
                                 </div>

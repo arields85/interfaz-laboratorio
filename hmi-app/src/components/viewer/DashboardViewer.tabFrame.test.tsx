@@ -22,11 +22,23 @@ class MockResizeObserver implements ResizeObserver {
 
 // The stub reads the grid scope the way `WidgetFrame` does, to assert what the viewer provides.
 vi.mock('./WidgetPresentationBoundary', async () => {
-    const { useContext } = await import('react');
-    const { GridFrameScopeContext } = await import('../../hooks/tabFrameContext');
+    const { useContext, useEffect } = await import('react');
+    const { GridFrameScopeContext, TabFrameReporterContext } = await import('../../hooks/tabFrameContext');
 
+    // Widget "a" behaves like a tab-frame widget: it reports a tab width like `WidgetFrame` does.
     function WidgetStub(props: { widget: { id: string } }) {
         const inGrid = useContext(GridFrameScopeContext);
+        const reportTabWidth = useContext(TabFrameReporterContext);
+
+        useEffect(() => {
+            if (props.widget.id !== 'a') {
+                return undefined;
+            }
+            reportTabWidth?.(180);
+
+            return () => reportTabWidth?.(null);
+        }, [props.widget.id, reportTabWidth]);
+
         return <div data-testid={`widget-renderer-${props.widget.id}`} data-in-grid={String(inGrid)} />;
     }
 
@@ -72,5 +84,29 @@ describe('DashboardViewer frame shape scope', () => {
 
         expect(screen.getByTestId('widget-renderer-a')).toHaveAttribute('data-in-grid', 'true');
         expect(screen.getByTestId('widget-renderer-b')).toHaveAttribute('data-in-grid', 'true');
+    });
+
+    it('gives the entrance overlays of a tab-frame widget its tab width, and only that widget', () => {
+        const widgets = [makeWidget({ id: 'a' }), makeWidget({ id: 'b' })];
+        const layout = [makeLayout({ widgetId: 'a', x: 0, y: 0 }), makeLayout({ widgetId: 'b', x: 4, y: 0 })];
+
+        const { container } = render(
+            <DashboardViewer
+                widgets={widgets}
+                layout={layout}
+                equipmentMap={new Map()}
+                cols={24}
+                rows={12}
+                entranceKey="dash:view"
+            />,
+        );
+        measure(container);
+
+        const flashA = screen.getByTestId('dashboard-viewer-entrance-flash-a');
+        expect(flashA).toHaveClass('hmi-viewer-entrance-flash-tab');
+        expect(flashA.style.getPropertyValue('--tab-frame-tab-width')).toBe('180px');
+
+        const flashB = screen.getByTestId('dashboard-viewer-entrance-flash-b');
+        expect(flashB).not.toHaveClass('hmi-viewer-entrance-flash-tab');
     });
 });

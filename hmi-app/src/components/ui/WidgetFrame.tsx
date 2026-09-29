@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import type { HTMLAttributes, ReactNode, Ref } from 'react';
 import { useTabFrameActive } from '../../hooks/useTabFrameActive';
-import { TabFrameContext } from '../../hooks/tabFrameContext';
+import { TabFrameContext, TabFrameReporterContext } from '../../hooks/tabFrameContext';
 
 // =============================================================================
 // WidgetFrame
@@ -55,6 +55,26 @@ export default function WidgetFrame({
     const tabActive = useTabFrameActive(widgetType, title);
     const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
     const tabContext = useMemo(() => ({ titleHost }), [titleHost]);
+    const reportTabWidth = useContext(TabFrameReporterContext);
+
+    // Publish the tab width (it follows the title) for the layers that trace the silhouette; an
+    // unmeasured tab (width 0, e.g. not laid out yet) is reported as unknown.
+    useEffect(() => {
+        if (!tabActive || !titleHost || !reportTabWidth) {
+            return undefined;
+        }
+
+        const publish = () => reportTabWidth(titleHost.offsetWidth > 0 ? titleHost.offsetWidth : null);
+        publish();
+
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+        resizeObserver?.observe(titleHost);
+
+        return () => {
+            resizeObserver?.disconnect();
+            reportTabWidth(null);
+        };
+    }, [tabActive, titleHost, reportTabWidth]);
 
     // `Tag` is a `div` or an `article`: a `Ref<HTMLElement>` type-checks on neither intrinsic
     // element type, so the ref is narrowed to `never` at the JSX boundary (runtime is unaffected).
