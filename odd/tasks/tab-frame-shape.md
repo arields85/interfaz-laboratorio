@@ -60,12 +60,12 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
 
 ## Tasks
 
-- [ ] **F1** — Setting + shape infrastructure: "Forma del marco" control in Tema (persisted like the other
+- [x] **F1** — Setting + shape infrastructure: "Forma del marco" control in Tema (persisted like the other
   visual settings, overrides only, default Estándar), a way for components to know the active shape, tab/body
   geometry tokens, the tab + chamfered body + border overlay, applied first to `machine-activity`.
-- [ ] **F2** — Roll out to `kpi`, `metric-card`, `info-card`, titled `group`; charts and the other listed
+- [x] **F2** — Roll out to `kpi`, `metric-card`, `info-card`, titled `group`; charts and the other listed
   widgets stay standard.
-- [ ] **F3** — Builder and entrance follow the shape: selection frame, placement ghosts, hover actions,
+- [x] **F3** — Builder and entrance follow the shape: selection frame, placement ghosts, hover actions,
   viewer entrance flash + outline.
 - [ ] **F4** — Live look with the user and tuning.
 
@@ -93,7 +93,39 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
   `.glass-panel` on each renderer root; `ThemeStyle` in `domain/themeStyle.types.ts`; builder
   `GridSelectionFrame`/`HeaderSelectionFrame`/`getWidgetCornerRadius`; entrance `ViewerEntranceFrameOverlays`.
   Route for F1–F3: delegated writer (writer trigger: 2+ non-trivial files).
+- 2026-09-29 (F1–F3, delegated writer, strict TDD, Vitest; RED observed before each GREEN):
+  - F1 `cc1450b` feat(theme): setting + shape infrastructure + machine-activity. Mechanism: Zustand
+    `store/frameShape.store.ts` written by `services/frameShape.service.ts` (storage key `hmi-frame-shape`, override
+    only, mirrored as `data-frame-shape` on `<html>`), read through `hooks/useFrameShape.ts`. Eligibility in ONE place:
+    `supportsTabFrame` (`utils/widgetCapabilities.ts`) + `hooks/useTabFrameActive.ts` (shape tab + inside a dashboard
+    grid `GridFrameScope` + eligible type + non-empty title). `components/ui/WidgetFrame.tsx` renders either today's single
+    element (standard) or a shell with surface (glass classes clipped to the chamfered body + `.hmi-tab-frame-border`
+    band), unclipped content and the tab (title portaled from `WidgetHeader`). RED: service (module missing), capabilities
+    (`supportsTabFrame` not a function), WidgetFrame (modules missing), CSS text (9/11 failing), ThemeSettingsTab (10
+    failing), MachineActivity tab test (4/6 failing with the widget reverted), grid scope in viewer/builder (failing
+    with the wrapper reverted). GREEN: same files. GGA blocked the first attempt (state must live in Zustand, context
+    beside the hooks, redundant inline colors, cast comment) and passed after the fixes.
+  - F2 `9e9c187` feat(widgets): kpi, metric-card (state class stays on the surface), info-card, titled group. RED: 7/15
+    failing in `widgets/renderers/tabFrameRollout.test.tsx` before the renderers used `WidgetFrame`.
+  - F3 `5d98403` feat(builder): tab width reported per widget (`hooks/useTabFrameWidths.ts`, `TabFrameReporter`);
+    `GridSelectionFrame` + placement ghosts trace `utils/tabFramePath.ts` paths (measured by
+    `hooks/useTabFrameGeometry.ts`); hover actions sit `--tab-frame-height` lower; entrance flash clipped with CSS
+    (`.hmi-viewer-entrance-flash-tab`), outline is a `<path pathLength="1">` sharing the rect's animated stroke rule.
+    `HeaderSelectionFrame` unchanged: header-slot widgets never take the tab shape. RED: tabFramePath util, widths hook,
+    GridSelectionFrame tab, overlays tab, viewer entrance wiring, builder tab tests (3/4 failing), CSS flash rule.
+  - Fix `84ee23d`: content element reserves the frame border width (1px, 2px for warning/critical) so header/subtitle/
+    footer do not sit 1px up-left of the standard frame.
+  - Final commands (in `hmi-app/`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 252 files / 3197 tests passed;
+    `npm run build` ok (all rerun after the last commit `84ee23d`).
+  - Not verifiable without a browser (F4): pixel match of the content positions, diagonal border crispness, hover/state
+    colors, the entrance outline on the polygon, icon shift, tab text metrics, `box-shadow` glow of warning/critical
+    (clipped by the chamfer clip-path in tab mode), and the top corner accents (clipped away in tab mode).
+  - Token defaults (`index.css`, px CSS = screenshot px / 1.5): `--tab-frame-height: 25px`, `--tab-frame-tab-cut:
+    var(--tab-frame-height)`, `--tab-frame-body-cut: 50px`, `--tab-frame-fill: #a9aaad`, `--tab-frame-text:
+    var(--color-industrial-bg)`, `--tab-frame-pad-start: 1.25rem`, `--tab-frame-pad-end: 0.3rem`,
+    `--tab-frame-icon-shift-x: 1.25rem`, `--tab-frame-icon-shift-y: 0.5rem`.
 
 ## Next step
 
-F1–F3 via one delegated writer, then F4 live look.
+F4 live look with the user and tuning (see the token table above; the measured defaults assume the screenshots
+were taken at 150 % display scale).
