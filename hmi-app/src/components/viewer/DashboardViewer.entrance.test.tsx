@@ -315,6 +315,35 @@ describe('DashboardViewer entrance frame overlays (flash + outline)', () => {
         expect(screen.queryByTestId('dashboard-viewer-entrance-outline-t')).not.toBeInTheDocument();
     });
 
+    it.each(['status', 'connection-status'] as const)(
+        'draws no overlay on a %s widget whose frame and background are hidden',
+        (type) => {
+            const frameless = makeWidget({ id: 'f', type, displayOptions: { showFrame: false } });
+            renderViewer({
+                widgets: [frameless],
+                layout: [makeLayout({ widgetId: 'f', x: 0, y: 0 })],
+                entranceKey: 'k',
+            });
+
+            expect(screen.queryByTestId('dashboard-viewer-entrance-flash-f')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('dashboard-viewer-entrance-outline-f')).not.toBeInTheDocument();
+            // The widget itself still enters with its staggered order.
+            expect(screen.getByTestId('dashboard-viewer-item-f')).toHaveClass('hmi-viewer-entrance-item');
+        },
+    );
+
+    it.each([{ showFrame: true }, {}])('keeps the overlays on a status widget that shows its frame (%o)', (displayOptions) => {
+        const framed = makeWidget({ id: 'f', type: 'status', displayOptions });
+        renderViewer({
+            widgets: [framed],
+            layout: [makeLayout({ widgetId: 'f', x: 0, y: 0 })],
+            entranceKey: 'k',
+        });
+
+        expect(screen.getByTestId('dashboard-viewer-entrance-flash-f')).toBeInTheDocument();
+        expect(screen.getByTestId('dashboard-viewer-entrance-outline-f')).toBeInTheDocument();
+    });
+
     it('renders no overlay without an entrance key (builder-like static render)', () => {
         renderViewer();
 

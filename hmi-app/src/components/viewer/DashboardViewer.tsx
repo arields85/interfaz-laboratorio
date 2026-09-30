@@ -18,6 +18,16 @@ import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 import { ViewerEntranceContext } from '../../hooks/useViewerEntranceCountUp';
 import { GridFrameScope } from '../ui/GridFrameScope';
 import { useTabFrameWidths } from '../../hooks/useTabFrameWidths';
+import { getWidgetFrameOption } from '../../utils/headerWidgets';
+import { resolveWidgetFrameVisible } from '../../utils/widgetFrameVisibility';
+
+/**
+ * Whether a grid widget draws a frame the entrance flash and outline can decorate: a text title
+ * never has one, and a widget whose "Mostrar fondo y marco" option is off has none either.
+ */
+function drawsGridFrame(widget: WidgetConfig): boolean {
+    return widget.type !== 'text-title' && resolveWidgetFrameVisible(getWidgetFrameOption(widget), 'grid');
+}
 
 interface DashboardViewerProps {
     widgets: WidgetConfig[];
@@ -220,7 +230,7 @@ export default function DashboardViewer({
                                             />
                                         </GridFrameScope>
                                     </ViewerEntranceContext.Provider>
-                                    {entranceKey !== undefined && widget.type !== 'text-title' ? (
+                                    {entranceKey !== undefined && drawsGridFrame(widget) ? (
                                         <ViewerEntranceFrameOverlays
                                             widgetId={widget.id}
                                             inset={resolveWidgetSurfaceInset(widget)}
