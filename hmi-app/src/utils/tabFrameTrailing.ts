@@ -8,6 +8,11 @@
 // slanted side and paddings) is under `--tab-frame-min-title`, the title tab is hidden cleanly
 // instead of being drawn under the selector.
 //
+// When the trailing content does not fit in the frame (right offset + host + one gap wider than the
+// frame), it falls back to the body header row (`placement: 'body'`): the title tab is then back to
+// normal, alone in the strip with the icon. The decision reads only the content's INTRINSIC width
+// (not where it is rendered), so it never flips back and forth.
+//
 // Pure pixel maths; `WidgetFrame` measures the shell and the trailing host and reads the tokens.
 // =============================================================================
 
@@ -31,6 +36,8 @@ export interface TabFrameTrailingInput {
     minTitle: number;
 }
 
+export type TabFrameTrailingPlacement = 'strip' | 'body';
+
 export interface TabFrameTrailingLayout {
     /** Space (px) the tab leaves free at the right of the frame. */
     reserve: number;
@@ -38,6 +45,8 @@ export interface TabFrameTrailingLayout {
     titleRoom: number;
     /** True when the title tab must not be shown. */
     titleHidden: boolean;
+    /** Where the trailing content lives: the top strip, or (it does not fit there) the body header row. */
+    placement: TabFrameTrailingPlacement;
 }
 
 function finite(value: number): number {
@@ -48,17 +57,19 @@ export function resolveTabFrameTrailing(input: TabFrameTrailingInput): TabFrameT
     const baseReserve = finite(input.baseReserve);
     const hostWidth = Math.max(0, finite(input.hostWidth));
     const hasTrailing = hostWidth > 0;
-    const reserve = hasTrailing
-        ? Math.max(baseReserve, finite(input.right) + hostWidth + Math.max(0, finite(input.gap)))
-        : baseReserve;
     const frameWidth = finite(input.frameWidth);
+    const stripEnd = finite(input.right) + hostWidth + Math.max(0, finite(input.gap));
+    // Wider than the frame (once measured): the content would stick out of it, so it goes to the body row.
+    const inBody = hasTrailing && frameWidth > 0 && stripEnd > frameWidth;
+    const reserve = hasTrailing && !inBody ? Math.max(baseReserve, stripEnd) : baseReserve;
     const titleRoom = frameWidth - reserve - finite(input.tabCut) - finite(input.padStart) - finite(input.padEnd);
 
     return {
         reserve,
         titleRoom,
         // Only a frame with strip content hides its title, and only once it has been measured.
-        titleHidden: hasTrailing && frameWidth > 0 && titleRoom < finite(input.minTitle),
+        titleHidden: hasTrailing && !inBody && frameWidth > 0 && titleRoom < finite(input.minTitle),
+        placement: inBody ? 'body' : 'strip',
     };
 }
 

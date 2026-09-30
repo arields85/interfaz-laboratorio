@@ -8,6 +8,7 @@ import {
     supportsCatalogVariable,
     supportsHierarchy,
     supportsTabFrame,
+    supportsTabFrameTrailingStrip,
 } from './widgetCapabilities';
 
 describe('widgetCapabilities', () => {
@@ -172,5 +173,36 @@ describe('widgetCapabilities tab frame eligibility', () => {
         'not-a-widget-type',
     ])('keeps %s on the standard frame', (widgetType) => {
         expect(supportsTabFrame(widgetType)).toBe(false);
+    });
+});
+
+describe('widgetCapabilities tab frame trailing strip opt-in', () => {
+    it.each([
+        'trend-chart',
+        'trend-chart-v2',
+        'prod-trend',
+        'prod-history',
+        'activity-analytics',
+    ])('lets the %s chart host its header selector in the tab strip', (widgetType) => {
+        expect(supportsTabFrameTrailingStrip(widgetType)).toBe(true);
+    });
+
+    it.each([
+        'machine-activity',
+        'kpi',
+        'metric-card',
+        'info-card',
+        'group',
+        'status',
+        'alert-history',
+        'not-a-widget-type',
+    ])('keeps the header trailing content of %s in its header row', (widgetType) => {
+        expect(supportsTabFrameTrailingStrip(widgetType)).toBe(false);
+    });
+
+    it('only opts in widgets that can take the tab frame at all', () => {
+        for (const widgetType of ['trend-chart', 'trend-chart-v2', 'prod-trend', 'prod-history', 'activity-analytics']) {
+            expect(supportsTabFrame(widgetType)).toBe(true);
+        }
     });
 });

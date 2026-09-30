@@ -120,6 +120,28 @@ export function supportsTabFrame(widgetType: string): boolean {
 }
 
 /**
+ * Widget types that move the header's `trailing` content (their period / scale selector) into the top
+ * strip of the tab frame shape. An explicit opt-in, decided here and carried through the tab frame
+ * context (`WidgetFrame` -> `WidgetHeader`): every other tab widget that passes `trailing` keeps it
+ * in its header row, with the row's height. The strip only holds it while it fits in the frame (see
+ * `utils/tabFrameTrailing.ts`); otherwise the selector falls back to that same header row.
+ */
+const TAB_FRAME_TRAILING_STRIP_WIDGET_TYPES: ReadonlySet<string> = new Set<WidgetType>([
+    'trend-chart',
+    'trend-chart-v2',
+    'prod-trend',
+    'prod-history',
+    'activity-analytics',
+]);
+
+/**
+ * Returns true when the widget type hosts its header `trailing` content in the tab frame's top strip.
+ */
+export function supportsTabFrameTrailingStrip(widgetType: string): boolean {
+    return TAB_FRAME_TRAILING_STRIP_WIDGET_TYPES.has(widgetType);
+}
+
+/**
  * Returns true when a concrete widget config needs nested-interactive navigation handling.
  */
 export function hasNestedInteractiveNavigationForConfig(widget: Pick<WidgetConfig, 'type' | 'hierarchyMode'>): boolean {
