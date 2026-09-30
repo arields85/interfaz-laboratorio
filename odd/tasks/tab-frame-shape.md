@@ -287,9 +287,9 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     row (`flex flex-col`, like the other admin panels). RED 1 -> GREEN 65/65 (`ThemeSettingsTab`,
     `GlobalSettingsDialog`). Commit `7955394`.
 
-## F7 — Group widget title as a tab (requested 2026-09-29, NOT started)
+## F7 — Group widget title as a tab (requested 2026-09-29, implemented 2026-09-30, live look pending)
 
-- [ ] **F7** — The `group` widget's title and icon adopt the same tab format as the other tab-frame widgets
+- [x] **F7** — The `group` widget's title and icon adopt the same tab format as the other tab-frame widgets
   (they already get the tab when titled; this changes the title's TYPOGRAPHY and the tab's HEIGHT):
   - Title typography = exactly the `text-title` widget's typography and settings ("Texto" and "Tamaño", e.g.
     35), WITHOUT its "Alinear" and "Color" options (not needed for the group).
@@ -302,16 +302,57 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     with any preset — NOT tied to Instrumento. F7 follows the same rule as the other tab widgets.
   - Property panel: the group's title needs the text-title "Tamaño" control (load the project skill
     `widget-property-panel` before touching property panels).
+  - Outcome (delegated writer, strict TDD, Vitest; commits `8af3bc2`, `3a3ca55`, `b09d21f`, `12b32f8`):
+    - [x] Typography: `utils/dashboardTitleTypography.ts` (`buildDashboardTitleTypography`, line height 1.1) is now the
+      single source of the `text-title` typography (`TextTitleWidget` uses it; its tests stay green) and the group tab
+      title uses it (font, weight, tracking from the `--font-dashboard-title`/`-weight-`/`--tracking-` tokens, `fontSize` px,
+      no Alinear/Color). Colors, hover and `transition-colors` are the other tabs' (`--tab-frame-text` ->
+      `--tab-frame-text-hover`); the data-mode dot rule is untouched. Decision (adjustable): the title is shown AS TYPED
+      (no `uppercase`), like the `text-title` widget; the other tabs stay uppercase.
+    - [x] Taller tab: token `--tab-frame-title-pad-y: 4.25px` (= (25 px - 11 px x 1.5 line box) / 2, i.e. the standard tab's
+      spacing around the standard title). `resolveTabFrameHeight` (`utils/tabFrameHeight.ts`) = `max(--tab-frame-height,
+      fontSize x 1.1 + 2 x pad-y)`; default 35 px -> 47 px; 12 px stays at 25 px. `WidgetFrame` takes `tabTitleFontSize`
+      (only used while the frame is the tab shape), computes it with `hooks/useTabFrameHeight.ts` (tokens read from the
+      document root, not the shell, to avoid feedback; re-measures on html style changes) and publishes it as the shell's own
+      inline `--tab-frame-height`, so the fill, the border clip, the tab and the icon host follow with no CSS change. The
+      title span carries `padding-top/bottom: var(--tab-frame-title-pad-y)` so `truncate` never clips ascenders/descenders.
+      Outer size and content positions do not change (the tab overlays the widget's own space; the body line moves down).
+    - [x] Mapping of every reader of the tab height (rg `tab-frame-height`): (1) `index.css` fill, border clip, tab (inside the
+      shell: follow the inline override); (2) `useTabFrameGeometry` and `useTabFrameIconPlacement` (both now take an optional
+      `tabHeight`, used by `WidgetFrame`); (3) OUTSIDE the shell, which cannot see the inline value: `GridSelectionFrame`
+      (rings, also the placement ghosts through `PlacementGhostRect`), `ViewerEntranceFrameOverlays` (flash + outline) and the
+      `BuilderCanvas` hover-actions offset (it read `var(--tab-frame-height)`). Fix: `TabFrameReporter(width, height?)` reports
+      the effective height next to the width only when there is an own size (so every other widget reports exactly as before),
+      `useTabFrameWidths` returns `heights`, and `BuilderCanvas`/`DashboardViewer` pass `tabHeight` to those layers
+      (`resolveHoverActionsTop` builds the offset). Tests prove each consumer uses the taller height.
+    - [x] Data and panel: `GroupDisplayOptions.titleFontSize?: number` (`domain/admin.types.ts`); default
+      `DEFAULT_TEXT_TITLE_FONT_SIZE` (35), adjustable in the live look. `PropertyDock` General section shows the same
+      "Tamaño" row as `text-title` (`DockFieldRow` + `AdminNumberInput`, min 12, max 200, `commitOnBlur`) for `group` only;
+      no new primitive; it is always shown (it only takes effect while the frame is the tab shape).
+    - [x] Estándar unchanged: no standard-frame code path changed (the prop, the context field and the reporter height are
+      only used in the tab shape); tests assert the group in the standard shape keeps the uppercase body title, no inline
+      height, and the other tab widgets keep the uppercase title, no height override and `report(width)` with one argument.
+    - RED/GREEN: `dashboardTitleTypography` + `tabFrameHeight` (modules missing, 2 files failed) and `tabFrame.css.test` (1
+      failed: pad-y token) -> GREEN 30/30 with `TextTitleWidget`; `WidgetFrame.test` 8 failed (height, floor, live, silhouette,
+      icon top, reporter, typography, padding) -> GREEN 48/48; consumers 7 failed (`useTabFrameWidths` 3, `GridSelectionFrame` 2,
+      `ViewerEntranceFrameOverlays` 1, `DashboardViewer` 1) + `BuilderCanvas` 3 failed (hover actions offset, rings, ghost) ->
+      GREEN; `tabFrameRollout` 2 failed (group typography/size) and `PropertyDock` 2 failed (Tamaño default and persistence) ->
+      GREEN.
+    - Not verifiable without a browser (live look): how 47 px of tab looks at the default 35 px (tab, junction rounding,
+      title truncation next to the icon); the tab cut (`--tab-frame-tab-cut: 19px`) is a fixed px, so a taller tab makes the
+      slanted side steeper (decision for the live look: scale it with the height?); real font metrics of the title font
+      against the 1.1 line height and the 4.25 px pad; the icon placement with the taller tab and body cut 0 (it sits in the
+      strip at the top right); `uppercase` off; the real hover color transition.
 
 ## Next step — EXACT RETURN POINT (session closed 2026-09-29)
 
 State: branch `feat/tab-frame-shape` (main checkout, the user's dev server serves it), HEAD = the commit that
 records this closeout on top of `ce94353`; working tree clean except the untracked `.gga` (never commit it).
 Local `main` = `40ad436` (viewer entrance animation merged), 26 commits ahead of `origin/main`, NOT pushed.
-F1–F6 done and accepted live; F7 pending. Order agreed with the user:
+F1–F6 done and accepted live; F7 implemented 2026-09-30 (commits `8af3bc2`..`12b32f8`), live look pending. Order agreed with the user:
 
-1. F7 — group widget tab title (above). Implement first (the user wants it before the closeout steps; Pestaña stays independent of the theme), with TDD,
-   then a live look.
+1. F7 — group widget tab title (above). DONE in code (TDD, all four commands green); needs the live look (Pestaña selected,
+   a titled group, "Tamaño" in the property panel) before the closeout steps.
 2. Native review of the branch in slices (the whole branch, ~5500 lines, exceeds the reviewer budget —
    `lens_context_budget_exceeded`). Proposed slices from the F1 boundary `40ad436`: `..cc1450b` (F1, ~1600),
    `..84ee23d` (F2–F3), `..e4a07ef` (F5), `..3bece2f` (F6 + style lab), `..HEAD` (tuning + F7). Each slice end
@@ -326,3 +367,16 @@ F1–F6 done and accepted live; F7 pending. Order agreed with the user:
    Steps 3 and 4 wait for the user's visual review.
 3. Fast-forward merge `feat/tab-frame-shape` into local `main` (only on the user's OK).
 4. Push `main` to `origin` only when the user decides.
+
+- 2026-09-30 (F7, delegated writer, strict TDD, Vitest). Route: delegated writer (writer trigger: 2+ non-trivial files);
+  the writer mapped every reader of the tab height first (`rg`, see the F7 item). Commits: `8af3bc2`
+  feat(theme) tab title height rule + shared typography (110+/6-); `3a3ca55` feat(theme) grow the tab with a title that has its
+  own size (323+/23-, over the ~400 heuristic only through tests: frame, header, hooks and their tests share one behavior);
+  `b09d21f` feat(theme) builder and entrance layers follow the reported tab height (230+/27-); `12b32f8` feat(widgets) group
+  tab title + Tamaño control + docs (107+/3-). GGA passed every commit (advice only: `min`/`max` 12/200 now repeated 3 times,
+  could become `MIN_/MAX_TEXT_TITLE_FONT_SIZE`; `stroke="white"` in the tab hover ring copies the existing rect branch).
+  - Token added (`index.css` `:root`): `--tab-frame-title-pad-y: 4.25px`. All other tokens unchanged.
+  - Final commands (in `hmi-app/`, after the last code commit `12b32f8`): `npx tsc -b` clean; `npm run lint` clean;
+    `npm test` 256 files / 3273 tests passed (one earlier full run failed 1 test in `Topbar.test.tsx` "continues admin
+    navigation immediately when runtime short is disabled": it passes alone, in `src/components` twice and in the next full run;
+    unrelated to this work, looks load-timing-dependent); `npm run build` ok.
