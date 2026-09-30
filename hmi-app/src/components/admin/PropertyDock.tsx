@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings2, Database, Zap, Sliders, Tag, Gauge, Activity, Thermometer, Droplet, Wind, Settings, Fan, FoldVertical, History, HelpCircle, ChevronDown, MousePointerClick, TrendingUp, BarChart2, AreaChart, Lock, Loader2, AlignLeft, AlignCenter, AlignRight, HeartPulse, Siren, Wifi, LineChart, Info, Pencil, Group } from 'lucide-react';
-import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField, TextAlign } from '../../domain/admin.types';
+import type { AggregationMode, Dashboard, WidgetConfig, WidgetBinding, WidgetLayout, KpiDisplayOptions, MetricCardDisplayOptions, AlertHistoryDisplayOptions, ConnectionStatusDisplayOptions, StatusDisplayOptions, ProdHistoryDisplayOptions, MachineActivityDisplayOptions, TextTitleDisplayOptions, GroupDisplayOptions, TextTitleColor, TrendChartDisplayOptions, TrendChartV2DisplayOptions, ActivityAnalyticsAlphaPair, ActivityAnalyticsDisplayOptions, ActivityAnalyticsStateGradientKey, ActivityAnalyticsSurfaceEffects, ActivityAnalyticsTrendBandBlendMode, ProdTrendDisplayOptions, KpiFixedTopCapEffects, KpiTravelingTopCapEffects, KpiTopCapShape, InfoCardDisplayOptions, InfoCardField, TextAlign } from '../../domain/admin.types';
 import { isTrendChartV2Widget } from '../../domain/admin.types';
 import { ACTIVITY_ANALYTICS_TREND_BAND_BLEND_MODE_OPTIONS } from '../../domain/admin.types';
 import { HISTORICAL_DENSITY_LABELS, normalizeHistoricalDensity } from '../../utils/trendChartV2Density';
@@ -1772,6 +1772,19 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     placeholder={isDashboardTitle ? 'ej. Producción' : 'ej. Velocidad'}
                                 />
                             </DockFieldRow>
+                            {/* Tamaño del título en la pestaña (group): el mismo control que text-title, sin Alinear ni Color. */}
+                            {selectedWidget.type === 'group' && (
+                                <DockFieldRow label="Tamaño">
+                                    <AdminNumberInput
+                                        value={(selectedWidget.displayOptions as GroupDisplayOptions | undefined)?.titleFontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE}
+                                        min={12}
+                                        max={200}
+                                        step={1}
+                                        commitOnBlur
+                                        onChange={val => handleNumericDisplayOptionChange('titleFontSize', val)}
+                                    />
+                                </DockFieldRow>
+                            )}
                             {/* Subtítulo: header del widget (debajo del título). KPI y MetricCard. */}
                              {(selectedWidget.type === 'kpi' || selectedWidget.type === 'metric-card') && (
                                  <DockFieldRow label="Subtítulo">

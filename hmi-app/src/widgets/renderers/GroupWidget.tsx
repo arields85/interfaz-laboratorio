@@ -21,6 +21,7 @@ import {
 import type { GroupWidgetConfig } from '../../domain/admin.types';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetFrame from '../../components/ui/WidgetFrame';
+import { DEFAULT_TEXT_TITLE_FONT_SIZE } from './TextTitleWidget';
 
 // =============================================================================
 // GroupWidget
@@ -30,6 +31,10 @@ import WidgetFrame from '../../components/ui/WidgetFrame';
 // que se colocan encima. Qué widgets están agrupados (`memberWidgetIds`) y
 // si el contenedor está cerrado (`locked`) es estado de edición del builder;
 // este renderer no lee ni necesita esos campos.
+//
+// Con la forma de marco Pestaña el título va en la pestaña con la tipografía del widget
+// `text-title` (tamaño `displayOptions.titleFontSize`, por defecto el de `text-title`) y la
+// pestaña crece hacia abajo con ese tamaño (ver `WidgetFrame`). Con la forma Estándar nada cambia.
 // =============================================================================
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -89,6 +94,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
             frameClassName="glass-panel glass-panel-group"
             className="group flex h-full w-full flex-col p-4"
             outerClassName={className}
+            tabTitleFontSize={displayOptions?.titleFontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE}
         >
             {hasHeaderContent && (
                 <WidgetHeader

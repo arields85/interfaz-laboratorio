@@ -644,6 +644,36 @@ describe('PropertyDock group', () => {
         expect(screen.queryByText('Fuente')).not.toBeInTheDocument();
     });
 
+    it('shows the text-title Tamaño control for the tab title, at the text-title default, without Alinear or Color', () => {
+        renderPropertyDock({
+            type: 'group',
+            title: 'Área compresión',
+            displayOptions: { icon: 'Group' },
+        });
+
+        const section = getSection('General');
+        expect(getInputInSection('General', 'Tamaño')).toHaveValue('35');
+        expect(within(section).queryByText('Alinear')).not.toBeInTheDocument();
+        expect(within(section).queryByText('Color')).not.toBeInTheDocument();
+    });
+
+    it('persists the tab title size in displayOptions.titleFontSize keeping the icon', async () => {
+        const { user, updates } = renderPropertyDock({
+            type: 'group',
+            title: 'Área compresión',
+            displayOptions: { icon: 'Group', titleFontSize: 48 },
+        });
+
+        const sizeInput = getInputInSection('General', 'Tamaño');
+        expect(sizeInput).toHaveValue('48');
+
+        await user.clear(sizeInput);
+        await user.type(sizeInput, '60');
+        await user.tab();
+
+        expect(updates.at(-1)?.displayOptions).toMatchObject({ icon: 'Group', titleFontSize: 60 });
+    });
+
     it('persists icon selection edits in displayOptions', async () => {
         const { user, updates } = renderPropertyDock({
             type: 'group',
