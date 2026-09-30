@@ -2,12 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     applyThemeStyleToDocument,
     CLASSIC_THEME_STYLE_ID,
+    FRAME_RADIUS_LIMITS,
+    getThemeStylePreset,
     INSTRUMENT_THEME_STYLE_ID,
     OUTLINE_THEME_STYLE_ID,
     previewThemeStyleOnDocument,
+    readStoredFrameRadiusOverrides,
     readStoredThemeStylePresetId,
     setActiveThemeStyle,
     THEME_STYLE_PRESETS,
+    writeStoredFrameRadiusOverrides,
 } from '../../services/themeStyle.service';
 import {
     applyViewerEntranceSettingsToDocument,
@@ -22,6 +26,7 @@ import {
     readStoredFrameShape,
     writeStoredFrameShape,
 } from '../../services/frameShape.service';
+import AdminActionButton from './AdminActionButton';
 import DockSliderField from './DockSliderField';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
@@ -82,9 +87,17 @@ const FRAME_SHAPE_OPTIONS: readonly FrameShapeCopy[] = [
     {
         value: 'tab',
         name: 'Pestaña',
-        description: 'El título pasa a una pestaña sobre el marco y la esquina superior derecha se recorta, con el ícono en el corte.',
+        description: 'El título pasa a una pestaña sobre el marco; el ícono queda arriba a la derecha, en la franja de la pestaña.',
     },
 ];
+
+type FrameRadiusOverrides = Readonly<Record<string, number>>;
+
+function areRadiusOverridesEqual(a: FrameRadiusOverrides, b: FrameRadiusOverrides): boolean {
+    const keys = Object.keys(a);
+
+    return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
 
 function areEntranceSettingsEqual(a: ViewerEntranceSettings, b: ViewerEntranceSettings): boolean {
     return ENTRANCE_CONTROLS.every(({ key }) => a[key] === b[key]);
@@ -108,12 +121,17 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const [entrance, setEntrance] = useState<ViewerEntranceSettings>(initialEntrance);
     const initialShape = useMemo(() => readStoredFrameShape(), []);
     const [shape, setShape] = useState<FrameShape>(initialShape);
+    // Per-preset frame radius overrides (absent = the preset's own radius), edited as a whole so
+    // every preset keeps its own adjusted value while the selection moves between them.
+    const initialRadii = useMemo<FrameRadiusOverrides>(() => readStoredFrameRadiusOverrides(), []);
+    const [radii, setRadii] = useState<FrameRadiusOverrides>(initialRadii);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
     const snapshotIdRef = useRef(initialId);
     const snapshotEntranceRef = useRef(initialEntrance);
     const snapshotShapeRef = useRef(initialShape);
+    const snapshotRadiiRef = useRef(initialRadii);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -134,9 +152,20 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             const cardEl = cardRefs.current[preset.id];
             if (cardEl) {
                 applyThemeStyleToDocument(preset, cardEl);
+                const radiusPx = radii[preset.id];
+                if (radiusPx !== undefined) {
+                    applyThemeStyleToDocument({
+                        ...preset,
+                        frame: {
+                            ...preset.frame,
+                            rest: { ...preset.frame.rest, radiusPx },
+                            hover: { ...preset.frame.hover, radiusPx },
+                        },
+                    }, cardEl);
+                }
             }
         }
-    }, []);
+    }, [radii]);
 
     // Selecting a theme or a value different from the saved one is dirty;
     // returning to the saved configuration is a not-dirty clear, not a
@@ -145,9 +174,11 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         id: string;
         entrance: ViewerEntranceSettings;
         shape: FrameShape;
+        radii: FrameRadiusOverrides;
     }) => next.id !== snapshotIdRef.current
         || !areEntranceSettingsEqual(next.entrance, snapshotEntranceRef.current)
-        || next.shape !== snapshotShapeRef.current;
+        || next.shape !== snapshotShapeRef.current
+        || !areRadiusOverridesEqual(next.radii, snapshotRadiiRef.current);
 
     const syncDirty = (isDirty: boolean) => {
         dirtyRef.current = isDirty;
@@ -161,9 +192,9 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         }
 
         setSelectedId(id);
-        previewThemeStyleOnDocument(id);
+        previewThemeStyleOnDocument(id, document.documentElement, radii[getThemeStylePreset(id).id]);
 
-        syncDirty(isDifferentFromSnapshot({ id, entrance, shape }));
+        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii }));
     };
 
     // The shape is previewed on the whole document like a theme card: every framed widget of the
@@ -175,7 +206,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setShape(next);
         previewFrameShape(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii }));
     };
 
     // Moving a slider previews the value on the whole document right away
@@ -188,7 +219,30 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setEntrance(next);
         applyViewerEntranceSettingsToDocument(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii }));
+    };
+
+    // The radius belongs to the selected preset: a value equal to the preset's own radius is "no
+    // override", so it never lingers in state or storage.
+    const selectedPreset = getThemeStylePreset(selectedId);
+    const presetRadiusPx = selectedPreset.frame.rest.radiusPx;
+    const radiusOverridePx = radii[selectedPreset.id];
+    const currentRadiusPx = radiusOverridePx ?? presetRadiusPx;
+
+    const commitRadius = (radiusPx: number) => {
+        const nextRadii: Record<string, number> = { ...radii };
+        if (radiusPx === presetRadiusPx) {
+            delete nextRadii[selectedPreset.id];
+        } else {
+            nextRadii[selectedPreset.id] = radiusPx;
+        }
+        if (areRadiusOverridesEqual(nextRadii, radii)) {
+            return;
+        }
+
+        setRadii(nextRadii);
+        previewThemeStyleOnDocument(selectedId, document.documentElement, nextRadii[selectedPreset.id]);
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii }));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -200,7 +254,11 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     useEffect(() => {
         return () => {
             if (dirtyRef.current) {
-                previewThemeStyleOnDocument(snapshotIdRef.current);
+                previewThemeStyleOnDocument(
+                    snapshotIdRef.current,
+                    document.documentElement,
+                    snapshotRadiiRef.current[getThemeStylePreset(snapshotIdRef.current).id],
+                );
                 applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
                 previewFrameShape(snapshotShapeRef.current);
             }
@@ -213,7 +271,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         }
 
         saveRef.current = () => {
-            setActiveThemeStyle(selectedId);
+            setActiveThemeStyle(selectedId, document.documentElement, radii[getThemeStylePreset(selectedId).id]);
+            writeStoredFrameRadiusOverrides(radii);
             writeStoredViewerEntranceSettings(entrance);
             applyViewerEntranceSettingsToDocument(entrance);
             writeStoredFrameShape(shape);
@@ -221,6 +280,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             snapshotIdRef.current = selectedId;
             snapshotEntranceRef.current = entrance;
             snapshotShapeRef.current = shape;
+            snapshotRadiiRef.current = radii;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -229,7 +289,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [entrance, onDirtyChange, saveRef, selectedId, shape]);
+    }, [entrance, onDirtyChange, radii, saveRef, selectedId, shape]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -239,7 +299,12 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         revertRef.current = () => {
             const snapshotId = snapshotIdRef.current;
             setSelectedId(snapshotId);
-            previewThemeStyleOnDocument(snapshotId);
+            setRadii(snapshotRadiiRef.current);
+            previewThemeStyleOnDocument(
+                snapshotId,
+                document.documentElement,
+                snapshotRadiiRef.current[getThemeStylePreset(snapshotId).id],
+            );
             setEntrance(snapshotEntranceRef.current);
             applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
             setShape(snapshotShapeRef.current);
@@ -309,13 +374,45 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 })}
             </div>
 
+            <section aria-labelledby="theme-radius-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
+                <div id="theme-radius-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
+                    Radio del marco
+                </div>
+                <p className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    Ajuste las esquinas de los marcos de los widgets sobre el tema elegido. Cada tema recuerda su propio
+                    valor; Restablecer vuelve al radio original del tema.
+                </p>
+
+                <div className="flex flex-col gap-3">
+                    <DockSliderField
+                        label="Radio del marco"
+                        ariaLabel="Radio del marco"
+                        numberInputAriaLabel="Valor de radio del marco"
+                        unit="px"
+                        value={currentRadiusPx}
+                        {...FRAME_RADIUS_LIMITS}
+                        onChange={commitRadius}
+                    />
+                    <div>
+                        <AdminActionButton
+                            variant="secondary"
+                            disabled={radiusOverridePx === undefined}
+                            onClick={() => commitRadius(presetRadiusPx)}
+                        >
+                            Restablecer
+                        </AdminActionButton>
+                    </div>
+                </div>
+            </section>
+
             <section aria-labelledby="theme-shape-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
                 <div id="theme-shape-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
                     Forma del marco
                 </div>
                 <p className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     Elija la forma de los marcos de los widgets del dashboard. Se combina con cualquier tema. Solo aplica
-                    a los widgets con título; los gráficos con selector de período conservan el marco estándar.
+                    a los widgets con título. En los gráficos con selector de período, el selector va en la franja de la
+                    pestaña o, si no cabe, en una fila dentro del cuerpo.
                 </p>
 
                 <div role="radiogroup" aria-label="Forma del marco" className="grid grid-cols-1 gap-3 sm:grid-cols-2">

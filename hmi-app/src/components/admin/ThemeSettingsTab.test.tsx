@@ -4,10 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeSettingsTab from './ThemeSettingsTab';
 import {
+    FRAME_RADIUS_STORAGE_KEY,
     INSTRUMENT_THEME_STYLE_ID,
     OUTLINE_THEME_STYLE_ID,
     resetThemeStyleOnDocument,
     THEME_STYLE_STORAGE_KEY,
+    writeStoredFrameRadiusOverrides,
     writeStoredThemeStylePresetId,
 } from '../../services/themeStyle.service';
 import {
@@ -323,8 +325,9 @@ describe('ThemeSettingsTab', () => {
             expect(flash).toHaveAttribute('step', '1');
             expect(flash).toHaveValue('6');
 
-            expect(screen.getByText('px')).toBeInTheDocument();
-            expect(screen.getAllByText('%')).toHaveLength(2);
+            const controls = within(screen.getByTestId('theme-entrance-controls'));
+            expect(controls.getByText('px')).toBeInTheDocument();
+            expect(controls.getAllByText('%')).toHaveLength(2);
         });
 
         it('stacks the three controls one per row so the number inputs never cover their labels', () => {
@@ -664,6 +667,208 @@ describe('ThemeSettingsTab', () => {
             await user.click(screen.getByRole('radio', { name: /Contorno/ }));
 
             expect(getActiveFrameShape()).toBe('tab');
+        });
+    });
+
+    describe('Radio del marco', () => {
+        const rootStyle = () => document.documentElement.style;
+        const radiusSlider = () => screen.getByRole('slider', { name: 'Radio del marco' });
+        const resetButton = () => screen.getByRole('button', { name: /Restablecer/ });
+
+        it('renders the slider (0-24 px, step 1) at the preset radius and a disabled Restablecer', () => {
+            render(<ThemeSettingsTab />);
+
+            expect(radiusSlider()).toHaveAttribute('min', '0');
+            expect(radiusSlider()).toHaveAttribute('max', '24');
+            expect(radiusSlider()).toHaveAttribute('step', '1');
+            expect(radiusSlider()).toHaveValue('24');
+            expect(screen.getByRole('textbox', { name: 'Valor de radio del marco' })).toHaveValue('24');
+            expect(resetButton()).toBeDisabled();
+        });
+
+        it('sits below the preset cards, before the frame shape section', () => {
+            render(<ThemeSettingsTab />);
+
+            const cards = screen.getByRole('radiogroup', { name: /tema/i });
+            const shape = screen.getByRole('radiogroup', { name: 'Forma del marco' });
+
+            expect(cards.compareDocumentPosition(radiusSlider()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(radiusSlider().compareDocumentPosition(shape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        });
+
+        it('does not touch the document or storage on a fresh install', () => {
+            render(<ThemeSettingsTab />);
+
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('');
+            expect(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY)).toBeNull();
+        });
+
+        it('previews rest and hover radius live, marks the tab dirty and enables Restablecer', () => {
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+
+            fireEvent.change(radiusSlider(), { target: { value: '10' } });
+
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('10px');
+            expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('10px');
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+            expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+            expect(resetButton()).toBeEnabled();
+            expect(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY)).toBeNull();
+        });
+
+        it('shows the preset own radius when switching presets and the adjusted one when coming back', async () => {
+            const user = userEvent.setup();
+
+            render(<ThemeSettingsTab />);
+            fireEvent.change(radiusSlider(), { target: { value: '10' } });
+
+            await user.click(screen.getByRole('radio', { name: /Instrumento/ }));
+            expect(radiusSlider()).toHaveValue('5');
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('5px');
+            expect(resetButton()).toBeDisabled();
+
+            await user.click(screen.getByRole('radio', { name: /Clásico/ }));
+            expect(radiusSlider()).toHaveValue('10');
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('10px');
+            expect(resetButton()).toBeEnabled();
+        });
+
+        it('starts from the stored override of the stored preset', () => {
+            writeStoredThemeStylePresetId(OUTLINE_THEME_STYLE_ID);
+            writeStoredFrameRadiusOverrides({ outline: 8 });
+
+            render(<ThemeSettingsTab />);
+
+            expect(radiusSlider()).toHaveValue('8');
+            expect(resetButton()).toBeEnabled();
+        });
+
+        it('persists only the overrides on save and keeps the other presets untouched', async () => {
+            const user = userEvent.setup();
+            const saveRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            writeStoredFrameRadiusOverrides({ instrument: 9 });
+
+            render(<ThemeSettingsTab saveRef={saveRef} onDirtyChange={onDirtyChange} />);
+            fireEvent.change(radiusSlider(), { target: { value: '12' } });
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+            fireEvent.change(radiusSlider(), { target: { value: '6' } });
+            act(() => {
+                saveRef.current?.();
+            });
+
+            expect(JSON.parse(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY) ?? 'null')).toEqual({
+                classic: 12,
+                outline: 6,
+                instrument: 9,
+            });
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('6px');
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('Restablecer clears the override, restores the preset radius and is dirty against a saved override', () => {
+            const onDirtyChange = vi.fn();
+            writeStoredFrameRadiusOverrides({ classic: 10 });
+            document.documentElement.style.setProperty('--frame-radius-rest', '10px');
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+            fireEvent.click(resetButton());
+
+            expect(radiusSlider()).toHaveValue('24');
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('');
+            expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('');
+            expect(resetButton()).toBeDisabled();
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+        });
+
+        it('saving after Restablecer removes the stored override', () => {
+            const saveRef = createRef<() => void>();
+            writeStoredFrameRadiusOverrides({ classic: 10 });
+
+            render(<ThemeSettingsTab saveRef={saveRef} />);
+            fireEvent.click(resetButton());
+            act(() => {
+                saveRef.current?.();
+            });
+
+            expect(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY)).toBeNull();
+        });
+
+        it('clears dirty when the slider returns to the saved radius', () => {
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+            fireEvent.change(radiusSlider(), { target: { value: '10' } });
+            fireEvent.change(radiusSlider(), { target: { value: '24' } });
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('');
+            expect(resetButton()).toBeDisabled();
+        });
+
+        it('reverts to the saved radius without persisting', () => {
+            const revertRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            writeStoredFrameRadiusOverrides({ classic: 10 });
+
+            render(<ThemeSettingsTab revertRef={revertRef} onDirtyChange={onDirtyChange} />);
+            fireEvent.change(radiusSlider(), { target: { value: '3' } });
+            act(() => {
+                revertRef.current?.();
+            });
+
+            expect(radiusSlider()).toHaveValue('10');
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('10px');
+            expect(JSON.parse(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY) ?? 'null')).toEqual({ classic: 10 });
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('restores the saved radius on the document when the tab unmounts with an unsaved preview', () => {
+            const { unmount } = render(<ThemeSettingsTab />);
+
+            fireEvent.change(radiusSlider(), { target: { value: '3' } });
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('3px');
+
+            unmount();
+
+            expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('');
+        });
+
+        it('shows the adjusted radius on the preset card preview', () => {
+            render(<ThemeSettingsTab />);
+
+            fireEvent.change(radiusSlider(), { target: { value: '10' } });
+
+            expect(screen.getByRole('radio', { name: /Clásico/ }).style.getPropertyValue('--frame-radius-rest')).toBe('10px');
+            expect(screen.getByRole('radio', { name: /Contorno/ }).style.getPropertyValue('--frame-radius-rest')).toBe('0px');
+        });
+
+        it('uses the usted register', () => {
+            render(<ThemeSettingsTab />);
+
+            const section = radiusSlider().closest('section');
+            expect(section?.textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b|\bajustá\b|\brestablecé\b/i);
+        });
+    });
+
+    describe('Forma del marco copy', () => {
+        it('no longer claims that charts with a period selector keep the standard frame', () => {
+            render(<ThemeSettingsTab />);
+
+            const section = screen.getByRole('radiogroup', { name: 'Forma del marco' }).closest('section');
+            expect(section?.textContent ?? '').not.toMatch(/conservan el marco est/i);
+            expect(section?.textContent ?? '').toMatch(/selector/i);
+        });
+
+        it('no longer says the top-right corner is cut with the icon in the cut', () => {
+            render(<ThemeSettingsTab />);
+
+            const section = screen.getByRole('radiogroup', { name: 'Forma del marco' }).closest('section');
+            expect(section?.textContent ?? '').not.toMatch(/recorta|en el corte/i);
+            expect(section?.textContent ?? '').toMatch(/ícono/);
         });
     });
 });
