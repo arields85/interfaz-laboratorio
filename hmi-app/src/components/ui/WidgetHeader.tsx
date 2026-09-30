@@ -1,10 +1,11 @@
 import { useContext } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import AnalyticsDataModeDot from './AnalyticsDataModeDot';
 import { TabFrameContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
+import { buildDashboardTitleTypography } from '../../utils/dashboardTitleTypography';
 import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 
 // =============================================================================
@@ -40,17 +41,45 @@ import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 // =============================================================================
 
 /**
- * Tab title (tab frame shape): the SAME behavior as the standard title (muted, white while the
- * widget is hovered, `transition-colors`) but through the `--tab-frame-text` / `-hover` tokens so
- * the tab color can be tuned in one place. Full class names so Tailwind finds them.
+ * Tab title colors (tab frame shape, including the title with its own typography): the SAME
+ * behavior as the standard title (muted, white while the widget is hovered, `transition-colors`)
+ * but through the `--tab-frame-text` / `-hover` tokens so the tab color can be tuned in one place.
+ * Full class names so Tailwind finds them.
  */
-const TAB_TITLE_CLASSES = 'min-w-0 truncate uppercase text-(color:--tab-frame-text) group-hover:text-(color:--tab-frame-text-hover) transition-colors';
+const TAB_TITLE_COLOR_CLASSES = 'text-(color:--tab-frame-text) group-hover:text-(color:--tab-frame-text-hover) transition-colors';
 
 /** In an alert state the tab title is the alert color at 100 % (no hover change). */
 const TAB_TITLE_ALERT_CLASSES: Record<TabFrameAlertState, string> = {
     warning: 'text-status-warning',
     critical: 'text-status-critical',
 };
+
+/**
+ * The title of the tab frame. With `fontSize` (a title with its own typography) it also carries its
+ * vertical breathing space as padding (`--tab-frame-title-pad-y`, the same token that sizes the tab),
+ * so `truncate`'s clipping never shaves the ascenders or descenders of a line box tighter than the glyphs.
+ */
+function TabFrameTitle({ title, alertState, fontSize }: {
+    title: string;
+    alertState: TabFrameAlertState | null;
+    fontSize: number | null;
+}) {
+    const ownTypography = fontSize !== null;
+    const colorClasses = alertState ? TAB_TITLE_ALERT_CLASSES[alertState] : TAB_TITLE_COLOR_CLASSES;
+    const style: CSSProperties | undefined = ownTypography
+        ? {
+            ...buildDashboardTitleTypography(fontSize),
+            paddingTop: 'var(--tab-frame-title-pad-y)',
+            paddingBottom: 'var(--tab-frame-title-pad-y)',
+        }
+        : undefined;
+
+    return (
+        <span className={`min-w-0 truncate ${ownTypography ? '' : 'uppercase '}${colorClasses}`} style={style}>
+            {title}
+        </span>
+    );
+}
 
 export interface WidgetHeaderProps {
     /** Texto principal del header (se renderiza en uppercase) */
@@ -172,9 +201,7 @@ export default function WidgetHeader({
         />
     ) : null;
     const titleNode = inTab ? (
-        <span className={tabFrame.alertState ? `min-w-0 truncate uppercase ${TAB_TITLE_ALERT_CLASSES[tabFrame.alertState]}` : TAB_TITLE_CLASSES}>
-            {title}
-        </span>
+        <TabFrameTitle title={title} alertState={tabFrame.alertState} fontSize={tabFrame.titleFontSize} />
     ) : (
         <span className={centered
             ? 'min-w-0 text-center uppercase text-industrial-muted group-hover:text-white transition-colors'

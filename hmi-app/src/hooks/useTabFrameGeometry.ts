@@ -26,10 +26,15 @@ function isSameGeometry(a: TabFramePathGeometry | null, b: TabFramePathGeometry 
  * the tab shape (`tabWidth !== null`) draw nothing meanwhile rather than a rectangle. It measures in a
  * layout effect so the first paint already has the silhouette. It re-measures on resize and when the document style changes (a
  * theme preview rewrites the frame tokens there).
+ *
+ * `tabHeight` is the effective tab height (px) of a frame whose tab is taller than the standard one
+ * (a title with its own size, reported by its `WidgetFrame`); without it the `--tab-frame-height`
+ * token applies. Layers outside the frame's shell cannot read the frame's own override, so they pass it.
  */
 export function useTabFrameGeometry(
     ref: RefObject<HTMLElement | null>,
     tabWidth: number | null,
+    tabHeight?: number,
 ): TabFramePathGeometry | null {
     const [geometry, setGeometry] = useState<TabFramePathGeometry | null>(null);
 
@@ -56,7 +61,7 @@ export function useTabFrameGeometry(
                 width,
                 height,
                 tabWidth,
-                tabHeight: token('--tab-frame-height'),
+                tabHeight: tabHeight ?? token('--tab-frame-height'),
                 tabCut: token('--tab-frame-tab-cut'),
                 bodyCut: token('--tab-frame-body-cut'),
                 radius: parseCssLengthPx(style.borderTopLeftRadius, rootFontSize),
@@ -78,7 +83,7 @@ export function useTabFrameGeometry(
             resizeObserver?.disconnect();
             mutationObserver?.disconnect();
         };
-    }, [ref, tabWidth]);
+    }, [ref, tabWidth, tabHeight]);
 
     // Without a tab there is no silhouette, whatever was measured before.
     return tabWidth === null || tabWidth <= 0 ? null : geometry;

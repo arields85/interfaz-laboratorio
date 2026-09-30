@@ -2,6 +2,7 @@ import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from 'react';
 import { useTabFrameActive } from '../../hooks/useTabFrameActive';
 import { useTabFrameGeometry } from '../../hooks/useTabFrameGeometry';
+import { useTabFrameHeight } from '../../hooks/useTabFrameHeight';
 import { useTabFrameIconPlacement } from '../../hooks/useTabFrameIconPlacement';
 import { TabFrameContext, TabFrameReporterContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
 import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
@@ -30,10 +31,17 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFrame
 // it clips the surface (`clip-path: path()`; CSS `polygon()` cannot round corners), and the same
 // path is stroked for the rest border and grown for the alert glow. Until the box and the tab are
 // measured, the CSS polygon of `index.css` is the fallback.
+//
+// A title with its own size (`tabTitleFontSize`, the `group` widget) makes the tab as tall as that
+// title needs (`useTabFrameHeight`): the shell publishes the effective height as its own
+// `--tab-frame-height` (so the fill, the border clip, the tab and the icon host follow), the
+// silhouette and the icon placement use it, and it is reported next to the tab width for the layers
+// outside the shell. The tab grows downward into the widget; the outer size never changes.
 // =============================================================================
 
-/** Inline style of the tab shell: the radius plus the icon custom properties computed from the tokens. */
+/** Inline style of the tab shell: the radius plus the custom properties computed from the tokens. */
 type TabFrameShellStyle = CSSProperties & {
+    '--tab-frame-height'?: string;
     '--tab-frame-icon-top'?: string;
     '--tab-frame-icon-reserve'?: string;
 };
@@ -57,6 +65,11 @@ interface WidgetFrameProps extends Omit<HTMLAttributes<HTMLElement>, 'className'
     className?: string;
     /** Classes handed down by the parent (item layout); applied to the outermost element. */
     outerClassName?: string;
+    /**
+     * Font size (px) of a title with the `text-title` typography (the `group` widget), only used while
+     * the frame is the tab shape: the tab grows with it and the header renders its title accordingly.
+     */
+    tabTitleFontSize?: number;
     /** Element of the content root. */
     as?: 'div' | 'article';
     /** Ref of the content root (the element that has the padding). */
@@ -70,6 +83,7 @@ export default function WidgetFrame({
     frameClassName,
     className = '',
     outerClassName = '',
+    tabTitleFontSize,
     as: Tag = 'div',
     ref,
     children,
@@ -81,13 +95,24 @@ export default function WidgetFrame({
     const [iconHost, setIconHost] = useState<HTMLElement | null>(null);
     const [tabWidth, setTabWidth] = useState(0);
     const alertState = resolveAlertState(frameClassName);
-    const tabContext = useMemo(() => ({ titleHost, iconHost, alertState }), [titleHost, iconHost, alertState]);
+    const titleFontSize = tabActive ? (tabTitleFontSize ?? null) : null;
+    const tabContext = useMemo(
+        () => ({ titleHost, iconHost, alertState, titleFontSize }),
+        [titleHost, iconHost, alertState, titleFontSize],
+    );
     const reportTabWidth = useContext(TabFrameReporterContext);
-    const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null);
+    // Effective tab height of a title with its own size; null keeps the `--tab-frame-height` token.
+    const ownTabHeight = useTabFrameHeight(titleFontSize);
+    const tabHeight = ownTabHeight ?? undefined;
+    const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null, tabHeight);
     const silhouette = geometry ? buildTabFramePath(geometry) : null;
-    const iconPlacement = useTabFrameIconPlacement(shellRef, tabActive);
-    // Icon top and the space the tab leaves free for it (index.css, `.hmi-tab-frame-icon-host`).
+    const iconPlacement = useTabFrameIconPlacement(shellRef, tabActive, tabHeight);
+    // Tab height, icon top and the space the tab leaves free for it (index.css, `.hmi-tab-frame-icon-host`).
     const shellStyle: TabFrameShellStyle = { borderRadius: 'var(--frame-radius-rest)' };
+
+    if (ownTabHeight !== null) {
+        shellStyle['--tab-frame-height'] = `${ownTabHeight}px`;
+    }
 
     if (iconPlacement) {
         shellStyle['--tab-frame-icon-top'] = `${iconPlacement.top}px`;
@@ -106,7 +131,12 @@ export default function WidgetFrame({
         const publish = () => {
             const measured = titleHost && titleHost.offsetWidth > 0 ? titleHost.offsetWidth : 0;
             setTabWidth(measured);
-            reportTabWidth?.(measured);
+
+            if (tabHeight === undefined) {
+                reportTabWidth?.(measured);
+            } else {
+                reportTabWidth?.(measured, tabHeight);
+            }
         };
         publish();
 
@@ -118,7 +148,7 @@ export default function WidgetFrame({
         resizeObserver.observe(titleHost);
 
         return () => resizeObserver.disconnect();
-    }, [tabActive, titleHost, reportTabWidth]);
+    }, [tabActive, titleHost, reportTabWidth, tabHeight]);
 
     // Leaving the tab shape (or unmounting) is the only thing that reports the standard shape.
     useLayoutEffect(() => {

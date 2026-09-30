@@ -15,6 +15,11 @@ export interface TabFrameContextValue {
     iconHost: HTMLElement | null;
     /** Alert state of the widget frame (`widget-state-*`): the tab title takes its color. */
     alertState: TabFrameAlertState | null;
+    /**
+     * Font size (px) of a title that has its own typography (the `text-title` one, `group` widget), or
+     * null for the standard tab title. The tab is then as tall as that title needs (`useTabFrameHeight`).
+     */
+    titleFontSize: number | null;
 }
 
 export type TabFrameAlertState = 'warning' | 'critical';
@@ -26,8 +31,10 @@ export const TabFrameContext = createContext<TabFrameContextValue | null>(null);
  * Receives the width of the tab (px, at its base) of the enclosing `WidgetFrame` while it renders
  * the tab shape, and `null` when it stops (standard shape, unmount). The grids provide one per
  * widget so sibling layers that cannot see the tab (builder selection ring, placement ghost, viewer
- * entrance overlays) can follow the tab + body silhouette.
+ * entrance overlays, hover actions) can follow the tab + body silhouette. A frame whose tab is
+ * taller than the standard one (a title with its own size) passes the effective tab height (px) as
+ * the second argument; without it the layers read `--tab-frame-height`.
  */
-export type TabFrameReporter = (tabWidthPx: number | null) => void;
+export type TabFrameReporter = (tabWidthPx: number | null, tabHeightPx?: number) => void;
 
 export const TabFrameReporterContext = createContext<TabFrameReporter | null>(null);

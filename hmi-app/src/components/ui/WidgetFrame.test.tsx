@@ -13,12 +13,14 @@ function renderFramed({
     inGrid = true,
     dataMode,
     frameClassName = 'glass-panel',
+    tabTitleFontSize,
 }: {
     widgetType?: string;
     title?: string;
     inGrid?: boolean;
     dataMode?: 'real' | 'simulated';
     frameClassName?: string;
+    tabTitleFontSize?: number;
 } = {}) {
     const frame = (
         <WidgetFrame
@@ -27,6 +29,7 @@ function renderFramed({
             frameClassName={frameClassName}
             className="p-5 group relative w-full h-full"
             outerClassName="external-layout"
+            tabTitleFontSize={tabTitleFontSize}
             data-state="producing"
         >
             <WidgetHeader title={title} icon={Activity} subtitle="PRODUCIENDO" dataMode={dataMode} dataModeTestId="widget-data-mode" iconTestId="frame-icon" />
@@ -481,6 +484,189 @@ describe('WidgetFrame', () => {
 
             expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-icon-top')).toBe('');
             expect(screen.queryByTestId('tab-frame-icon-host')).toBeNull();
+        });
+    });
+
+    describe('title with its own size (group): a taller tab', () => {
+        const OWN_SIZE_TOKENS: Record<string, string> = {
+            '--tab-frame-height': '25px',
+            '--tab-frame-tab-cut': '19px',
+            '--tab-frame-body-cut': '0px',
+            '--tab-frame-glow-spread': '2px',
+            '--tab-frame-title-pad-y': '4.25px',
+            '--tab-frame-icon-right': '0px',
+            '--tab-frame-icon-gap': '4px',
+            '--tab-frame-icon-clearance': '3px',
+            '--tab-frame-icon-min-top': '0px',
+            '--tab-frame-icon-tab-gap': '8px',
+            '--tab-frame-icon-scale': '0.9',
+        };
+
+        function mockOwnSizeLayout(overrides: Record<string, string> = {}, tabWidth = 180) {
+            const tokens = { ...OWN_SIZE_TOKENS, ...overrides };
+            vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+            vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
+            vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
+                return this.dataset.testid === 'tab-frame-tab' ? tabWidth : 0;
+            });
+            vi.spyOn(window, 'getComputedStyle').mockImplementation(() => ({
+                getPropertyValue: (name: string) => tokens[name] ?? '',
+                borderTopLeftRadius: '4px',
+                fontSize: '16px',
+            }) as unknown as CSSStyleDeclaration);
+        }
+
+        const shellOf = (container: HTMLElement) => container.firstElementChild as HTMLElement;
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it('sets the effective tab height on the shell: the title line box plus the breathing space above and below', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            const { container } = renderFramed({ tabTitleFontSize: 35 });
+
+            // 35 x 1.1 + 2 x 4.25
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('47px');
+        });
+
+        it('never makes the tab shorter than the standard tab height', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            const { container } = renderFramed({ tabTitleFontSize: 12 });
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('25px');
+        });
+
+        it('follows the title size live', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+            const framed = (size: number) => (
+                <GridFrameScope>
+                    <WidgetFrame widgetType="group" title="Grupo" frameClassName="glass-panel" className="p-5" tabTitleFontSize={size}>
+                        <WidgetHeader title="Grupo" icon={Activity} />
+                    </WidgetFrame>
+                </GridFrameScope>
+            );
+            const { container, rerender } = render(framed(35));
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('47px');
+
+            rerender(framed(60));
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('74.5px');
+        });
+
+        it('draws the unified silhouette with the taller tab (clip, border, glow)', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+            const geometry = { width: 300, height: 200, tabWidth: 180, tabHeight: 47, tabCut: 19, bodyCut: 0, radius: 4, glowSpread: 2 };
+
+            renderFramed({ tabTitleFontSize: 35, frameClassName: 'widget-state-warning' });
+
+            expect(screen.getByTestId('tab-frame-surface').style.clipPath).toBe(`path('${buildTabFramePath(geometry)}')`);
+            expect(screen.getByTestId('tab-frame-border').querySelector('path')?.getAttribute('d')).toBe(buildTabFramePath(geometry));
+            expect(screen.getByTestId('tab-frame-glow').style.clipPath).toBe(
+                `path(evenodd, '${buildTabFrameGlowClipPath(geometry, TAB_FRAME_GLOW_CLIP_MARGIN_PX)}')`,
+            );
+        });
+
+        it('places the header icon by the icon rule with the taller tab', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout({ '--tab-frame-body-cut': '100px' });
+
+            const { container } = renderFramed({ tabTitleFontSize: 35 });
+
+            // preferred top = tab height 47 + gap 4 (25 + 4 = 29 with the standard tab)
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-icon-top')).toBe('51px');
+        });
+
+        it('reports the tab height next to the tab width for the layers outside the shell', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+            const onTabWidth = vi.fn();
+
+            render(
+                <GridFrameScope onTabWidth={onTabWidth}>
+                    <WidgetFrame widgetType="group" title="Grupo" frameClassName="glass-panel" className="p-5" tabTitleFontSize={35}>
+                        <WidgetHeader title="Grupo" icon={Activity} />
+                    </WidgetFrame>
+                </GridFrameScope>,
+            );
+
+            expect(onTabWidth).toHaveBeenLastCalledWith(180, 47);
+        });
+
+        it('gives the tab title the typography of the text-title widget, without uppercase', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            renderFramed({ title: 'Área compresión', tabTitleFontSize: 35 });
+
+            const title = within(screen.getByTestId('tab-frame-tab')).getByText('Área compresión');
+            expect(title.style.fontFamily).toBe('var(--font-dashboard-title)');
+            expect(title.style.fontWeight).toBe('var(--font-weight-dashboard-title)');
+            expect(title.style.letterSpacing).toBe('var(--tracking-dashboard-title)');
+            expect(title.style.fontSize).toBe('35px');
+            expect(title.style.lineHeight).toBe('1.1');
+            expect(title).not.toHaveClass('uppercase');
+        });
+
+        it('keeps the tab title colors of the other tabs (rest, hover, transition)', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            renderFramed({ title: 'Área compresión', tabTitleFontSize: 35 });
+
+            const title = within(screen.getByTestId('tab-frame-tab')).getByText('Área compresión');
+            expect(title).toHaveClass('text-(color:--tab-frame-text)', 'group-hover:text-(color:--tab-frame-text-hover)', 'transition-colors');
+            expect(title.style.color).toBe('');
+        });
+
+        it('gives the title its own breathing space as padding so the truncation never clips ascenders or descenders', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            renderFramed({ title: 'Área compresión', tabTitleFontSize: 35 });
+
+            const title = within(screen.getByTestId('tab-frame-tab')).getByText('Área compresión');
+            expect(title.style.paddingTop).toBe('var(--tab-frame-title-pad-y)');
+            expect(title.style.paddingBottom).toBe('var(--tab-frame-title-pad-y)');
+        });
+
+        it('leaves every other tab frame exactly as before (no own size: no height override, uppercase title)', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+            const onTabWidth = vi.fn();
+
+            const { container } = render(
+                <GridFrameScope onTabWidth={onTabWidth}>
+                    <WidgetFrame widgetType="machine-activity" title="Actividad" frameClassName="glass-panel" className="p-5">
+                        <WidgetHeader title="Actividad" icon={Activity} />
+                    </WidgetFrame>
+                </GridFrameScope>,
+            );
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('');
+            expect(onTabWidth).toHaveBeenLastCalledWith(180);
+            const title = screen.getByText('Actividad');
+            expect(title).toHaveClass('uppercase');
+            expect(title.style.fontSize).toBe('');
+        });
+
+        it('has no effect in the standard shape (same single element, title inside the body)', () => {
+            mockOwnSizeLayout();
+
+            const { container } = renderFramed({ tabTitleFontSize: 35 });
+
+            const root = container.firstElementChild as HTMLElement;
+            expect(root).toHaveClass('glass-panel');
+            expect(root.style.getPropertyValue('--tab-frame-height')).toBe('');
+            expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+            expect(screen.getByText('Actividad de Máquina')).toHaveClass('uppercase');
+            expect(screen.getByText('Actividad de Máquina').style.fontSize).toBe('');
         });
     });
 });

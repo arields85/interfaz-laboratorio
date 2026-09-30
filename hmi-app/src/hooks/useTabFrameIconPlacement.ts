@@ -13,13 +13,15 @@ function isSamePlacement(a: TabFrameIconPlacement | null, b: TabFrameIconPlaceme
 
 /**
  * Placement of the header icon of the tab frame in `ref` (the shell), computed from the
- * `--tab-frame-*` tokens (the icon rule depends on tokens only, never on the widget size). `null`
- * until measured and while the tab shape is inactive. It measures in a layout effect and re-measures
+ * `--tab-frame-*` tokens (the icon rule depends on tokens only, never on the widget size), with the
+ * effective tab height (`tabHeight`, px) of a frame whose tab is taller than the standard one when
+ * given. `null` until measured and while the tab shape is inactive. It measures in a layout effect and re-measures
  * when the document style changes (a theme preview rewrites the frame tokens there).
  */
 export function useTabFrameIconPlacement(
     ref: RefObject<HTMLElement | null>,
     active: boolean,
+    tabHeight?: number,
 ): TabFrameIconPlacement | null {
     const [placement, setPlacement] = useState<TabFrameIconPlacement | null>(null);
 
@@ -38,7 +40,7 @@ export function useTabFrameIconPlacement(
             const scale = Number.parseFloat(style.getPropertyValue('--tab-frame-icon-scale'));
             const iconSize = TAB_FRAME_ICON_SIZE_PX * (Number.isFinite(scale) && scale > 0 ? scale : 1);
             const next = resolveTabFrameIconPlacement({
-                tabHeight: token('--tab-frame-height'),
+                tabHeight: tabHeight ?? token('--tab-frame-height'),
                 bodyCut: token('--tab-frame-body-cut'),
                 right: token('--tab-frame-icon-right'),
                 gap: token('--tab-frame-icon-gap'),
@@ -56,7 +58,7 @@ export function useTabFrameIconPlacement(
         mutationObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
 
         return () => mutationObserver?.disconnect();
-    }, [ref, active]);
+    }, [ref, active, tabHeight]);
 
     return active ? placement : null;
 }
