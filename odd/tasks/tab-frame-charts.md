@@ -43,8 +43,20 @@ Lab controls: A/B/C switch on a sample chart widget, plus spacing, selector heig
   adjustments; "Copiar elección" includes the chosen alternative and its values; README updated; republish. Done
   2026-09-30, commit `07cc7a3` (`feat(style-lab): ...`, +477/-17 in `tools/style-lab/style-lab.html` and
   `README.md`); republished to the same artifact URL (version 14). Route: delegated writer (preparation trigger).
-- [ ] **C2** — User compares in the lab and picks one (with values).
-- [ ] **C3** — Implement the chosen alternative in the app for the five chart widgets (scope and tasks refined after C2).
+- [x] **C2** — User compares in the lab and picks one (with values). DECIDED 2026-09-30: **alternative B** (selector in
+  the tab strip, between the tab and the icon). The user first wrote "elijo la c" with a screenshot showing B selected;
+  asked, the user confirmed "la B, me equivoqué". Values from the screenshot: selector style **Subrayado** (underline),
+  gap **15 px**, selector scale **100 %** (23.5 px tall in the 25 px strip). The 480 px width is only the lab sample size.
+- [ ] **C3** — Implement alternative B in the app for the five chart widgets (`trend-chart`, `trend-chart-v2`,
+  `prod-trend`, `prod-history`, `activity-analytics`). Route: delegated writer (writer trigger: 2+ non-trivial files).
+  - [ ] **C3a** — Frame infrastructure: the header's `trailing` content (the scale selector) is placed in the top strip,
+    right side, left of the icon, with the chosen gap as a token; the title tab (and its truncating title) stops before
+    it and is hidden cleanly when it cannot fit (lab rule: under 12 px of room); the body's header row no longer takes
+    height when title, icon and trailing all live in the strip (the chart gains that row). Builder rings/ghosts and the
+    viewer entrance keep following the silhouette.
+  - [ ] **C3b** — Roll out: `supportsTabFrame` covers the five chart widgets; each renderer uses `WidgetFrame`; with
+    Pestaña the selector uses the `underline` variant (today `pill`; Estándar keeps `pill`).
+  - [ ] **C3c** — Docs (`docs/DESIGN_SYSTEM.md`, `WIDGET_AUTHORING.md` if it documents the header) and this document.
 - [ ] **C4** — Live look, native review (RDD per work-unit commit), merge on the user's OK.
 
 ## Acceptance criteria
@@ -117,4 +129,5 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
 
 ## Next step
 
-C2: the user compares A/B/C in the lab (narrow and wide, rest and hover) and picks one with values; then C3 is refined.
+C3 in progress (delegated writer, strict TDD). Then C4: live look with the user, RDD per work-unit commit (consent is
+relayed per candidate for this feature), merge on the user's OK. Separate pending user decision: push of `main`.
