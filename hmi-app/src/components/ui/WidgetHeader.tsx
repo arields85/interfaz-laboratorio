@@ -6,6 +6,7 @@ import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import AnalyticsDataModeDot from './AnalyticsDataModeDot';
 import { TabFrameContext, TabFrameStripContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
 import { buildDashboardTitleTypography } from '../../utils/dashboardTitleTypography';
+import { ICON_CUTOUT_ICON_ATTRIBUTE } from '../../utils/iconCutout';
 import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 
 // =============================================================================
@@ -257,6 +258,7 @@ export default function WidgetHeader({
                 : 'shrink-0 opacity-70 group-hover:opacity-100 transition-opacity'}
             style={{ color: iconColor }}
             data-testid={iconTestId}
+            {...{ [ICON_CUTOUT_ICON_ATTRIBUTE]: 'true' }}
         />
     ) : null;
     const titleNode = inTab ? (

@@ -436,6 +436,25 @@ h1, h2, h3, h4, h5, h6 {
   --frame-accent-opacity-hover: 0%;
 }
 
+/* ── Calado del ícono (tokens) ─────────────────────────────────────────────
+ * Configuración general -> Tema -> "Calado del ícono" (solo con el tema Clásico y la forma
+ * Estándar; ver `WidgetFrame`, `useIconCutoutActive`). Los defaults son los valores elegidos
+ * en el laboratorio de estilo.
+ *   --icon-cutout-margin      margen entre el ícono y el borde del círculo transparente
+ *                             (radio = mitad del ícono medido + margen)
+ *   --icon-cutout-feather     suavizado del borde del círculo, centrado en el radio (0 = borde duro)
+ *   --icon-cutout-ring        1 = anillo fino sobre el borde del círculo, 0 = sin anillo
+ *   --icon-cutout-ring-width  grosor del anillo (2px en alerta, el grosor de su borde: lo fija la regla
+ *                             de cada estado)
+ * El centro y la mitad del tamaño del ícono (--icon-cutout-x/-y/-half) los publica el propio marco.
+ * ────────────────────────────────────────────────────────────────────── */
+:root {
+  --icon-cutout-margin: 6px;
+  --icon-cutout-feather: 0px;
+  --icon-cutout-ring: 1;
+  --icon-cutout-ring-width: 1px;
+}
+
 /* ── Forma del marco: Pestaña (tokens) ─────────────────────────────────────
  * Geometría y colores de la forma "Pestaña" (Configuración general -> Tema ->
  * "Forma del marco"); solo se usan bajo `.hmi-tab-frame` (ver `WidgetFrame`).
@@ -1051,6 +1070,7 @@ h1, h2, h3, h4, h5, h6 {
   .glass-panel::after,
   .widget-state-warning,
   .widget-state-critical,
+  [data-icon-cutout]::before,
   .theme-button,
   .theme-button::after,
   .theme-button-neutral,
@@ -1749,6 +1769,125 @@ h1, h2, h3, h4, h5, h6 {
     height: 2px;
     background: linear-gradient(90deg, #A78BFA, #22d3ee);
     border-radius: 2px;
+  }
+
+  /* ── Calado del ícono (reglas) ────────────────────────────────────────────
+   * Opt-in por atributo: solo `WidgetFrame` (tema Clásico + forma Estándar + opción activa, con un
+   * ícono de header medido) escribe `data-icon-cutout` y el centro del ícono (--icon-cutout-x/-y/-half);
+   * la regla base `.glass-panel` de arriba NO cambia (diálogos, páginas y esqueletos la usan).
+   * El fondo, el desenfoque y el borde del marco pasan a un ::before con una máscara radial centrada
+   * en el ícono, así que dentro del círculo el marco es transparente y se ve lo que hay detrás; el
+   * acento de esquina (::after) usa la misma máscara. Un anillo fino (capa del mismo ::before) sigue
+   * el borde del círculo con el color del borde del marco (el del estado en warning/critical).
+   * El contenido (ícono, título, datos) no se toca. El ::before cubre el área del borde, por eso el
+   * marco amplía su recorte (`overflow-clip-margin`) en el ancho de su borde. */
+  [data-icon-cutout] {
+    --icon-cutout-radius: calc(var(--icon-cutout-half) + var(--icon-cutout-margin));
+    --icon-cutout-ring-color: color-mix(in srgb, #fff var(--frame-border), transparent);
+    --icon-cutout-hole: radial-gradient(
+      circle at var(--icon-cutout-x) var(--icon-cutout-y),
+      transparent calc(var(--icon-cutout-radius) - var(--icon-cutout-ring) * var(--icon-cutout-ring-width) - var(--icon-cutout-feather) / 2),
+      #000 calc(var(--icon-cutout-radius) - var(--icon-cutout-ring) * var(--icon-cutout-ring-width) + var(--icon-cutout-feather) / 2)
+    );
+    --icon-cutout-ring-layer: radial-gradient(
+      circle at var(--icon-cutout-x) var(--icon-cutout-y),
+      transparent calc(var(--icon-cutout-radius) - var(--icon-cutout-ring) * var(--icon-cutout-ring-width)),
+      var(--icon-cutout-ring-color) calc(var(--icon-cutout-radius) - var(--icon-cutout-ring) * var(--icon-cutout-ring-width)),
+      var(--icon-cutout-ring-color) var(--icon-cutout-radius),
+      transparent var(--icon-cutout-radius)
+    );
+    isolation: isolate;
+    overflow-clip-margin: 1px;
+  }
+
+  [data-icon-cutout],
+  [data-icon-cutout]:hover {
+    background: none;
+    border-color: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  [data-icon-cutout]::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+      var(--icon-cutout-ring-layer),
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, #fff var(--frame-fill), transparent),
+        color-mix(in srgb, #fff var(--frame-fill), transparent)
+      ),
+      var(--frame-base-background);
+    background-origin: border-box;
+    border: 1px solid color-mix(in srgb, #fff var(--frame-border), transparent);
+    -webkit-backdrop-filter: blur(var(--frame-blur));
+    backdrop-filter: blur(var(--frame-blur));
+    -webkit-mask-image: var(--icon-cutout-hole);
+    mask-image: var(--icon-cutout-hole);
+  }
+
+  [data-icon-cutout]::after {
+    -webkit-mask-image: var(--icon-cutout-hole);
+    mask-image: var(--icon-cutout-hole);
+  }
+
+  /* Alerta: el fondo de estado y su borde de 2px también pasan al ::before (el brillo exterior
+   * `box-shadow` queda en el marco: no entra en el círculo, que está dentro de la caja). */
+  [data-icon-cutout].widget-state-warning {
+    --icon-cutout-state: var(--color-status-warning);
+    --icon-cutout-ring-width: 2px;
+    --icon-cutout-ring-color: color-mix(in srgb, var(--icon-cutout-state) 35%, transparent);
+    overflow-clip-margin: 2px;
+  }
+
+  [data-icon-cutout].widget-state-critical {
+    --icon-cutout-state: var(--color-status-critical);
+    --icon-cutout-ring-width: 2px;
+    --icon-cutout-ring-color: color-mix(in srgb, var(--icon-cutout-state) 35%, transparent);
+    overflow-clip-margin: 2px;
+  }
+
+  [data-icon-cutout].widget-state-warning:hover,
+  [data-icon-cutout].widget-state-critical:hover {
+    --icon-cutout-ring-color: color-mix(in srgb, var(--icon-cutout-state) 55%, transparent);
+  }
+
+  [data-icon-cutout].widget-state-warning::before {
+    inset: -2px;
+    background:
+      var(--icon-cutout-ring-layer),
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--icon-cutout-state) 12%, transparent) 0%,
+        color-mix(in srgb, var(--icon-cutout-state) 2%, transparent) 100%
+      );
+    background-origin: border-box;
+    border: 2px solid color-mix(in srgb, var(--icon-cutout-state) 35%, transparent);
+    transition: border-color 0.2s ease;
+  }
+
+  [data-icon-cutout].widget-state-critical::before {
+    inset: -2px;
+    background:
+      var(--icon-cutout-ring-layer),
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--icon-cutout-state) 12%, transparent) 0%,
+        color-mix(in srgb, var(--icon-cutout-state) 2%, transparent) 100%
+      );
+    background-origin: border-box;
+    border: 2px solid color-mix(in srgb, var(--icon-cutout-state) 35%, transparent);
+    transition: border-color 0.2s ease;
+  }
+
+  [data-icon-cutout].widget-state-warning:hover::before,
+  [data-icon-cutout].widget-state-critical:hover::before {
+    border-color: color-mix(in srgb, var(--icon-cutout-state) 55%, transparent);
   }
 
   /* ── Forma del marco: Pestaña (reglas) ────────────────────────────────────

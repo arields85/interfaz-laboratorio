@@ -1,5 +1,7 @@
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from 'react';
+import { useIconCutoutActive } from '../../hooks/useIconCutoutActive';
+import { useIconCutoutGeometry } from '../../hooks/useIconCutoutGeometry';
 import { useTabFrameActive } from '../../hooks/useTabFrameActive';
 import { useTabFrameGeometry } from '../../hooks/useTabFrameGeometry';
 import { useTabFrameHeight } from '../../hooks/useTabFrameHeight';
@@ -117,6 +119,14 @@ export default function WidgetFrame({
     ...rest
 }: WidgetFrameProps) {
     const tabActive = useTabFrameActive(widgetType, title);
+    // Icon cutout (Clasico + Estandar, see `useIconCutoutActive`): only the standard frame element has it.
+    const cutoutActive = useIconCutoutActive(widgetType) && !tabActive;
+    const frameRef = useRef<HTMLElement | null>(null);
+    const setFrameRef = useCallback((node: HTMLElement | null) => {
+        frameRef.current = node;
+        assignRef(ref, node);
+    }, [ref]);
+    useIconCutoutGeometry(frameRef, cutoutActive);
     const shellRef = useRef<HTMLDivElement>(null);
     const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
     const [iconHost, setIconHost] = useState<HTMLElement | null>(null);
@@ -238,7 +248,7 @@ export default function WidgetFrame({
     if (!tabActive) {
         return (
             <Tag
-                ref={ref as Ref<never>}
+                ref={setFrameRef as Ref<never>}
                 className={[frameClassName, className, outerClassName].filter(Boolean).join(' ')}
                 {...rest}
             >

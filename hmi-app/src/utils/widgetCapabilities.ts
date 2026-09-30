@@ -120,6 +120,15 @@ export function supportsTabFrame(widgetType: string): boolean {
 }
 
 /**
+ * Widget types whose grid frame may take the icon cutout ("Calado del ícono"): the framed widgets of
+ * the tab frame list except the `group` container, whose frame paints its own base on the `::before`
+ * the cutout needs. Whether the frame actually gets it still depends on a header icon being drawn.
+ */
+export function supportsIconCutout(widgetType: string): boolean {
+    return supportsTabFrame(widgetType) && widgetType !== 'group';
+}
+
+/**
  * Widget types that move the header's `trailing` content (their period / scale selector) into the top
  * strip of the tab frame shape. An explicit opt-in, decided here and carried through the tab frame
  * context (`WidgetFrame` -> `WidgetHeader`): every other tab widget that passes `trailing` keeps it
