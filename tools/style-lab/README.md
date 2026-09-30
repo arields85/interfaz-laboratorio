@@ -76,6 +76,16 @@ between them.
   body's top line and the border is interrupted around it (control: *separación*, 0-16 px; in B it cannot exceed the
   strip gap). The values are remembered and validated on load, and "Copiar elección" adds a "Remate de la esquina" part
   naming the finish and its values (for Escalón: depth, displacement and that the slope equals the tab's).
+- **"Calado del ícono" (icon cutout):** a toggle that makes the widget's background transparent inside a circle
+  centered on the header icon, so the icon does not sit on the glass fill. It applies only with the **Actual
+  (Clásico)** preset and the **Estándar** shape (in Pestaña the icon is already outside the body, so nothing is cut),
+  to every sample widget with a header icon, the alert card and the chart sample included. The card's background,
+  blur and border move to `::before`, which carries a radial `mask-image` built from the icon's measured center
+  (`-webkit-mask-image` too); the corner accent intersects its mask with the same hole, and the alert glow stays on
+  the card. The stage shows through, rest and hover. Controls: *margen* (circle radius = half the icon + margin,
+  0-24 px), *suavizado* (feather, 0 = hard edge, up to 16 px, centered on the radius) and *anillo en el borde*
+  (a thin ring with the frame's border colour, the alert colour on the alert card). Values are remembered, validated on
+  load, and "Copiar elección" adds a "Calado del ícono" part.
 - A hidden corner accent keeps its length, thickness and color: they are the start point of the
   rest-to-hover animation (registered `@property` custom properties transitioned on the element).
 - "Copiar elección" produces a text summary of every section to turn into a theme.

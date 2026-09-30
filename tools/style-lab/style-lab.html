@@ -715,6 +715,80 @@
   .card.alert:hover .tf-glow svg,
   .force-w .card.alert .tf-glow svg { --gs: 3px; --gb: 9px; opacity: 0.28; }
 
+  /* ---------- Icon cutout ("calado"), Estándar shape + Clásico preset ----------
+   * The card's own background and border move to ::before, which carries a radial mask centered on the header
+   * icon (--cut-hole, set by JS): the fill, its blur and the border are transparent inside the circle, so the
+   * stage shows through. The corner accent (::after) intersects its own mask with the same hole. An optional
+   * ring (.cut-ring) follows the circle's edge with the frame's border colour. The icon itself is not touched. */
+  .cut-ring { display: none; }
+  .card.cut-on { --ring-c: color-mix(in srgb, #fff var(--w-border), transparent); }
+  .card.alert.cut-on { --ring-c: color-mix(in srgb, var(--al) 35%, transparent); }
+  .card.alert.cut-on:hover,
+  .force-w .card.alert.cut-on { --ring-c: color-mix(in srgb, var(--al) 55%, transparent); }
+  [data-frame] .card.cut-on {
+    background: none;
+    border-color: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .card.cut-on::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+      linear-gradient(color-mix(in srgb, #fff var(--w-fill), transparent), color-mix(in srgb, #fff var(--w-fill), transparent)),
+      var(--w-base);
+    border: 1px solid color-mix(in srgb, #fff var(--w-border), transparent);
+    -webkit-mask-image: var(--cut-hole);
+    mask-image: var(--cut-hole);
+  }
+  [data-frame="glass"] .card.cut-on::before,
+  [data-frame="line"] .card.cut-on::before {
+    -webkit-backdrop-filter: blur(var(--w-blur));
+    backdrop-filter: blur(var(--w-blur));
+  }
+  .card.cut-on::after {
+    -webkit-mask:
+      var(--cut-hole) 0 0 / 100% 100% no-repeat,
+      linear-gradient(#000 0 0) 0 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 0 100% / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 100% / var(--clen) var(--clen) no-repeat;
+            mask:
+      var(--cut-hole) 0 0 / 100% 100% no-repeat,
+      linear-gradient(#000 0 0) 0 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 0 / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 0 100% / var(--clen) var(--clen) no-repeat,
+      linear-gradient(#000 0 0) 100% 100% / var(--clen) var(--clen) no-repeat;
+    -webkit-mask-composite: source-in, source-over, source-over, source-over, source-over;
+            mask-composite: intersect, add, add, add, add;
+  }
+  .card.cut-on.cut-ring-on > .cut-ring {
+    display: block;
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background: var(--cut-ring);
+  }
+  /* Alert card: the alert background and 2 px border move to ::before too; the glow stays on the card. */
+  .card.alert.cut-on:not(.tf-on),
+  .card.alert.cut-on:not(.tf-on):hover,
+  .force-w .card.alert.cut-on:not(.tf-on) { background: none; border-color: transparent; }
+  .card.alert.cut-on::before {
+    inset: -2px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--al) 12%, transparent) 0%, color-mix(in srgb, var(--al) 2%, transparent) 100%);
+    border: 2px solid color-mix(in srgb, var(--al) 35%, transparent);
+    transition: border-color 0.2s ease;
+  }
+  .card.alert.cut-on:hover::before,
+  .force-w .card.alert.cut-on::before { border-color: color-mix(in srgb, var(--al) 55%, transparent); }
+  .card.alert.cut-on.cut-ring-on > .cut-ring { inset: -2px; }
+
   .tab-box {
     display: flex;
     flex-direction: column;
@@ -1049,6 +1123,25 @@
         <span class="range-val" id="tf-alertTextAlpha-val"></span>
       </div>
       <p class="hint">En alerta, la pestaña usa el color de alerta como relleno y como texto. Borde (2 px) y brillo siguen la silueta.</p>
+    </div>
+
+    <!-- Icon cutout (Clásico, Estándar shape) -->
+    <div class="ctl-group" id="co-group">
+      <p class="ctl-head">Calado del ícono</p>
+      <p class="hint">Hace transparente el fondo del widget en un círculo centrado en el ícono del encabezado, para que el ícono no quede sobre el vidrio. Se aplica con el punto de partida Actual (Clásico) y la forma Estándar; en Pestaña el ícono ya está fuera del cuerpo y no hace falta.</p>
+      <label class="switch" for="co-on">Calado del ícono <input id="co-on" type="checkbox"><span aria-hidden="true"></span></label>
+      <div class="range-row wide">
+        <label for="co-pad">Margen</label>
+        <input class="range" id="co-pad" type="range" min="0" max="24" step="1">
+        <span class="range-val" id="co-pad-val"></span>
+      </div>
+      <div class="range-row wide">
+        <label for="co-feather">Suavizado</label>
+        <input class="range" id="co-feather" type="range" min="0" max="16" step="1">
+        <span class="range-val" id="co-feather-val"></span>
+      </div>
+      <label class="switch" for="co-ring">Anillo en el borde <input id="co-ring" type="checkbox"><span aria-hidden="true"></span></label>
+      <p class="hint">Margen: distancia entre el ícono y el borde del círculo. Suavizado 0 da un borde duro. El anillo usa el color del borde del marco (el de alerta en la tarjeta en alerta). <span id="co-status"></span></p>
     </div>
 
     <!-- Corner finish under the header icon -->
@@ -1546,6 +1639,19 @@
     const CW_MIN_TITLE = 12;
     // Corner finish of the body's top-right corner under the header icon (tab shape only).
     // mode: 'actual' | 'step' | 'open' | 'line'. The step depth is the tab frame's body cut (state.tf.bodyCut).
+    // Icon cutout: a circle of transparent background behind the header icon (Estándar shape, Clásico preset).
+    const CO_DEFAULT = { on: false, pad: 8, feather: 6, ring: false };
+    const CO_LIMITS = { pad: [0, 24], feather: [0, 16] };
+    const PRESET_IDS = ['instrument', 'current', 'glassCorners', 'industrial', 'minimal'];
+    function sanitizeCo(raw) {
+      const d = clone(CO_DEFAULT);
+      if (!raw || typeof raw !== 'object') return d;
+      const num = function (key) {
+        return typeof raw[key] === 'number' && isFinite(raw[key])
+          ? Math.min(CO_LIMITS[key][1], Math.max(CO_LIMITS[key][0], raw[key])) : d[key];
+      };
+      return { on: typeof raw.on === 'boolean' ? raw.on : d.on, pad: num('pad'), feather: num('feather'), ring: typeof raw.ring === 'boolean' ? raw.ring : d.ring };
+    }
     const CF_DEFAULT = { mode: 'actual', shift: 24, fade: 40, gap: 6 };
     const CF_LIMITS = { shift: [0, 80], fade: [8, 120], gap: [0, 16] };
     const CF_MODES = ['actual', 'step', 'open', 'line'];
@@ -1645,7 +1751,7 @@
       },
     };
 
-    Object.keys(PRESETS).forEach(function (k) { PRESETS[k].shape = 'tab'; PRESETS[k].tf = clone(TF_DEFAULT); PRESETS[k].cw = clone(CW_DEFAULT); PRESETS[k].cf = clone(CF_DEFAULT); });
+    Object.keys(PRESETS).forEach(function (k) { PRESETS[k].shape = 'tab'; PRESETS[k].tf = clone(TF_DEFAULT); PRESETS[k].cw = clone(CW_DEFAULT); PRESETS[k].cf = clone(CF_DEFAULT); PRESETS[k].co = clone(CO_DEFAULT); PRESETS[k].preset = k; });
 
     const STORE_KEY = 'hmi-style-lab-v1';
     const TF_START_RADIUS = 5;
@@ -1658,7 +1764,8 @@
       if (saved && saved.state && saved.state.w && saved.state.tf) {
         const tf = Object.assign(clone(TF_DEFAULT), saved.state.tf);
         tf.text = Object.assign(clone(TF_DEFAULT.text), saved.state.tf.text);
-        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf, cw: sanitizeCw(saved.state.cw), cf: sanitizeCf(saved.state.cf) });
+        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf, cw: sanitizeCw(saved.state.cw), cf: sanitizeCf(saved.state.cf), co: sanitizeCo(saved.state.co),
+          preset: PRESET_IDS.indexOf(saved.state.preset) >= 0 ? saved.state.preset : 'instrument' });
       }
     } catch (err) { /* storage unavailable: start from the defaults */ }
     const editing = { w: 'rest', b: 'rest', i: 'rest', g: 'rest' };
@@ -1777,6 +1884,7 @@
       renderTabControls();
       syncChartUi();
       syncCornerUi();
+      syncCutoutUi();
 
       Object.keys(T_FIELDS).forEach(function (key) {
         $('t-' + key).value = state.t[key];
@@ -1839,6 +1947,7 @@
         ' %, color ' + state.t.tint + ' %' +
         ' · Forma del marco: ' + (state.shape === 'tab' ? 'Pestaña' : 'Estándar') +
         (state.shape === 'tab' ? ' · Pestaña (tokens --tab-frame-*) | ' + tabSummary() : '') +
+        ' · Calado del ícono | ' + cutoutSummary() +
         (state.shape === 'tab' ? ' · Remate de la esquina | ' + cornerSummary() : '') +
         ' · Gráfico con selector | ' + chartSummary();
       layoutAll();
@@ -1854,6 +1963,45 @@
         state.w.rest.radius + ' px, hover ' + state.w.hover.radius + ' px, alerta: relleno de la pestaña = color de alerta al ' +
         tf.alertFillAlpha + ' % (--tab-frame-alert-fill-opacity), texto = color de alerta al ' + tf.alertTextAlpha +
         ' %, borde ' + (tf.borderTab ? 'rodea también la pestaña' : 'sigue solo el cuerpo');
+    }
+
+    // The cutout applies to the Estándar shape with the Clásico ("Actual") preset only.
+    function cutoutActive() { return state.co.on && state.shape === 'std' && state.preset === 'current'; }
+    function cutoutSummary() {
+      const co = state.co;
+      if (!co.on) return 'apagado (sin calado, como hoy)';
+      return 'encendido: círculo de fondo transparente centrado en el ícono del encabezado (máscara radial sobre el fondo, el desenfoque y el borde del marco y sobre el remate de esquina; el ícono no cambia; el fondo del escenario se ve a través)' +
+        ' | radio = mitad del lado del ícono + margen ' + co.pad + ' px' +
+        ' | suavizado del borde: ' + (co.feather === 0 ? 'duro (0 px)' : co.feather + ' px, centrado en el radio') +
+        ' | anillo en el borde del círculo: ' + (co.ring ? 'sí, con el color del borde del marco (--frame-border; el de alerta en alerta), grosor del borde del marco' : 'no') +
+        ' | aplica solo con el preset Actual (Clásico) y la forma Estándar' + (cutoutActive() ? '' : ' (ahora no está activo: ' + (state.shape !== 'std' ? 'la forma es Pestaña' : 'el preset no es Actual') + ')');
+    }
+    function syncCutoutUi() {
+      const co = state.co;
+      $('co-on').checked = co.on;
+      $('co-ring').checked = co.ring;
+      $('co-pad').value = co.pad;
+      $('co-pad-val').textContent = co.pad + ' px';
+      $('co-feather').value = co.feather;
+      $('co-feather-val').textContent = co.feather + ' px';
+      $('co-status').textContent = cutoutActive() ? 'Activo.' : 'Ahora no se ve: elija el punto de partida Actual y la forma Estándar.';
+    }
+    // Sets or clears the cutout on one card (only cards with a header icon outside the tab shape).
+    function applyIconCutout(card) {
+      const icon = cutoutActive() && !card.classList.contains('group-card') ? card.querySelector('.w-head > svg, .cw-std-head > svg') : null;
+      const on = !!icon && !card.classList.contains('tf-on');
+      card.classList.toggle('cut-on', on);
+      card.classList.toggle('cut-ring-on', on && state.co.ring);
+      if (!on) { card.style.removeProperty('--cut-hole'); card.style.removeProperty('--cut-ring'); return; }
+      if (!card.querySelector('.cut-ring')) card.insertAdjacentHTML('beforeend', '<div class="cut-ring" aria-hidden="true"></div>');
+      const cr = card.getBoundingClientRect(), ir = icon.getBoundingClientRect();
+      const cx = ir.left + ir.width / 2 - cr.left, cy = ir.top + ir.height / 2 - cr.top;
+      const radius = Math.max(ir.width, ir.height) / 2 + state.co.pad, f = state.co.feather;
+      const a = Math.max(0, radius - f / 2), b = radius + f / 2;
+      card.style.setProperty('--cut-hole', 'radial-gradient(circle at ' + cx + 'px ' + cy + 'px, transparent ' + a + 'px, #000 ' + b + 'px)');
+      const w = card.classList.contains('alert') ? 2 : 1;
+      const color = 'var(--ring-c)';
+      card.style.setProperty('--cut-ring', 'radial-gradient(circle at ' + cx + 'px ' + cy + 'px, transparent ' + (radius - w) + 'px, ' + color + ' ' + (radius - w) + 'px, ' + color + ' ' + radius + 'px, transparent ' + radius + 'px)');
     }
 
     // Text a future session can port exactly: the chosen corner finish, its rule and its values.
@@ -1995,8 +2143,8 @@
     $('presets').addEventListener('click', function (e) {
       const b = e.target.closest('button');
       if (!b) return;
-      const keep = { shape: state.shape, tf: state.tf, cw: state.cw, cf: state.cf };
-      state = Object.assign(clone(PRESETS[b.dataset.preset]), keep);
+      const keep = { shape: state.shape, tf: state.tf, cw: state.cw, cf: state.cf, co: state.co };
+      state = Object.assign(clone(PRESETS[b.dataset.preset]), keep, { preset: b.dataset.preset });
       render();
     });
     document.querySelectorAll('.state-box').forEach(function (box) {
@@ -2077,6 +2225,13 @@
       alertKind = b.dataset.alert;
       render();
     });
+    // ---------- Icon cutout controls ----------
+    $('co-on').addEventListener('change', function () { state.co.on = $('co-on').checked; render(); });
+    $('co-ring').addEventListener('change', function () { state.co.ring = $('co-ring').checked; render(); });
+    ['pad', 'feather'].forEach(function (k) {
+      $('co-' + k).addEventListener('input', function () { state.co[k] = Number($('co-' + k).value); render(); });
+    });
+
     // ---------- Corner finish controls ----------
     $('cf-mode').addEventListener('click', function (e) {
       const b = e.target.closest('button');
@@ -2445,10 +2600,12 @@
       const icon = card.querySelector('.w-head > svg');
       if (!isTab) {
         if (icon) { icon.style.top = ''; icon.style.right = ''; }
+        applyIconCutout(card);
         outline.setAttribute('d', rectPath(W, H, state.w.rest.radius, 0.75));
         if (isChart) { card.querySelector('.cw-icon-tab').style.top = ''; drawChart(card); }
         return;
       }
+      applyIconCutout(card);
       const g = geometry(card, W, H);
       if (icon) placeIcon(icon, g);
       const iconBox = placeCornerIcon(card, g, icon);
