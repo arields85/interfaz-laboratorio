@@ -344,6 +344,47 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
       against the 1.1 line height and the 4.25 px pad; the icon placement with the taller tab and body cut 0 (it sits in the
       strip at the top right); `uppercase` off; the real hover color transition.
 
+## F8 — Fix two review findings (user authorized 2026-09-30, before the visual review)
+
+- [x] **F8** — Fix R3-001 and R3-path-degenerate-geometry from the native review (advisory findings promoted to
+  work by the user's explicit authorization). Route: delegated writer (writer trigger: 2+ non-trivial files).
+  - [x] R3-001, invalid stored size. `normalizeTitleFontSize` (non-finite/non-number -> `DEFAULT_TEXT_TITLE_FONT_SIZE`
+    35, finite -> clamped to [12, 200]) plus the shared `MIN_/MAX_TEXT_TITLE_FONT_SIZE` live in
+    `utils/dashboardTitleTypography.ts` together with `DEFAULT_TEXT_TITLE_FONT_SIZE` (moved from `TextTitleWidget.tsx`:
+    the lint rule `react-refresh/only-export-components` forbids exporting a function from a renderer file; the old
+    importers now import from the util). `GroupWidget` passes the normalized size to `WidgetFrame`; `PropertyDock` uses
+    the constants for the group and text-title inputs and shows the normalized size for the group; `resolveTabFrameHeight`
+    never returns NaN (non-finite title/pad -> base height, non-finite base -> 0 floor). Decision: `TextTitleWidget` ALSO
+    uses the normalizer (trivial, identical for every value the panel can produce, 12-200; only a corrupt or out-of-range
+    stored value changes, from NaN/unbounded to the default/clamped). Left as is: the info-card `valueFontSize` input keeps
+    its own literal `min={12} max={200}` (a different setting, not the title size).
+  - [x] R3-path-degenerate-geometry, short group with a tall tab. Minimum body rule: `minBody = bodyCut + 2 x frame radius`
+    (both from existing tokens/measurements, no new token); effective tab = `min(requested, shellHeight - minBody)`,
+    floored at 0, by the pure `capTabFrameHeight` (`utils/tabFrameHeight.ts`). `useTabFrameHeight(titleFontSize, shellRef)`
+    applies it (shell `clientHeight` + `border-top-left-radius` + body cut token from the root; ResizeObserver on the
+    shell, next to the existing style MutationObserver; an unmeasured shell, height 0, is not capped). `WidgetFrame`
+    publishes that one value as the inline `--tab-frame-height`, uses it for the silhouette and icon placement, and reports
+    it through `TabFrameReporter`, so the CSS tab, the silhouette and the builder/entrance consumers agree.
+    Defensive: `buildTabFramePath` clamps the chamfer to the box and the tab height to `height - bodyCut` (non-finite ->
+    0), so no caller can fold the polygon. `.hmi-tab-frame-tab` gets `overflow: hidden` so a title taller than the capped
+    tab is clipped vertically (the width was already `truncate`d). The cap applies only to a tab with its own size (the
+    group); the standard 25 px tab and every other widget are unchanged (existing tests untouched and green).
+  - Commits: `54157fb` fix(theme) normalize the stored title size and never publish a NaN tab height (120+/18-);
+    `6b4c917` fix(theme) keep the silhouette valid when the tab is taller than the frame (62+/1-);
+    `8da703b` feat(theme) cap the tab height to what the widget can give and clip its title (197+/16-, over the ~400
+    heuristic only through tests: hook, frame, util and CSS share one behavior).
+  - RED/GREEN (Vitest): commit 1 RED 9 failed / 27 passed in 3 files (`TextTitleWidget`, `tabFrameHeight`,
+    `tabFrameRollout`: normalizer missing, NaN height, NaN group size) -> GREEN (75 files / 1145 tests after moving the
+    normalizer tests to `dashboardTitleTypography.test.ts`). Commits 2-3 RED 16 failed / 91 passed in 4 files
+    (`tabFramePath` 5, `tabFrameHeight` 4 `capTabFrameHeight is not a function`, `tabFrame.css` 1, `WidgetFrame` 6) ->
+    GREEN 107/107.
+  - Final commands (in `hmi-app/`, after the last code commit `8da703b`): `npx tsc -b` clean; `npm run lint` clean;
+    `npm test` 256 files / 3299 tests passed; `npm run build` ok.
+  - Needs the browser (visual review): a real short group (a few grid rows) with a large title size (e.g. 100-200): the tab
+    should shrink to leave the body, the title must be clipped inside it with no spill, the icon must still sit sensibly,
+    and the builder rings/ghosts and the viewer entrance outline must follow the capped tab; also that the cap re-applies
+    when the widget is resized in the builder.
+
 ## Next step — EXACT RETURN POINT (session closed 2026-09-29)
 
 State: branch `feat/tab-frame-shape` (main checkout, the user's dev server serves it), HEAD = the commit that
@@ -400,7 +441,7 @@ Advisory (non-blocking) findings, re-checked at HEAD `688eed2` by a read-only ex
 - Resolved at HEAD: R3-tab-hover-lost (S1: `.group:hover .glass-panel` reaches the surface inside the `group` shell);
   R3-icon-portal-inherited-style (S4: icon color is inline, `group-hover` still applies inside the shell).
 
-None is in scope without the user's decision (findings never expand scope by themselves).
+R3-path-degenerate-geometry and R3-001 were fixed in F8 on the user's explicit authorization (2026-09-30); the rest stay out of scope without the user's decision (findings never expand scope by themselves).
 
 - 2026-09-30 (F7, delegated writer, strict TDD, Vitest). Route: delegated writer (writer trigger: 2+ non-trivial files);
   the writer mapped every reader of the tab height first (`rg`, see the F7 item). Commits: `8af3bc2`
