@@ -384,6 +384,21 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     should shrink to leave the body, the title must be clipped inside it with no spill, the icon must still sit sensibly,
     and the builder rings/ghosts and the viewer entrance outline must follow the capped tab; also that the cap re-applies
     when the widget is resized in the builder.
+  - Review S6 (`688eed2..ea955e3`, 20 files / 493 lines, medium, `review-reliability`, consent granted in advance):
+    APPROVED and acknowledged (`review-144b07bf90f4232a`, burned). Advisory findings handled by the parent (route: inline,
+    2 mechanical files + tests, TDD):
+    - R3-cap-stale-frame-element (WARNING) — refuted: `WidgetFrame` passes `titleFontSize = null` while not in the tab
+      shape, so a shape switch changes the hook's dependency and the effect re-runs on the newly mounted shell.
+      Characterization test added (`WidgetFrame.test.tsx`: cap after a live standard -> tab -> standard -> tab switch);
+      it passed on first run (no RED possible, behavior already correct).
+    - R3-textitle-panel-unnormalized (SUGGESTION) — fixed: the text-title "Tamaño" input shows `normalizeTitleFontSize(...)`,
+      like the group. RED 3 failed (NaN -> 35, 500 -> 200, 4 -> 12) -> GREEN `PropertyDock.test.tsx` 102/102. Commit `5651f44`.
+    - R3-resize-test-global-leak (SUGGESTION) — fixed: `vi.unstubAllGlobals()` moved to an `afterEach` of that describe.
+      Commit `00406bd` (with the characterization test).
+    - Final commands (in `hmi-app/`, after `00406bd`): `npx tsc -b` clean; `npm run lint` clean; `npm test` 256 files / 3303
+      tests passed; `npm run build` ok.
+    - RDD assess `ea955e3..00406bd` (committed-only, `.gga` excluded): medium, 36 lines / 3 files, `review_due` false
+      (`under_budget`): pending in the slice from boundary `ea955e3`; no further review due now.
 
 ## Next step — EXACT RETURN POINT (session closed 2026-09-29)
 
@@ -407,6 +422,9 @@ F1–F6 done and accepted live; F7 implemented 2026-09-30 (commits `8af3bc2`..`1
    consent of every RDD review of this feature (native review slices included) and approves the sliced review.
    Steps 3 and 4 wait for the user's visual review.
    DONE 2026-09-30: all 5 slices APPROVED and acknowledged (see "Native review outcome" below); worktrees deleted.
+   Then F8 (two findings fixed on the user's authorization) reviewed as S6, APPROVED; follow-up `5651f44`, `00406bd`
+   under budget. NEXT: the user's visual review of F7 + F8 (Pestaña; titled group; "Tamaño"; a short group with a large
+   size), then steps 3-4.
 3. Fast-forward merge `feat/tab-frame-shape` into local `main` (only on the user's OK, after the visual review).
 4. Push `main` to `origin` only when the user decides.
 
