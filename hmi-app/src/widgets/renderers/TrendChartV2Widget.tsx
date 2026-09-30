@@ -72,6 +72,7 @@ import {
     WIDGET_CHART_LAYOUT_MIN_RENDERABLE_SIZE,
 } from '../../components/ui/WidgetChartLayout.shared';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
@@ -362,7 +363,7 @@ function TrendChartV2PresentationRenderer({ widget, className, renderContext, pr
         )} />
     );
 
-    return <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`} data-prefetch-history-widget="true" data-resize-surface={renderContext?.surface ?? 'viewer'}>
+    return <WidgetFrame widgetType={widget.type} title={widget.title || 'Trend Chart V2'} frameClassName="glass-panel" className="group relative p-5 overflow-hidden w-full h-full flex flex-col" outerClassName={className} data-prefetch-history-widget="true" data-resize-surface={renderContext?.surface ?? 'viewer'}>
         {header}
         <div ref={chartShellRef} className={WIDGET_CHART_CONTAINER_CLASS} data-testid="trend-chart-v2-chart-shell">
             {presentationData.isShowingRefreshFailedSnapshot && <HistoricalChartNotice variant="stale" testId="trend-chart-v2-historical-notice" />}
@@ -370,7 +371,7 @@ function TrendChartV2PresentationRenderer({ widget, className, renderContext, pr
             {shouldShowState ? <WidgetRuntimeState state={runtimeState} testId="trend-chart-v2-state" /> : <WidgetChartLayout layout={chartLayout} svgTestId="trend-chart-v2-svg" overlaySvgTestId="trend-chart-v2-overlay-svg" renderMain={(layout) => <><defs><linearGradient id={`${widget.id}-line-gradient`}><stop offset="0%" stopColor={TOKEN.gradientFrom} /><stop offset="100%" stopColor={TOKEN.gradientTo} /></linearGradient></defs>{resolvedUnit && <text data-testid="trend-chart-v2-unit-label" x={layout.yAxisUnitSlot.x} y={layout.yAxisUnitSlot.y} fill={TOKEN.icon}>{resolvedUnit.toUpperCase()}</text>}{v2Data?.summary && <text data-testid="trend-chart-v2-summary" x={layout.topMetaSlot.x} y={layout.topMetaSlot.y} textAnchor={layout.topMetaSlot.textAnchor} fill={TOKEN.muted} fontSize={SYSTEM_TEXT_STYLE.fontSize} fontFamily={SYSTEM_TEXT_STYLE.fontFamily} fontWeight={SYSTEM_TEXT_STYLE.fontWeight} letterSpacing={SYSTEM_TEXT_STYLE.letterSpacing}><tspan data-testid="trend-chart-v2-summary-min">{`min ${formatTrendChartV2SummaryValue(v2Data.summary.min ?? 0, resolvedUnit)}`}</tspan><tspan data-testid="trend-chart-v2-summary-max" dx="12">{`max ${formatTrendChartV2SummaryValue(v2Data.summary.max ?? 0, resolvedUnit)}`}</tspan><tspan data-testid="trend-chart-v2-summary-avg" dx="12">{`avg ${formatTrendChartV2SummaryValue(v2Data.summary.avg ?? 0, resolvedUnit)}`}</tspan></text>}{chartModel.valueTicks.map((tick) => <line key={tick.y} data-testid="trend-chart-v2-y-grid-line" x1={layout.plotArea.left} x2={layout.plotArea.right} y1={tick.y} y2={tick.y} stroke={TOKEN.grid} strokeDasharray="3 3" />)}{staticSegments.map((segment, index) => <g key={index} data-testid="trend-chart-v2-segment">{segment.areaPath && <path d={segment.areaPath} fill={TOKEN.gradientFrom} fillOpacity={0.2} />}{segment.points.length >= 2 && <path data-testid="trend-chart-v2-line-segment" d={segment.linePath} fill="none" stroke={`url(#${widget.id}-line-gradient)`} strokeWidth={clampLineStrokeWidth(widget.displayOptions?.lineStrokeWidth)} />}</g>)}{xTicks.map((tick) => <text data-testid="trend-chart-v2-x-axis-label" key={tick.timestampMs} x={tick.x} y={layout.xAxisLabels.y} textAnchor="middle" fill={TOKEN.muted}>{tick.label}</text>)}<TrendChartV2InteractionLayer plotLeft={layout.plotArea.left} plotTop={layout.plotArea.top} plotWidth={chartModel.plotWidth} plotHeight={chartModel.plotHeight} domainStartMs={visibleWindow.startMs} domainEndMs={visibleWindow.endMs} points={interactionPoints} hoveredTimestampMs={hoveredTimestampMs} onHoverChange={setHoveredTimestampMs} onZoomSelection={handleZoomSelection} onInvalidSelection={() => setZoomMessage('Selection too small to zoom. Drag a wider time window.')} /></>} renderOverlay={() => null} />}
             {hoveredPoint && <ChartTooltip label={formatter.format(hoveredPoint.timestampMs)} x={hoveredPoint.x} containerWidth={dimensions.width} series={[{ name: widget.title ?? 'Trend Chart V2', value: `${hoveredPoint.value}${resolvedUnit ? ` ${resolvedUnit}` : ''}`, color: TOKEN.gradientTo }]} />}
         </div>
-    </div>;
+    </WidgetFrame>;
 }
 
 function LegacyTrendChartV2Widget({
@@ -1180,9 +1181,13 @@ function LegacyTrendChartV2Widget({
     }, []);
 
     return (
-        <div
+        <WidgetFrame
             ref={widgetRootRef}
-            className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}
+            widgetType={widget.type}
+            title={widget.title || 'Trend Chart V2'}
+            frameClassName="glass-panel"
+            className="group relative p-5 overflow-hidden w-full h-full flex flex-col"
+            outerClassName={className}
             data-prefetch-history-widget="true"
             data-resize-surface={renderContext?.surface ?? 'viewer'}
             data-transient-resize-active={isBuilderTransientResizeActive ? 'true' : 'false'}
@@ -1528,6 +1533,6 @@ function LegacyTrendChartV2Widget({
                     </>
                 )}
             </div>
-        </div>
+        </WidgetFrame>
     );
 }

@@ -1,11 +1,13 @@
 import '@testing-library/jest-dom/vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClientContext } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartV2WidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponseV2 } from '../../domain/dataContract.types';
 import type { TrendChartV2PresentationData } from '../controllers/PresentationControllers';
 import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../components/ui/WidgetChartLayout.shared';
+import { GridFrameScope } from '../../components/ui/GridFrameScope';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
 import { useDataHistory } from '../../queries/useDataHistory';
@@ -2417,6 +2419,125 @@ describe('TrendChartV2Widget', () => {
 
             const summary = screen.getByTestId('trend-chart-v2-summary');
             expect(summary).toHaveAttribute('text-anchor', 'end');
+        });
+    });
+
+    // "Forma del marco": with Pestaña the chart takes the tab shape; the period selector (and "Back to preset")
+    // move into the top strip with the underline look; with Estándar nothing changes.
+    describe('tab frame shape', () => {
+        afterEach(() => {
+            resetFrameShapeOnDocument();
+        });
+
+        function makePresented(overrides?: Partial<TrendChartV2PresentationData>): TrendChartV2PresentationData {
+            return {
+                data: makeHistoryResponse(),
+                displayedRange: '24h',
+                displayedCustomWindow: null,
+                isSimulated: false,
+                isLoading: false,
+                isError: false,
+                error: null,
+                isFetching: false,
+                isPlaceholderData: false,
+                isRefreshing: false,
+                isLoadingData: false,
+                isShowingRefreshingSnapshot: false,
+                isShowingRefreshFailedSnapshot: false,
+                isNoData: false,
+                runtimeState: 'empty',
+                onRangeChange: vi.fn(),
+                onCustomWindowChange: vi.fn(),
+                ...overrides,
+            };
+        }
+
+        it('keeps the single framed element and the pill selector in the header with the standard shape (guard)', () => {
+            const { container } = render(
+                <GridFrameScope>
+                    <TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />
+                </GridFrameScope>,
+            );
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            const framed = container.querySelector('.glass-panel') as HTMLElement;
+            expect(framed).toHaveClass('glass-panel', 'group', 'relative', 'p-5', 'overflow-hidden', 'w-full', 'h-full', 'flex', 'flex-col');
+            expect(framed).toHaveAttribute('data-prefetch-history-widget', 'true');
+            expect(within(framed).getByText('Trend Chart V2')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '24h' })).toHaveClass('theme-button', 'theme-button-segment-active');
+        });
+
+        it('takes the tab shape in the binding path: title in the tab, selector in the strip (underline), root attributes and ref on the content', () => {
+            previewFrameShape('tab');
+
+            const { container } = render(
+                <GridFrameScope>
+                    <TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />
+                </GridFrameScope>,
+            );
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(shell).not.toBeNull();
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Trend Chart V2')).toBeInTheDocument();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            expect(within(strip).getByTestId('trend-chart-v2-widget-runtime-controls')).toBeInTheDocument();
+            expect(within(strip).getByRole('button', { name: '24h' })).not.toHaveClass('theme-button');
+            // The measured root (ref + data attributes) is the content element, which has the same size as the shell.
+            const content = screen.getByTestId('trend-chart-v2-chart-shell').closest('[data-prefetch-history-widget]') as HTMLElement;
+            expect(content).not.toBeNull();
+            expect(content.parentElement).toBe(shell);
+            expect(content).toHaveAttribute('data-measured-width');
+            expect(content).toHaveAttribute('data-resize-surface', 'viewer');
+        });
+
+        it('keeps the selector working from the strip (a preset change goes back to the history query)', () => {
+            previewFrameShape('tab');
+
+            render(
+                <GridFrameScope>
+                    <TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} />
+                </GridFrameScope>,
+            );
+            fireEvent.click(within(screen.getByTestId('tab-frame-trailing-host')).getByRole('button', { name: '7d' }));
+
+            expect(useDataHistory).toHaveBeenLastCalledWith(expect.objectContaining({ range: '7d' }));
+        });
+
+        it('takes the tab shape in the presentation path and keeps "Back to preset" next to the selector in the strip', () => {
+            previewFrameShape('tab');
+            const onCustomWindowChange = vi.fn();
+            const presented = makePresented({
+                displayedRange: 'custom',
+                displayedCustomWindow: { start: '2026-06-18T12:00:00.000Z', end: '2026-06-18T13:00:00.000Z' },
+                onCustomWindowChange,
+            });
+
+            const { container } = render(
+                <GridFrameScope>
+                    <TrendChartV2Widget widget={makeWidget()} equipmentMap={new Map()} machines={[]} presentationData={{ data: presented }} />
+                </GridFrameScope>,
+            );
+
+            expect(container.querySelector('[data-widget-frame-shape="tab"]')).not.toBeNull();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            expect(within(strip).getByTestId('trend-chart-v2-widget-runtime-controls')).toBeInTheDocument();
+            fireEvent.click(within(strip).getByRole('button', { name: 'Back to preset' }));
+
+            expect(onCustomWindowChange).toHaveBeenCalledWith(null);
+        });
+
+        it('puts the default header title in the tab when the chart has no title of its own', () => {
+            previewFrameShape('tab');
+
+            const { container } = render(
+                <GridFrameScope>
+                    <TrendChartV2Widget widget={{ ...makeWidget(), title: '' }} equipmentMap={new Map()} machines={[]} />
+                </GridFrameScope>,
+            );
+
+            // The header falls back to its default title, so the chart always has one to put in the tab.
+            expect(container.querySelector('[data-widget-frame-shape="tab"]')).not.toBeNull();
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Trend Chart V2')).toBeInTheDocument();
         });
     });
 });

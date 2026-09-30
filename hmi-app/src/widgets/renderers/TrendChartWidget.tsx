@@ -21,6 +21,7 @@ import {
     getChartTextFont,
 } from '../../utils/chartHelpers';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
@@ -518,15 +519,27 @@ function TrendChartPresentationRenderer({ widget, isLoadingData = false, classNa
 
     if (isLoadingData || presentationData.isRealLoading) {
         return (
-            <div className={`glass-panel group p-5 w-full h-full flex flex-col ${className ?? ''}`}>
+            <WidgetFrame
+                widgetType={widget.type}
+                title={widget.title ?? 'Trend Chart'}
+                frameClassName="glass-panel"
+                className="group p-5 w-full h-full flex flex-col"
+                outerClassName={className}
+            >
                 {header}
                 <WidgetRuntimeState state="loading" testId="trend-chart-widget-loading" />
-            </div>
+            </WidgetFrame>
         );
     }
 
     return (
-        <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
+        <WidgetFrame
+            widgetType={widget.type}
+            title={widget.title ?? 'Trend Chart'}
+            frameClassName="glass-panel"
+            className="group relative p-5 overflow-hidden w-full h-full flex flex-col"
+            outerClassName={className}
+        >
             {header}
             <div className={WIDGET_CHART_CONTAINER_CLASS} data-testid="trend-chart-widget-chart-shell">
                 {presentationData.isShowingRefreshFailedSnapshot ? (
@@ -549,7 +562,7 @@ function TrendChartPresentationRenderer({ widget, isLoadingData = false, classNa
                     />
                 )}
             </div>
-        </div>
+        </WidgetFrame>
     );
 }
 
@@ -716,15 +729,27 @@ function LegacyTrendChartWidget({
 
     if (isLoadingData || isRealLoading) {
         return (
-            <div className={`glass-panel group p-5 w-full h-full flex flex-col ${className ?? ''}`}>
+            <WidgetFrame
+                widgetType={widget.type}
+                title={widget.title ?? 'Trend Chart'}
+                frameClassName="glass-panel"
+                className="group p-5 w-full h-full flex flex-col"
+                outerClassName={className}
+            >
                 {header}
                 <WidgetRuntimeState state="loading" testId="trend-chart-widget-loading" />
-            </div>
+            </WidgetFrame>
         );
     }
 
     return (
-        <div className={`glass-panel group relative p-5 overflow-hidden w-full h-full flex flex-col ${className ?? ''}`}>
+        <WidgetFrame
+            widgetType={widget.type}
+            title={widget.title ?? 'Trend Chart'}
+            frameClassName="glass-panel"
+            className="group relative p-5 overflow-hidden w-full h-full flex flex-col"
+            outerClassName={className}
+        >
             {header}
 
             <div className={WIDGET_CHART_CONTAINER_CLASS} data-testid="trend-chart-widget-chart-shell">
@@ -754,6 +779,6 @@ function LegacyTrendChartWidget({
                 )}
             </div>
 
-        </div>
+        </WidgetFrame>
     );
 }

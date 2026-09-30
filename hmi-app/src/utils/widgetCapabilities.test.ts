@@ -145,7 +145,19 @@ describe('widgetCapabilities', () => {
 });
 
 describe('widgetCapabilities tab frame eligibility', () => {
-    it.each(['machine-activity', 'kpi', 'metric-card', 'info-card', 'group'])(
+    it.each([
+        'machine-activity',
+        'kpi',
+        'metric-card',
+        'info-card',
+        'group',
+        // Charts with a period selector in the header: the selector moves into the strip.
+        'activity-analytics',
+        'prod-trend',
+        'prod-history',
+        'trend-chart',
+        'trend-chart-v2',
+    ])(
         'lets %s use the tab frame shape',
         (widgetType) => {
             expect(supportsTabFrame(widgetType)).toBe(true);
@@ -153,11 +165,6 @@ describe('widgetCapabilities tab frame eligibility', () => {
     );
 
     it.each([
-        'activity-analytics',
-        'prod-trend',
-        'prod-history',
-        'trend-chart',
-        'trend-chart-v2',
         'status',
         'text-title',
         'connection-status',

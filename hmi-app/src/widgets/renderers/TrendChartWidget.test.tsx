@@ -1,9 +1,11 @@
 import { Profiler } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrendChartWidgetConfig } from '../../domain/admin.types';
 import type { DataHistoryResponse, ContractMachine } from '../../domain/dataContract.types';
 import { WIDGET_CHART_CONTAINER_CLASS, WIDGET_CHART_HEADER_CLASS } from '../../components/ui/WidgetChartLayout.shared';
+import { GridFrameScope } from '../../components/ui/GridFrameScope';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { isDataHistoryEnabled } from '../../config/dataConnection.config';
 import { useDataHistory } from '../../queries/useDataHistory';
 import { DataHistoryServiceError } from '../../services/dataHistory.service';
@@ -876,5 +878,113 @@ describe('TrendChartWidget', () => {
         expect(chartSvg).not.toContainElement(core);
         expect(container.querySelector(`[clip-path="url(#trend-1-plot-clip)"]`)).not.toContainElement(pulse);
         expect(container.querySelector(`[clip-path="url(#trend-1-plot-clip)"]`)).not.toContainElement(core);
+    });
+
+    // "Forma del marco": with Pestaña the chart takes the tab shape; the period selector moves into the
+    // top strip (underline variant); with Estándar nothing changes (pill selector in the header).
+    describe('tab frame shape', () => {
+        afterEach(() => {
+            resetFrameShapeOnDocument();
+        });
+
+        function renderPresented(onRangeChange = vi.fn(), overrides: Partial<ReturnType<typeof makePresentationData>['data']> = {}) {
+            const presentationData = makePresentationData(onRangeChange);
+
+            return render(
+                <GridFrameScope>
+                    <TrendChartWidget
+                        widget={makeWidget()}
+                        equipmentMap={equipmentMap}
+                        presentationData={{ data: { ...presentationData.data, ...overrides } }}
+                    />
+                </GridFrameScope>,
+            );
+        }
+
+        it('keeps the single framed element it always had with the pill selector in the header with the standard shape (guard)', () => {
+            const { container } = renderPresented();
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            const framed = container.querySelector('.glass-panel') as HTMLElement;
+            expect(framed).toHaveClass('glass-panel', 'group', 'relative', 'p-5', 'overflow-hidden', 'w-full', 'h-full', 'flex', 'flex-col');
+            expect(within(framed).getByText('Temperatura')).toBeInTheDocument();
+            const controls = screen.getByTestId('trend-chart-widget-runtime-controls');
+            expect(framed).toContainElement(controls);
+            expect(controls.closest('[data-testid="tab-frame-trailing-host"]')).toBeNull();
+            expect(screen.getByRole('button', { name: 'Hora' })).toHaveClass('theme-button', 'theme-button-segment-active');
+        });
+
+        it('takes the tab shape: title in the tab, icon in the corner host, selector in the strip host with the underline look', () => {
+            previewFrameShape('tab');
+
+            const { container } = renderPresented();
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(shell).not.toBeNull();
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Temperatura')).toBeInTheDocument();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            expect(within(strip).getByTestId('trend-chart-widget-runtime-controls')).toBeInTheDocument();
+            const active = within(strip).getByRole('button', { name: 'Hora' });
+            expect(active).not.toHaveClass('theme-button');
+            expect(active).toHaveClass('text-industrial-text', 'transition-colors');
+            // The chart stays a child of the content element, which is unclipped.
+            expect(screen.getByTestId('trend-chart-widget-chart-shell').closest('[data-widget-frame-shape]')).toBe(shell);
+        });
+
+        it('keeps the selector working from the strip', () => {
+            previewFrameShape('tab');
+            const onRangeChange = vi.fn();
+
+            renderPresented(onRangeChange);
+            fireEvent.click(within(screen.getByTestId('tab-frame-trailing-host')).getByRole('button', { name: 'Día' }));
+
+            expect(onRangeChange).toHaveBeenCalledWith('dia');
+        });
+
+        it('takes the tab shape while loading too (same frame, selector in the strip)', () => {
+            previewFrameShape('tab');
+
+            const { container } = renderPresented(vi.fn(), { isRealLoading: true });
+
+            expect(container.querySelector('[data-widget-frame-shape="tab"]')).not.toBeNull();
+            expect(screen.getByTestId('trend-chart-widget-loading')).toBeInTheDocument();
+            expect(within(screen.getByTestId('tab-frame-trailing-host')).getByTestId('trend-chart-widget-runtime-controls')).toBeInTheDocument();
+        });
+
+        it('takes the tab shape in the legacy binding path and its selector still drives the history range', () => {
+            previewFrameShape('tab');
+            vi.mocked(useDataHistory).mockReturnValue({
+                data: makeHistoryResponse(),
+                isLoading: false,
+                isError: false,
+                error: null,
+                isEnabled: true,
+            });
+
+            const { container } = render(
+                <GridFrameScope>
+                    <TrendChartWidget widget={makeWidget()} equipmentMap={equipmentMap} machines={makeMachines(50)} />
+                </GridFrameScope>,
+            );
+
+            expect(container.querySelector('[data-widget-frame-shape="tab"]')).not.toBeNull();
+            fireEvent.click(within(screen.getByTestId('tab-frame-trailing-host')).getByRole('button', { name: 'Día' }));
+
+            expect(useDataHistory).toHaveBeenLastCalledWith({ machineId: 101, variableKey: 'temperature', range: 'dia' });
+        });
+
+        it('keeps the standard frame for an untitled chart even with the tab shape selected', () => {
+            previewFrameShape('tab');
+            const presentationData = makePresentationData();
+
+            const { container } = render(
+                <GridFrameScope>
+                    <TrendChartWidget widget={{ ...makeWidget(), title: '' }} equipmentMap={equipmentMap} presentationData={presentationData} />
+                </GridFrameScope>,
+            );
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            expect(screen.getByRole('button', { name: 'Hora' })).toHaveClass('theme-button');
+        });
     });
 });

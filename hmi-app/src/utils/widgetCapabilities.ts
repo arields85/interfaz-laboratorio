@@ -93,10 +93,11 @@ export function hasNestedInteractiveNavigation(widgetType: string): boolean {
 
 /**
  * Widget types whose grid frame may take the tab shape ("Forma del marco" = Pestaña):
- * titled widgets whose header uses the right-side icon. The single source of truth for
- * that eligibility -- every excluded type keeps the standard frame in every shape:
- * charts with period controls (`WidgetHeaderTemporalControls`), `status`, `text-title`,
- * `connection-status`, `alert-history`, header-slot widgets and non-grid uses.
+ * titled widgets whose header uses the right-side icon, and the charts with a period
+ * selector in the header (`WidgetHeaderTemporalControls`), whose selector moves up into the
+ * tab strip. The single source of truth for that eligibility -- every excluded type keeps
+ * the standard frame in every shape: `status`, `text-title`, `connection-status`,
+ * `alert-history`, header-slot widgets and non-grid uses.
  */
 const TAB_FRAME_WIDGET_TYPES: ReadonlySet<string> = new Set<WidgetType>([
     'machine-activity',
@@ -104,6 +105,11 @@ const TAB_FRAME_WIDGET_TYPES: ReadonlySet<string> = new Set<WidgetType>([
     'metric-card',
     'info-card',
     'group',
+    'trend-chart',
+    'trend-chart-v2',
+    'prod-trend',
+    'prod-history',
+    'activity-analytics',
 ]);
 
 /**

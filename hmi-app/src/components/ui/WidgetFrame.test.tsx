@@ -185,7 +185,7 @@ describe('WidgetFrame', () => {
             expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
         });
 
-        it.each(['activity-analytics', 'prod-trend', 'prod-history', 'trend-chart', 'trend-chart-v2', 'status', 'text-title', 'connection-status', 'alert-history'])(
+        it.each(['status', 'text-title', 'connection-status', 'alert-history'])(
             'keeps the standard frame for %s',
             (widgetType) => {
                 previewFrameShape('tab');
