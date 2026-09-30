@@ -37,11 +37,11 @@ section.
 
 ## Tasks
 
-- [ ] **R1** — Radius override: domain/service/store (per preset, overrides only), applied to the frame radius tokens
+- [x] **R1** — Radius override: domain/service/store (per preset, overrides only), applied to the frame radius tokens
   (rest and hover), live preview in the Tema tab, dirty/save/revert integration.
-- [ ] **R2** — Tema UI: "Radio del marco" slider (px) with the current value, and a "Restablecer" button (disabled when
+- [x] **R2** — Tema UI: "Radio del marco" slider (px) with the current value, and a "Restablecer" button (disabled when
   there is no override); fix the stale "Forma del marco" copy.
-- [ ] **R3** — Docs (`docs/DESIGN_SYSTEM.md` theme section) + live check.
+- [x] **R3** — Docs (`docs/DESIGN_SYSTEM.md` theme section) done; the live check with the browser is still pending (see Next step).
 
 ## Acceptance criteria
 
@@ -59,6 +59,32 @@ are the user's decisions.
 
 - 2026-09-30: document created; route: delegated writer (writer trigger: 2+ non-trivial files).
 
+- 2026-09-30: R1-R3 implemented by the delegated writer (TDD, Vitest).
+  - `439a65d` feat(theme): service override (+222/-9). RED: 11 failed / 41 passed; GREEN: 52/52.
+  - `395d82a` feat(theme): Tema slider + Restablecer + copy fix (+393/-14). RED: 15 failed / 43 passed; GREEN: 58/58.
+  - `4df28fb` docs(theme): DESIGN_SYSTEM.md (+1/-0, one long bullet).
+  - Mechanism: `themeStyle.service.ts` keeps the override as `{ [presetId]: px }` in `localStorage`
+    (`hmi-theme-frame-radius`), only radii that differ from the preset's own (absent = preset radius); invalid
+    values (corrupt JSON, unknown preset, non-number) are dropped, out-of-range clamped to 0-24, off-step snapped.
+    `previewThemeStyleOnDocument(id, target, radiusPx?)` applies the preset and then writes `--frame-radius-rest`
+    and `--frame-radius-hover` with the same value (also for Clasico, which otherwise only resets); `setActiveThemeStyle`
+    takes the same optional radius; `applyThemeStyleOverrides()` (boot) reapplies the stored override of the stored
+    preset, including Clasico. The Tema tab holds all overrides in state (snapshot ref for dirty/revert/unmount), so
+    each preset keeps its own value while switching; the slider shows `override ?? preset radius`; a value equal to
+    the preset radius counts as no override; Restablecer deletes the selected preset's override (disabled without one).
+    Guardar writes the overrides map; the preset cards' mini previews also show the adjusted radius.
+  - Frame derivatives verified to read the token (no code change): `WidgetFrame` tab shell (`border-radius` and the
+    silhouette from the computed radius), `GridSelectionFrame`/`HeaderSelectionFrame`/`BuilderCanvas`
+    rings/ghosts, `ViewerEntranceFrameOverlays`, entrance CSS (`rx/ry`). Added characterization test
+    `WidgetFrame.radius.test.tsx` (passed immediately, no behavior change needed).
+  - Copy fixed: Forma del marco description (charts take the tab shape, selector in the strip or, if it does not fit, in
+    a row inside the body) and the Pestaña card (icon at the top right of the tab strip, no cut).
+  - Decisions: slider range 0-24 px step 1; rest and hover share the override value; the override affects only the
+    frame radius tokens (buttons, tags, group container untouched).
+  - Verification (hmi-app): `npx tsc -b` clean; `npm run lint` clean; `npm test` 259 files / 3451 tests passed;
+    `npm run build` ok (chunk-size warning only).
+
 ## Next step
 
-R1–R3 (delegated writer), then live check with the control Chrome.
+Live check in the browser (control Chrome): move the slider per preset in both frame shapes (tab silhouette, builder
+rings, entrance overlays), Guardar, close without saving, Restablecer; then user review.
