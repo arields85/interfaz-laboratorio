@@ -400,6 +400,46 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     - RDD assess `ea955e3..00406bd` (committed-only, `.gga` excluded): medium, 36 lines / 3 files, `review_due` false
       (`under_budget`): pending in the slice from boundary `ea955e3`; no further review due now.
 
+## F9 — Corrections from the live look of F7/F8 (user, 2026-09-30)
+
+User verdict of the live look (2026-09-30): F8 short-group behavior "funciona perfecto"; the group title shown as typed
+(no uppercase) is confirmed correct. Corrections requested: the group title default size and a constant tab slope.
+Pending, NOT part of F9: **F10** — builder hover actions (lock/copy/delete) above the tab; scope to be confirmed by the user.
+
+- [x] **F9** — Two corrections. Route: delegated writer (writer trigger: 2+ non-trivial files).
+  - [x] Group title default size = 30 (user: "30 tiene que ser el valor por defecto"). `DEFAULT_GROUP_TITLE_FONT_SIZE = 30` next to
+    the others in `utils/dashboardTitleTypography.ts`; `normalizeTitleFontSize(stored, fallback = DEFAULT_TEXT_TITLE_FONT_SIZE)`
+    is the single design: `GroupWidget` and the `PropertyDock` group "Tamaño" pass the group default, `TextTitleWidget` passes
+    nothing and keeps 35 (parent assumption, stated to the user; text-title behavior untouched). Clamping 12-200 is unchanged.
+    Docs: `docs/DESIGN_SYSTEM.md`, `WIDGET_AUTHORING.md`, the `GroupDisplayOptions` comment. Commit `f4a441c` feat(widgets) (56+/18-).
+    RED: 6 failed / 130 passed in 3 files (`dashboardTitleTypography` 3: fallback + constants, `tabFrameRollout` 2: 30 px default and
+    NaN -> 30 / 33 px tab, `PropertyDock` 1+: group default 30 and stored NaN/500/4) -> GREEN 574/574 (23 files).
+  - [x] Constant tab slope (user: "la inclinación debe ser siempre la misma ... igual que la que tienen actualmente los otros
+    widgets"). Effective cut = `--tab-frame-tab-cut` x effective tab height / `--tab-frame-height` (19 x 47 / 25 = 35.72;
+    capped 52 -> 39.52; 25 -> 19). ONE pure helper `scaleTabFrameCut` (`utils/tabFrameHeight.ts`): a base height that cannot
+    scale (0, negative, non-finite) or a non-finite tab height returns the token cut, never NaN or negative. Consumers:
+    (1) the CSS tab and its right padding: `WidgetFrame` publishes an inline `--tab-frame-tab-cut` on the shell next to the
+    inline `--tab-frame-height` (only with an own title size; `useTabFrameHeight` now returns `{ height, tabCut }`, derived
+    from the ROOT tokens and the capped height, so no CSS change was needed); (2) the silhouette path (surface clip, border,
+    glow): `useTabFrameGeometry` derives `tabCut` with the same helper whenever a `tabHeight` is given, reading both base tokens
+    from the document root (the shell's own overrides would otherwise scale twice); (3) the outside consumers
+    (`GridSelectionFrame` rings + placement ghosts, `ViewerEntranceFrameOverlays` flash + outline) already get `tabHeight`
+    and use `useTabFrameGeometry`, so they needed no plumbing. The icon placement and tab reserve do not depend on the cut.
+    Widgets without an own title size publish nothing and keep the token cut (19 px); the group at 12 px stays 25 px / 19 px.
+    Docs: `docs/DESIGN_SYSTEM.md` (removed the "fixed in px" sentence), `index.css` token comment. Commit `0f70990` feat(theme) (207+/34-).
+    RED: 18 failed / 217 passed in 5 files (`scaleTabFrameCut` missing 7, `GridSelectionFrame.tabFrame` 2, `WidgetFrame` 7 (published cut,
+    live, floor, zero base, silhouette, capped silhouette, capped cut), `DashboardViewer.tabFrame` 1, `ViewerEntranceFrameOverlays.tabFrame`
+    1) -> GREEN 235/235 (16 files). Existing expectations that legitimately changed: outside-consumer tests now use the real 19 px
+    token and expect the scaled cut for the taller tab.
+  - GGA passed both commits (advice only: the `|| 16` root font-size fallback is now repeated in three hooks; a shared helper
+    could remove it, left as is).
+  - Final commands (in `hmi-app/`, after the last code commit `0f70990`): `npx tsc -b` clean; `npm run lint` clean;
+    `npm test` 256 files / 3323 tests passed (the first full run failed the known flaky `Topbar.test.tsx` "continues admin
+    navigation immediately when runtime short is disabled"; it passes alone and in the next full run); `npm run build` ok.
+  - Needs the browser (live look): the slanted side of a group tab at 30 (tab 41.5 px, cut ~31.54 px) and at larger sizes has the same
+    angle as the other widgets' tabs; the builder rings/ghosts and the viewer entrance outline follow the scaled cut; the shape switch
+    and the resize re-cap keep the cut in step with the height.
+
 ## Next step — EXACT RETURN POINT (session closed 2026-09-29)
 
 State: branch `feat/tab-frame-shape` (main checkout, the user's dev server serves it), HEAD = the commit that
