@@ -356,8 +356,20 @@ export function themeStyleToCssProperties(style: ThemeStyle): Record<string, str
     };
 }
 
+/**
+ * Keeps the Clasico flag (`themeStylePreset.store`) in step with the preset on the document root. Every
+ * path that changes the root tokens goes through `applyThemeStyleToDocument` / `resetThemeStyleOnDocument`,
+ * so this is the one place that writes it (a preset card applies its tokens on its own element: no sync).
+ */
+function syncActivePreset(target: HTMLElement, classic: boolean): void {
+    if (target === document.documentElement) {
+        useThemeStylePresetStore.getState().setClassic(classic);
+    }
+}
+
 /** Sets every custom property of `style` on `target` (defaults to the document root). */
 export function applyThemeStyleToDocument(style: ThemeStyle, target: HTMLElement = document.documentElement): void {
+    syncActivePreset(target, style.id === CLASSIC_THEME_STYLE_ID);
     const properties = themeStyleToCssProperties(style);
     for (const [name, value] of Object.entries(properties)) {
         target.style.setProperty(name, value);
@@ -366,6 +378,7 @@ export function applyThemeStyleToDocument(style: ThemeStyle, target: HTMLElement
 
 /** Removes every theme custom property from `target`, restoring the CSS `:root` defaults. */
 export function resetThemeStyleOnDocument(target: HTMLElement = document.documentElement): void {
+    syncActivePreset(target, true);
     const properties = themeStyleToCssProperties(CLASSIC_THEME_STYLE);
     for (const name of Object.keys(properties)) {
         target.style.removeProperty(name);
@@ -465,11 +478,6 @@ export function previewThemeStyleOnDocument(
     frameRadiusPx?: number,
 ): void {
     const preset = getThemeStylePreset(id);
-    // Only the document root carries the live preset (a preset card applies its own tokens on its element).
-    if (target === document.documentElement) {
-        useThemeStylePresetStore.getState().setClassic(preset.id === CLASSIC_THEME_STYLE_ID);
-    }
-
     if (preset.id === CLASSIC_THEME_STYLE_ID) {
         resetThemeStyleOnDocument(target);
     } else {
@@ -500,6 +508,8 @@ export function setActiveThemeStyle(
  */
 export function applyThemeStyleOverrides(): void {
     const storedId = readStoredThemeStylePresetId();
+    // Nothing applied below leaves the root on the Clasico defaults.
+    syncActivePreset(document.documentElement, true);
     const preset = storedId ? THEME_STYLE_PRESETS.find((candidate) => candidate.id === storedId) : undefined;
     if (storedId && !preset) {
         return;

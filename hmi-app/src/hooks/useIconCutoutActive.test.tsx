@@ -9,7 +9,6 @@ import {
     previewThemeStyleOnDocument,
     resetThemeStyleOnDocument,
 } from '../services/themeStyle.service';
-import { useThemeStylePresetStore } from '../store/themeStylePreset.store';
 import { supportsIconCutout } from '../utils/widgetCapabilities';
 import { useIconCutoutActive } from './useIconCutoutActive';
 
@@ -24,7 +23,6 @@ describe('useIconCutoutActive', () => {
         resetIconCutoutOnDocument();
         resetFrameShapeOnDocument();
         resetThemeStyleOnDocument();
-        useThemeStylePresetStore.getState().setClassic(true);
     });
 
     it('is off by default', () => {

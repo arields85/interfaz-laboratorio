@@ -9,7 +9,6 @@ import {
     previewThemeStyleOnDocument,
     resetThemeStyleOnDocument,
 } from '../../services/themeStyle.service';
-import { useThemeStylePresetStore } from '../../store/themeStylePreset.store';
 import { ICON_CUTOUT_ATTRIBUTE, ICON_CUTOUT_PROPERTIES } from '../../utils/iconCutout';
 import { GridFrameScope } from './GridFrameScope';
 import WidgetFrame from './WidgetFrame';
@@ -36,7 +35,6 @@ afterEach(() => {
     resetIconCutoutOnDocument();
     resetFrameShapeOnDocument();
     resetThemeStyleOnDocument();
-    useThemeStylePresetStore.getState().setClassic(true);
 });
 
 function renderFrame({ withIcon = true, grid = true, type = 'kpi' }: { withIcon?: boolean; grid?: boolean; type?: string } = {}) {

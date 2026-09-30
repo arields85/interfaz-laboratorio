@@ -10,10 +10,15 @@ import {
     writeStoredIconCutout,
 } from './iconCutout.service';
 import {
+    applyThemeStyleOverrides,
+    applyThemeStyleToDocument,
     CLASSIC_THEME_STYLE_ID,
+    getThemeStylePreset,
     INSTRUMENT_THEME_STYLE_ID,
     previewThemeStyleOnDocument,
     resetThemeStyleOnDocument,
+    setActiveThemeStyle,
+    THEME_STYLE_STORAGE_KEY,
 } from './themeStyle.service';
 import { useThemeStylePresetStore } from '../store/themeStylePreset.store';
 
@@ -79,8 +84,8 @@ describe('iconCutout.service', () => {
 
 describe('active theme preset tracking', () => {
     afterEach(() => {
+        localStorage.clear();
         resetThemeStyleOnDocument(document.documentElement);
-        useThemeStylePresetStore.getState().setClassic(true);
     });
 
     it('reports Clasico by default', () => {
@@ -98,6 +103,53 @@ describe('active theme preset tracking', () => {
     it('ignores a preview scoped to another element (a preset card)', () => {
         previewThemeStyleOnDocument(INSTRUMENT_THEME_STYLE_ID, document.createElement('div'));
 
+        expect(useThemeStylePresetStore.getState().classic).toBe(true);
+    });
+
+    it('follows a preset applied directly on the document root', () => {
+        applyThemeStyleToDocument(getThemeStylePreset(INSTRUMENT_THEME_STYLE_ID));
+
+        expect(useThemeStylePresetStore.getState().classic).toBe(false);
+    });
+
+    it('goes back to Clasico when the root tokens are reset', () => {
+        previewThemeStyleOnDocument(INSTRUMENT_THEME_STYLE_ID);
+
+        resetThemeStyleOnDocument();
+
+        expect(useThemeStylePresetStore.getState().classic).toBe(true);
+    });
+
+    it('follows the preset activated and persisted from the Tema tab', () => {
+        setActiveThemeStyle(INSTRUMENT_THEME_STYLE_ID);
+        expect(useThemeStylePresetStore.getState().classic).toBe(false);
+
+        setActiveThemeStyle(CLASSIC_THEME_STYLE_ID);
+        expect(useThemeStylePresetStore.getState().classic).toBe(true);
+    });
+
+    it('boots with a stored non-Clasico preset as not Clasico', () => {
+        localStorage.setItem(THEME_STYLE_STORAGE_KEY, INSTRUMENT_THEME_STYLE_ID);
+
+        applyThemeStyleOverrides();
+
+        expect(useThemeStylePresetStore.getState().classic).toBe(false);
+    });
+
+    it('boots with a stored Clasico preset (or none, or an unknown id) as Clasico', () => {
+        useThemeStylePresetStore.getState().setClassic(false);
+        localStorage.setItem(THEME_STYLE_STORAGE_KEY, CLASSIC_THEME_STYLE_ID);
+        applyThemeStyleOverrides();
+        expect(useThemeStylePresetStore.getState().classic).toBe(true);
+
+        useThemeStylePresetStore.getState().setClassic(false);
+        localStorage.clear();
+        applyThemeStyleOverrides();
+        expect(useThemeStylePresetStore.getState().classic).toBe(true);
+
+        useThemeStylePresetStore.getState().setClassic(false);
+        localStorage.setItem(THEME_STYLE_STORAGE_KEY, 'nope');
+        applyThemeStyleOverrides();
         expect(useThemeStylePresetStore.getState().classic).toBe(true);
     });
 });
