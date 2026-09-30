@@ -67,8 +67,9 @@ header") and wants to TRY it, so it must be switchable and reversible with one c
   widgets stay standard.
 - [x] **F3** — Builder and entrance follow the shape: selection frame, placement ghosts, hover actions,
   viewer entrance flash + outline.
-- [ ] **F4** — Live look with the user and tuning. First live look 2026-09-29: "se ve todo muy bien", with
-  the corrections in F5.
+- [x] **F4** — Live look with the user and tuning. First live look 2026-09-29: "se ve todo muy bien", with
+  the corrections in F5; after F6 and the icon/entrance tuning the user accepted everything live
+  ("todo lo que hicimos quedó perfecto", 2026-09-29).
 - [x] **F5** — Corrections from the first live look (user, 2026-09-29). Outcome per item (commits `3febe44`,
   `e8a01c0`, `e4a07ef`):
   - [x] Tab colors, normal widgets. Decision history: first "white 40 % fill + title white 70 % / 100 % on hover";
@@ -286,8 +287,40 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
     row (`flex flex-col`, like the other admin panels). RED 1 -> GREEN 65/65 (`ThemeSettingsTab`,
     `GlobalSettingsDialog`). Commit `7955394`.
 
-## Next step
+## F7 — Group widget title as a tab (requested 2026-09-29, NOT started)
 
-Live look (F4) with the user on the F6 result (Instrumento 5 px, body cut 0, icon in the tab strip, tab stopping
-before the icon, tab colors, alert glow, entrance; tokens above are the tuning knobs). Then the native review in smaller slices (the whole branch exceeds
-the reviewer budget): one candidate per work-unit commit, from the F1 boundary `40ad436`.
+- [ ] **F7** — The `group` widget's title and icon adopt the same tab format as the other tab-frame widgets
+  (they already get the tab when titled; this changes the title's TYPOGRAPHY and the tab's HEIGHT):
+  - Title typography = exactly the `text-title` widget's typography and settings ("Texto" and "Tamaño", e.g.
+    35), WITHOUT its "Alinear" and "Color" options (not needed for the group).
+  - Tab fill and title color in rest/hover = the same as the other tabs (`--tab-frame-fill` white 15 %,
+    `--tab-frame-text` white 70 % → `--tab-frame-text-hover` white 100 %).
+  - The tab height grows with the title font size so the text always has an even breathing space above and
+    below; the tab grows DOWNWARD, into the widget (the widget's outer height never changes; the body's top line
+    moves down with it). The icon placement rule and the unified silhouette follow the taller tab.
+  - Scope note to confirm with the user: the user said "solo en el tema Instrumento (como lo venimos haciendo)",
+    but the tab shape is the independent "Forma del marco" setting (combinable with any preset). F7 follows the
+    same rule as the other tab widgets unless the user decides to tie Pestaña to Instrumento.
+  - Property panel: the group's title needs the text-title "Tamaño" control (load the project skill
+    `widget-property-panel` before touching property panels).
+
+## Next step — EXACT RETURN POINT (session closed 2026-09-29)
+
+State: branch `feat/tab-frame-shape` (main checkout, the user's dev server serves it), HEAD = the commit that
+records this closeout on top of `ce94353`; working tree clean except the untracked `.gga` (never commit it).
+Local `main` = `40ad436` (viewer entrance animation merged), 26 commits ahead of `origin/main`, NOT pushed.
+F1–F6 done and accepted live; F7 pending. Order agreed with the user:
+
+1. F7 — group widget tab title (above). Implement first (the user wants it before the closeout steps), with TDD,
+   then a live look.
+2. Native review of the branch in slices (the whole branch, ~5500 lines, exceeds the reviewer budget —
+   `lens_context_budget_exceeded`). Proposed slices from the F1 boundary `40ad436`: `..cc1450b` (F1, ~1600),
+   `..84ee23d` (F2–F3), `..e4a07ef` (F5), `..3bece2f` (F6 + style lab), `..HEAD` (tuning + F7). Each slice end
+   except HEAD is reviewed in a temporary git worktree checked out at that commit (sibling folder, e.g.
+   `D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\review-sN`, so the user's dev server is untouched), with
+   `gentle-ai review status --cwd <worktree> ... --base-ref <previous slice end> --committed-only
+   --untracked-scope=exclude --expected-untracked-inventory=<from status>`; relay each consent; acknowledge each
+   approval; delete the worktrees afterwards (a CodeGraph daemon may lock `.codegraph/` files — see
+   `backlog/leftover-worktree-cleanup` for the Restart Manager technique).
+3. Fast-forward merge `feat/tab-frame-shape` into local `main` (only on the user's OK).
+4. Push `main` to `origin` only when the user decides.
