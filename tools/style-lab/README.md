@@ -60,6 +60,22 @@ between them.
 - **Presets:** Instrumento (the app's `INSTRUMENT_THEME_STYLE`, and the lab's initial state), Actual
   (Clásico), Vidrio con remate, Industrial recto, Contorno (HMI). Switching preset keeps the shape
   and tab settings.
+- **"Remate de la esquina" (finish of the body's top-right corner under the header icon):** a switch that
+  applies to every widget with the Pestaña shape (the main sample widgets and the chart sample; not to the chart's
+  alternative C, whose icon lives in its own tab). Options: **Actual** (the reference: rounded corner, or the 45°
+  chamfer when "Corte cuerpo" is above 0); **1 · Escalón**: the body's top line runs right from the tab junction, a
+  diagonal goes down to the right and a flat shelf continues to the right edge, with the icon above the shelf.
+  Controls: *profundidad* (the same value as "Corte cuerpo", 0-60 px; picking Escalón with 0 loads 16 px and gives the 0
+  back when leaving it untouched) and *desplazamiento* (shelf width, 0-80 px; 0 = the diagonal reaches the right edge).
+  The diagonal is parallel to the tab's slanted side (slope = tab cut / tab height, not 45°), every vertex uses the
+  single silhouette radius, and the fill, border, glow, alert states and hover follow the same path. The step is
+  clamped so it never crosses the title tab, the chart selector (in B it cannot start left of the selector's right
+  edge) or the widget's height, and the content moves down just enough to stay 6 px below the shelf. **2 · Esquina
+  abierta**: the fill stays closed but the top and right border fade to transparent before the corner (control:
+  *desvanecer*, 8-120 px, a radial mask on the border layer). **3 · Ícono sobre la línea**: the icon is centered on the
+  body's top line and the border is interrupted around it (control: *separación*, 0-16 px; in B it cannot exceed the
+  strip gap). The values are remembered and validated on load, and "Copiar elección" adds a "Remate de la esquina" part
+  naming the finish and its values (for Escalón: depth, displacement and that the slope equals the tab's).
 - A hidden corner accent keeps its length, thickness and color: they are the start point of the
   rest-to-hover animation (registered `@property` custom properties transitioned on the element).
 - "Copiar elección" produces a text summary of every section to turn into a theme.

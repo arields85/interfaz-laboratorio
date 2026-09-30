@@ -736,6 +736,8 @@
     cursor: pointer;
   }
 
+  .cf-opt { display: flex; flex-direction: column; gap: 12px; }
+  .cf-opt[hidden] { display: none; }
   .text-in {
     flex: 1;
     min-width: 0;
@@ -1047,6 +1049,47 @@
         <span class="range-val" id="tf-alertTextAlpha-val"></span>
       </div>
       <p class="hint">En alerta, la pestaña usa el color de alerta como relleno y como texto. Borde (2 px) y brillo siguen la silueta.</p>
+    </div>
+
+    <!-- Corner finish under the header icon -->
+    <div class="ctl-group" id="cf-group">
+      <p class="ctl-head">Remate de la esquina</p>
+      <p class="hint">Alternativas para el final de la esquina superior derecha del cuerpo, bajo el ícono del encabezado. Se ven en los widgets con Pestaña, incluido el gráfico (en su alternativa C no aplica: el ícono va en su propia pestaña).</p>
+      <div class="seg" id="cf-mode">
+        <button type="button" data-cf="actual">Actual</button>
+        <button type="button" data-cf="step">1 · Escalón</button>
+        <button type="button" data-cf="open">2 · Esquina abierta</button>
+        <button type="button" data-cf="line">3 · Ícono sobre la línea</button>
+      </div>
+      <div class="cf-opt" data-cf-for="step">
+        <div class="range-row wide">
+          <label for="cf-depth">Profundidad</label>
+          <input class="range" id="cf-depth" type="range" min="0" max="60" step="1">
+          <span class="range-val" id="cf-depth-val"></span>
+        </div>
+        <div class="range-row wide">
+          <label for="cf-shift">Desplazamiento</label>
+          <input class="range" id="cf-shift" type="range" min="0" max="80" step="1">
+          <span class="range-val" id="cf-shift-val"></span>
+        </div>
+        <p class="hint">Profundidad es el mismo valor que Corte cuerpo: cuánto baja la meseta. Desplazamiento es el ancho de la meseta: con 0 la diagonal llega al borde derecho. La diagonal es paralela al lado inclinado de la pestaña. Se limita sola para no cruzar la pestaña, el selector (en B) ni el alto del widget, y el contenido baja lo necesario para quedar bajo la meseta.</p>
+      </div>
+      <div class="cf-opt" data-cf-for="open">
+        <div class="range-row wide">
+          <label for="cf-fade">Desvanecer</label>
+          <input class="range" id="cf-fade" type="range" min="8" max="120" step="1">
+          <span class="range-val" id="cf-fade-val"></span>
+        </div>
+        <p class="hint">Largo con el que el borde superior y el derecho se desvanecen antes de llegar a la esquina. El relleno sigue cerrado.</p>
+      </div>
+      <div class="cf-opt" data-cf-for="line">
+        <div class="range-row wide">
+          <label for="cf-gap">Separación</label>
+          <input class="range" id="cf-gap" type="range" min="0" max="16" step="1">
+          <span class="range-val" id="cf-gap-val"></span>
+        </div>
+        <p class="hint">Espacio sin borde alrededor del ícono, que queda centrado sobre la línea superior del cuerpo y conserva su distancia al borde derecho. En la alternativa B del gráfico no supera la separación de la franja.</p>
+      </div>
     </div>
 
     <!-- Chart sample: selector placement -->
@@ -1501,6 +1544,23 @@
     // (dot + a couple of letters); below it the title tab is hidden instead of drawn under the selector.
     const CW_LIMITS = { gap: [0, 24], selScale: [70, 110], width: [280, 720] };
     const CW_MIN_TITLE = 12;
+    // Corner finish of the body's top-right corner under the header icon (tab shape only).
+    // mode: 'actual' | 'step' | 'open' | 'line'. The step depth is the tab frame's body cut (state.tf.bodyCut).
+    const CF_DEFAULT = { mode: 'actual', shift: 24, fade: 40, gap: 6 };
+    const CF_LIMITS = { shift: [0, 80], fade: [8, 120], gap: [0, 16] };
+    const CF_MODES = ['actual', 'step', 'open', 'line'];
+    const CF_STEP_DEPTH_MAX = 60;      // matches the depth control
+    const CF_STEP_DEFAULT_DEPTH = 16;  // loaded when Escalón is picked with a body cut of 0 (no step to see)
+    const CF_CONTENT_CLEARANCE = 6;    // content stays this far below the shelf
+    function sanitizeCf(raw) {
+      const d = clone(CF_DEFAULT);
+      if (!raw || typeof raw !== 'object') return d;
+      const num = function (key) {
+        return typeof raw[key] === 'number' && isFinite(raw[key])
+          ? Math.min(CF_LIMITS[key][1], Math.max(CF_LIMITS[key][0], raw[key])) : d[key];
+      };
+      return { mode: CF_MODES.indexOf(raw.mode) >= 0 ? raw.mode : d.mode, shift: num('shift'), fade: num('fade'), gap: num('gap') };
+    }
     // Stored chart-sample state is untrusted: whitelist enums, coerce the boolean, clamp numbers, fall back per field.
     function sanitizeCw(raw) {
       const d = clone(CW_DEFAULT);
@@ -1585,7 +1645,7 @@
       },
     };
 
-    Object.keys(PRESETS).forEach(function (k) { PRESETS[k].shape = 'tab'; PRESETS[k].tf = clone(TF_DEFAULT); PRESETS[k].cw = clone(CW_DEFAULT); });
+    Object.keys(PRESETS).forEach(function (k) { PRESETS[k].shape = 'tab'; PRESETS[k].tf = clone(TF_DEFAULT); PRESETS[k].cw = clone(CW_DEFAULT); PRESETS[k].cf = clone(CF_DEFAULT); });
 
     const STORE_KEY = 'hmi-style-lab-v1';
     const TF_START_RADIUS = 5;
@@ -1598,7 +1658,7 @@
       if (saved && saved.state && saved.state.w && saved.state.tf) {
         const tf = Object.assign(clone(TF_DEFAULT), saved.state.tf);
         tf.text = Object.assign(clone(TF_DEFAULT.text), saved.state.tf.text);
-        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf, cw: sanitizeCw(saved.state.cw) });
+        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf, cw: sanitizeCw(saved.state.cw), cf: sanitizeCf(saved.state.cf) });
       }
     } catch (err) { /* storage unavailable: start from the defaults */ }
     const editing = { w: 'rest', b: 'rest', i: 'rest', g: 'rest' };
@@ -1716,6 +1776,7 @@
       writeVars();
       renderTabControls();
       syncChartUi();
+      syncCornerUi();
 
       Object.keys(T_FIELDS).forEach(function (key) {
         $('t-' + key).value = state.t[key];
@@ -1778,6 +1839,7 @@
         ' %, color ' + state.t.tint + ' %' +
         ' · Forma del marco: ' + (state.shape === 'tab' ? 'Pestaña' : 'Estándar') +
         (state.shape === 'tab' ? ' · Pestaña (tokens --tab-frame-*) | ' + tabSummary() : '') +
+        (state.shape === 'tab' ? ' · Remate de la esquina | ' + cornerSummary() : '') +
         ' · Gráfico con selector | ' + chartSummary();
       layoutAll();
       try { localStorage.setItem(STORE_KEY, JSON.stringify({ state: state })); } catch (err) { /* optional */ }
@@ -1792,6 +1854,45 @@
         state.w.rest.radius + ' px, hover ' + state.w.hover.radius + ' px, alerta: relleno de la pestaña = color de alerta al ' +
         tf.alertFillAlpha + ' % (--tab-frame-alert-fill-opacity), texto = color de alerta al ' + tf.alertTextAlpha +
         ' %, borde ' + (tf.borderTab ? 'rodea también la pestaña' : 'sigue solo el cuerpo');
+    }
+
+    // Text a future session can port exactly: the chosen corner finish, its rule and its values.
+    function cornerSummary() {
+      const cf = state.cf, tf = state.tf;
+      const slope = tf.tabCut + ' / ' + TF_STANDARD_HEIGHT;
+      const rules = {
+        actual: 'Actual: esquina superior derecha del cuerpo como hoy (redondeada con el radio único; con Corte cuerpo mayor que 0, un chaflán a 45° de ' + tf.bodyCut + ' px)',
+        step: '1 · Escalón: la línea superior del cuerpo sigue hacia la derecha desde la unión con la pestaña, baja en diagonal hacia la derecha y continúa en una meseta horizontal hasta el borde derecho; el ícono queda arriba a la derecha de la franja, sobre la meseta' +
+          ' | profundidad (= Corte cuerpo, --tab-frame-body-cut): ' + Math.min(tf.bodyCut, CF_STEP_DEPTH_MAX) + ' px' +
+          ' | desplazamiento (ancho de la meseta; 0 = la diagonal llega al borde derecho): ' + cf.shift + ' px' +
+          ' | la diagonal es paralela al lado inclinado de la pestaña (misma pendiente: corte / alto = ' + slope + ', desplazamiento horizontal = profundidad x ' + slope + ', no 45°)' +
+          ' | los tres vértices (convexo, cóncavo, convexo) usan el radio único de la silueta; relleno, borde, brillo y hover siguen el mismo trazo' +
+          ' | límites: la diagonal no pasa por la pestaña (más su radio), en la alternativa B del gráfico no pasa por debajo del selector, la profundidad no supera ' + CF_STEP_DEPTH_MAX + ' px ni el alto del widget, y el contenido del cuerpo baja lo necesario para quedar ' + CF_CONTENT_CLEARANCE + ' px por debajo de la meseta',
+        open: '2 · Esquina abierta: silueta y relleno cerrados como hoy; el borde superior y el derecho se desvanecen hasta transparente antes de llegar a la esquina superior derecha del cuerpo' +
+          ' | largo del desvanecimiento: ' + cf.fade + ' px (degradado radial centrado en esa esquina: transparente en la esquina, opaco a ' + cf.fade + ' px)',
+        line: '3 · Ícono sobre la línea: el ícono se centra verticalmente sobre la línea superior del cuerpo y conserva su distancia al borde derecho; el borde se interrumpe alrededor del ícono (rectángulo del ícono ampliado en la separación, hasta el borde derecho)' +
+          ' | separación alrededor del ícono: ' + cf.gap + ' px (en la alternativa B del gráfico no supera la separación de la franja)',
+      };
+      return 'remate elegido: ' + rules[cf.mode] + (cf.mode === 'actual' ? '' : ' | no aplica en la alternativa C del gráfico (el ícono va en su pestaña)');
+    }
+
+    // Corner finish controls; the geometry is applied by layoutCard.
+    function syncCornerUi() {
+      const cf = state.cf;
+      document.querySelectorAll('#cf-mode button').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.dataset.cf === cf.mode));
+      });
+      document.querySelectorAll('.cf-opt').forEach(function (block) { block.hidden = block.dataset.cfFor !== cf.mode; });
+      const depth = Math.min(state.tf.bodyCut, CF_STEP_DEPTH_MAX);
+      $('cf-depth').value = depth;
+      $('cf-depth-val').textContent = state.tf.bodyCut > CF_STEP_DEPTH_MAX ? depth + ' px (máx.)' : depth + ' px';
+      $('cf-shift').value = cf.shift;
+      $('cf-shift-val').textContent = cf.shift + ' px';
+      $('cf-fade').value = cf.fade;
+      $('cf-fade-val').textContent = cf.fade + ' px';
+      $('cf-gap').value = cf.gap;
+      $('cf-gap-val').textContent = cf.gap + ' px';
+      $('cf-group').style.opacity = state.shape === 'tab' ? '1' : '0.5';
     }
 
     // Text a future session can port exactly: the chosen alternative, its rule and every adjustable value.
@@ -1894,7 +1995,7 @@
     $('presets').addEventListener('click', function (e) {
       const b = e.target.closest('button');
       if (!b) return;
-      const keep = { shape: state.shape, tf: state.tf, cw: state.cw };
+      const keep = { shape: state.shape, tf: state.tf, cw: state.cw, cf: state.cf };
       state = Object.assign(clone(PRESETS[b.dataset.preset]), keep);
       render();
     });
@@ -1976,6 +2077,25 @@
       alertKind = b.dataset.alert;
       render();
     });
+    // ---------- Corner finish controls ----------
+    $('cf-mode').addEventListener('click', function (e) {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const leaving = state.cf.mode === 'step' && b.dataset.cf !== 'step';
+      state.cf.mode = b.dataset.cf;
+      // Escalón with a body cut of 0 would show nothing: start from a visible step, and give the 0 back when
+      // leaving it untouched (the body cut also drives the plain chamfer of the other finishes).
+      if (state.cf.mode === 'step' && state.tf.bodyCut === 0) { state.tf.bodyCut = CF_STEP_DEFAULT_DEPTH; stepAutoDepth = true; }
+      if (leaving && stepAutoDepth && state.tf.bodyCut === CF_STEP_DEFAULT_DEPTH) state.tf.bodyCut = 0;
+      if (state.cf.mode !== 'step') stepAutoDepth = false;
+      render();
+    });
+    let stepAutoDepth = false;
+    $('cf-depth').addEventListener('input', function () { stepAutoDepth = false; state.tf.bodyCut = Number($('cf-depth').value); render(); });
+    ['shift', 'fade', 'gap'].forEach(function (k) {
+      $('cf-' + k).addEventListener('input', function () { state.cf[k] = Number($('cf-' + k).value); render(); });
+    });
+
     // ---------- Chart sample controls ----------
     $('cw-alt').addEventListener('click', function (e) {
       const b = e.target.closest('button');
@@ -2117,10 +2237,29 @@
       if (g.rightTab) return twoTabPath(g, inset);
       const tabW = Math.max(0, Math.min(g.tabWidth, g.width - g.bodyCut));
       const tabCut = Math.max(0, Math.min(g.tabCut, tabW));
-      return shapePath(leftTabPoints(tabW, tabCut, g.tabHeight).concat([
-        { x: g.width - g.bodyCut, y: g.tabHeight }, { x: g.width, y: g.tabHeight + g.bodyCut },
+      // Right side of the body's top edge: the plain chamfer (Actual), or the Escalón: a diagonal parallel to
+      // the tab's slanted side down to a flat shelf that runs to the right edge (g.step, see computeStep).
+      const corner = g.step
+        ? [{ x: g.step.x1, y: g.tabHeight }, { x: g.step.x2, y: g.step.y }, { x: g.width, y: g.step.y }]
+        : [{ x: g.width - g.bodyCut, y: g.tabHeight }, { x: g.width, y: g.tabHeight + g.bodyCut }];
+      return shapePath(leftTabPoints(tabW, tabCut, g.tabHeight).concat(corner, [
         { x: g.width, y: g.height }, { x: 0, y: g.height },
       ]), g.radius, inset || 0);
+    }
+    // Escalón geometry, clamped so it never crosses the title tab (plus its radius), the chart selector
+    // (keepFrom: leftmost x the diagonal may start at) or the widget's height. Depth is the tab frame's body cut;
+    // the slope is the tab's (cut / height), so the diagonal is parallel to the tab's slanted side.
+    // Returns { x1, x2, y }: diagonal from (x1, tabHeight) to (x2, y), shelf from x2 to the right edge.
+    function computeStep(g, keepFrom) {
+      const slope = g.tabHeight > 0 ? g.tabCut / g.tabHeight : 1;
+      const minX = Math.max(g.tabWidth > 0 ? g.tabWidth + 2 * g.radius + 4 : 0, keepFrom || 0);
+      const room = Math.max(0, g.width - minX);
+      let depth = Math.min(CF_STEP_DEPTH_MAX, state.tf.bodyCut, Math.max(0, g.height - g.tabHeight - 2 * g.radius - 8));
+      if (slope > 0 && depth * slope > room) depth = room / slope;
+      if (depth < 0.5) return null;
+      const dx = depth * slope;
+      const shift = Math.max(0, Math.min(state.cf.shift, room - dx));
+      return { x1: g.width - shift - dx, x2: g.width - shift, y: g.tabHeight + depth };
     }
     function rectPath(w, h, radius, inset) {
       return shapePath([{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }], radius, inset);
@@ -2184,11 +2323,44 @@
       // (hidden label, no silhouette) instead of drawing it under the selector or the second tab.
       const noTitle = !!chart && room < CW_MIN_TITLE;
       if (chart) card.querySelector('.tf-tab').style.visibility = noTitle ? 'hidden' : '';
-      return {
+      const g = {
         width: W, height: H, tabHeight: tf.height, tabCut: cut, bodyCut: chart ? chart.bodyCut : tf.bodyCut,
         rightTab: chart ? chart.rightTab : 0,
         tabWidth: noTitle ? 0 : tf.padStart + label.offsetWidth + tf.padEnd + cut, radius: state.w.rest.radius,
+        corner: cornerMode(card), step: null,
       };
+      if (g.corner === 'step') {
+        // The step replaces the chamfer; in B the diagonal may not start left of the selector's right edge.
+        g.bodyCut = 0;
+        g.step = computeStep(g, chart && chart.stepKeep ? W - chart.stepKeep : 0);
+      }
+      return g;
+    }
+    // Corner finish that applies to this card: none for the chart's alternative C (its icon has its own tab).
+    function cornerMode(card) {
+      return state.shape === 'tab' && card.dataset.cw !== 'C' ? state.cf.mode : 'actual';
+    }
+    // Content of the card stays below the Escalón shelf: main widgets push it with the header's bottom
+    // margin, chart samples with the body's top padding ('line' in A also clears the icon that dips into the body).
+    function applyCornerPush(card) {
+      const mode = cornerMode(card);
+      let depth = Math.min(CF_STEP_DEPTH_MAX, state.tf.bodyCut);
+      // In B the diagonal cannot start left of the selector's right edge, which caps the depth.
+      const slope = state.tf.height > 0 ? effectiveTabCut() / state.tf.height : 1;
+      if (card.dataset.cw === 'B' && slope > 0) depth = Math.min(depth, (CW_ICON_WIDTH + state.cw.gap) / slope);
+      const shelfBottom = state.tf.height + (mode === 'step' ? depth : 0) + CF_CONTENT_CLEARANCE;
+      if (card.classList.contains('cw-card')) {
+        const body = card.querySelector('.cw-body');
+        body.style.paddingTop = mode === 'step' ? Math.max(8, depth + CF_CONTENT_CLEARANCE) + 'px'
+          : mode === 'line' && card.dataset.cw === 'A' ? '14px' : '';
+        return;
+      }
+      const head = card.querySelector('.w-head');
+      if (!head || !head.nextElementSibling) return;
+      head.style.marginBottom = '';
+      if (mode !== 'step') return;
+      const contentTop = head.nextElementSibling.getBoundingClientRect().top - card.getBoundingClientRect().top;
+      head.style.marginBottom = Math.max(0, Math.round(shelfBottom - contentTop)) + 'px';
     }
     // Chart sample strip metrics per alternative (px, border box). The selector and the icon sit at fixed
     // distances from the right edge, so the title tab only needs to know how much room they take.
@@ -2204,7 +2376,8 @@
       }
       const selW = card.querySelector('.cw-sel').offsetWidth;
       if (alt === 'B') {
-        return { bodyCut: 0, rightTab: 0, reserve: CW_ICON_WIDTH + cw.gap + selW + cw.gap };
+        // stepKeep: distance from the right edge the Escalón diagonal must stay inside (right of the selector).
+        return { bodyCut: 0, rightTab: 0, reserve: CW_ICON_WIDTH + cw.gap + selW + cw.gap, stepKeep: CW_ICON_WIDTH + cw.gap };
       }
       const rightTab = cut + tf.padEnd + selW + cw.gap + CW_ICON_WIDTH;
       return { bodyCut: 0, rightTab: rightTab, reserve: rightTab + cw.gap };
@@ -2259,23 +2432,26 @@
       return d;
     }
     function layoutCard(card) {
-      const W = card.offsetWidth, H = card.offsetHeight;
-      if (!W || !H) return;
+      if (!card.offsetWidth || !card.offsetHeight) return;
       const tf = state.tf;
       const isTab = state.shape === 'tab';
       card.classList.toggle('tf-on', isTab);
       const isChart = card.classList.contains('cw-card');
       if (isChart) placeChartSelector(card, isTab);
+      applyCornerPush(card);
+      // Measured after the push: the Escalón can make the card taller.
+      const W = card.offsetWidth, H = card.offsetHeight;
       const outline = card.querySelector('.tf-outline path');
       const icon = card.querySelector('.w-head > svg');
       if (!isTab) {
         if (icon) { icon.style.top = ''; icon.style.right = ''; }
         outline.setAttribute('d', rectPath(W, H, state.w.rest.radius, 0.75));
-        if (isChart) drawChart(card);
+        if (isChart) { card.querySelector('.cw-icon-tab').style.top = ''; drawChart(card); }
         return;
       }
       const g = geometry(card, W, H);
       if (icon) placeIcon(icon, g);
+      const iconBox = placeCornerIcon(card, g, icon);
       const d = tabPath(g, 0);
       outline.setAttribute('d', tabPath(g, 0.75));
       setClip(card.querySelector('.tf-surface'), 'path("' + d + '")');
@@ -2287,6 +2463,7 @@
       const border = card.querySelector('.tf-border');
       border.querySelector('path').setAttribute('d', tabPath(g, sw / 2));
       setClip(border, tf.borderTab ? 'none' : 'inset(' + tf.height + 'px -10px -10px -10px)');
+      applyBorderFinish(card, g, iconBox);
       const glow = card.querySelector('.tf-glow');
       if (glow) {
         // Even-odd clip: a rectangle 64 px larger on every side with the silhouette punched out,
@@ -2308,10 +2485,60 @@
       const s = icon.getBoundingClientRect().width || 18;
       // Inside the triangle: (x - (W - bodyCut)) >= (y - tabHeight) + clearance at the icon's bottom-left.
       const maxTop = g.tabHeight + g.bodyCut - ICON_RIGHT - 2 * s - ICON_CLEAR;
-      const top = Math.max(1, Math.min(g.tabHeight + ICON_GAP, maxTop));
+      let top = Math.max(1, Math.min(g.tabHeight + ICON_GAP, maxTop));
+      // Corner finishes: Escalón keeps the icon in the strip (above the shelf, never near the diagonal);
+      // "Ícono sobre la línea" centers it on the body's top line.
+      if (g.corner === 'step') top = 1;
+      if (g.corner === 'line') top = g.tabHeight - s / 2;
       // The icon is positioned in the padding box (1px border inside the border box).
       icon.style.top = (top - 1) + 'px';
       icon.style.right = (ICON_RIGHT - 1) + 'px';
+    }
+    // Chart sample icon (24 px at 90 %, top-right) follows the "line" finish too. Returns the icon box used by
+    // the border finish: { w, h, right } in border-box px.
+    function placeCornerIcon(card, g, mainIcon) {
+      if (!card.classList.contains('cw-card')) {
+        const s = mainIcon ? (mainIcon.getBoundingClientRect().width || 18) : 18;
+        return { w: s, h: s, right: ICON_RIGHT };
+      }
+      const size = CW_ICON_SIZE * CW_ICON_SCALE;
+      card.querySelector('.cw-icon-tab').style.top = g.corner === 'line' ? (g.tabHeight - size / 2 - 1) + 'px' : '';
+      return { w: size, h: size, right: CW_ICON_RIGHT };
+    }
+    // Border finishes: "open" fades the border out around the body's top-right corner (radial mask centered on
+    // it); "line" cuts a hole in the border around the icon. Both act on the border layer only, so the
+    // fill, the glow and the entrance outline are untouched.
+    function applyBorderFinish(card, g, iconBox) {
+      const el = card.querySelector('.tf-border');
+      const set = function (prop, value) {
+        el.style.setProperty(prop, value);
+        el.style.setProperty('-webkit-' + prop, value);
+      };
+      if (g.corner === 'open') {
+        set('mask-image', 'radial-gradient(circle ' + state.cf.fade + 'px at ' + g.width + 'px ' + g.tabHeight + 'px, transparent 0%, #000 100%)');
+        set('mask-size', 'auto');
+        set('mask-position', '0 0');
+        set('mask-repeat', 'no-repeat');
+        set('mask-composite', 'add');
+        el.style.setProperty('-webkit-mask-composite', 'source-over');
+      } else if (g.corner === 'line') {
+        // In B the hole may not reach the selector, which sits left of the icon at the strip's gap.
+        const gap = card.dataset.cw === 'B' ? Math.min(state.cf.gap, state.cw.gap) : state.cf.gap;
+        const x0 = g.width - iconBox.right - iconBox.w - gap;
+        const y0 = g.tabHeight - iconBox.h / 2 - gap;
+        const solid = 'linear-gradient(#000, #000)';
+        set('mask-image', solid + ', ' + solid);
+        set('mask-size', '100% 100%, ' + (g.width - x0 + 2) + 'px ' + (iconBox.h + 2 * gap) + 'px');
+        set('mask-position', '0 0, ' + x0 + 'px ' + y0 + 'px');
+        set('mask-repeat', 'no-repeat');
+        set('mask-composite', 'exclude');
+        el.style.setProperty('-webkit-mask-composite', 'xor');
+      } else {
+        ['mask-image', 'mask-size', 'mask-position', 'mask-repeat', 'mask-composite'].forEach(function (p) {
+          el.style.removeProperty(p);
+          el.style.removeProperty('-webkit-' + p);
+        });
+      }
     }
     // The sample never gets narrower than what the strip needs for the selector, the icon and the gaps
     // (worst case: alternative C, whose second tab is the widest); the title tab then degrades on its own.
@@ -2324,7 +2551,12 @@
       setVar('--cw-w', width + 'px');
       $('cw-width-val').textContent = width + ' px' + (width > cw.width ? ' (mínimo)' : '');
     }
-    function layoutAll() { applyChartWidth(); cards.forEach(layoutCard); }
+    // Pushes first: a card's height can depend on its grid row, which the other cards' pushes change.
+    function layoutAll() {
+      applyChartWidth();
+      cards.forEach(function (c) { c.classList.toggle('tf-on', state.shape === 'tab'); applyCornerPush(c); });
+      cards.forEach(layoutCard);
+    }
     if (window.ResizeObserver) {
       const ro = new ResizeObserver(function (entries) {
         entries.forEach(function (en) { layoutCard(en.target); });
