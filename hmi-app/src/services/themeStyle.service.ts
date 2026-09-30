@@ -7,6 +7,7 @@ import type {
     ThemeSurfaceStateStyle,
     ThemeTagStyle,
 } from '../domain/themeStyle.types';
+import { useThemeStylePresetStore } from '../store/themeStylePreset.store';
 import { normalizeStepValue } from '../utils/normalizeStepValue';
 
 export const THEME_STYLE_STORAGE_KEY = 'hmi-theme-style';
@@ -464,6 +465,11 @@ export function previewThemeStyleOnDocument(
     frameRadiusPx?: number,
 ): void {
     const preset = getThemeStylePreset(id);
+    // Only the document root carries the live preset (a preset card applies its own tokens on its element).
+    if (target === document.documentElement) {
+        useThemeStylePresetStore.getState().setClassic(preset.id === CLASSIC_THEME_STYLE_ID);
+    }
+
     if (preset.id === CLASSIC_THEME_STYLE_ID) {
         resetThemeStyleOnDocument(target);
     } else {

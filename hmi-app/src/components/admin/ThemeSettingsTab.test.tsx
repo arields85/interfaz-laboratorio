@@ -27,6 +27,14 @@ import {
     writeStoredFrameShape,
 } from '../../services/frameShape.service';
 
+import {
+    getActiveIconCutout,
+    ICON_CUTOUT_STORAGE_KEY,
+    previewIconCutout,
+    resetIconCutoutOnDocument,
+    writeStoredIconCutout,
+} from '../../services/iconCutout.service';
+
 function createRef<T>(): { current: T | null } {
     return { current: null };
 }
@@ -37,12 +45,14 @@ describe('ThemeSettingsTab', () => {
         resetThemeStyleOnDocument(document.documentElement);
         resetViewerEntranceSettingsOnDocument(document.documentElement);
         resetFrameShapeOnDocument(document.documentElement);
+        resetIconCutoutOnDocument();
     });
 
     afterEach(() => {
         resetThemeStyleOnDocument(document.documentElement);
         resetViewerEntranceSettingsOnDocument(document.documentElement);
         resetFrameShapeOnDocument(document.documentElement);
+        resetIconCutoutOnDocument();
         localStorage.clear();
     });
 
@@ -869,6 +879,145 @@ describe('ThemeSettingsTab', () => {
             const section = screen.getByRole('radiogroup', { name: 'Forma del marco' }).closest('section');
             expect(section?.textContent ?? '').not.toMatch(/recorta|en el corte/i);
             expect(section?.textContent ?? '').toMatch(/ícono/);
+        });
+    });
+
+    describe('Calado del ícono', () => {
+        const cutoutSwitch = () => screen.getByRole('checkbox', { name: 'Calado del ícono' });
+        const cutoutSection = () => cutoutSwitch().closest('section') as HTMLElement;
+
+        it('renders an off switch with usted-register copy, below the frame shape section', () => {
+            render(<ThemeSettingsTab />);
+
+            expect(cutoutSwitch()).not.toBeChecked();
+            expect(cutoutSection().textContent ?? '').toMatch(/transparente/i);
+            expect(cutoutSection().textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
+            const shape = screen.getByRole('radiogroup', { name: 'Forma del marco' }).closest('section') as HTMLElement;
+            expect(shape.compareDocumentPosition(cutoutSection()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        });
+
+        it('does not touch storage on a fresh install', () => {
+            render(<ThemeSettingsTab />);
+
+            expect(localStorage.getItem(ICON_CUTOUT_STORAGE_KEY)).toBeNull();
+        });
+
+        it('starts from the persisted value', () => {
+            writeStoredIconCutout(true);
+
+            render(<ThemeSettingsTab />);
+
+            expect(cutoutSwitch()).toBeChecked();
+        });
+
+        it('previews on the whole app and marks the tab dirty, without persisting', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+
+            await user.click(cutoutSwitch());
+
+            expect(getActiveIconCutout()).toBe(true);
+            expect(localStorage.getItem(ICON_CUTOUT_STORAGE_KEY)).toBeNull();
+            expect(onDirtyChange).toHaveBeenCalledWith(true);
+            expect(onSaveStatusChange).toHaveBeenCalledWith('dirty');
+            expect(cutoutSwitch()).toBeChecked();
+        });
+
+        it('persists the override on save and clears dirty; saving it off again removes the key', async () => {
+            const user = userEvent.setup();
+            const saveRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab saveRef={saveRef} onDirtyChange={onDirtyChange} />);
+
+            await user.click(cutoutSwitch());
+            act(() => {
+                saveRef.current?.();
+            });
+            expect(localStorage.getItem(ICON_CUTOUT_STORAGE_KEY)).toBe('true');
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+
+            await user.click(cutoutSwitch());
+            act(() => {
+                saveRef.current?.();
+            });
+            expect(localStorage.getItem(ICON_CUTOUT_STORAGE_KEY)).toBeNull();
+            expect(getActiveIconCutout()).toBe(false);
+        });
+
+        it('restores the saved value on revert without persisting', async () => {
+            const user = userEvent.setup();
+            const revertRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab revertRef={revertRef} onDirtyChange={onDirtyChange} />);
+
+            await user.click(cutoutSwitch());
+            act(() => {
+                revertRef.current?.();
+            });
+
+            expect(getActiveIconCutout()).toBe(false);
+            expect(localStorage.getItem(ICON_CUTOUT_STORAGE_KEY)).toBeNull();
+            expect(cutoutSwitch()).not.toBeChecked();
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('clears dirty when the switch returns to the saved value', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            await user.click(cutoutSwitch());
+            await user.click(cutoutSwitch());
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('restores the saved value on the whole app when the tab unmounts with an unsaved preview', async () => {
+            const user = userEvent.setup();
+
+            const { unmount } = render(<ThemeSettingsTab />);
+
+            await user.click(cutoutSwitch());
+            expect(getActiveIconCutout()).toBe(true);
+            unmount();
+
+            expect(getActiveIconCutout()).toBe(false);
+        });
+
+        it('says nothing is in the way with Clásico and Estándar, and keeps the switch usable', () => {
+            previewIconCutout(true);
+            render(<ThemeSettingsTab />);
+
+            expect(cutoutSection().textContent ?? '').not.toMatch(/ahora no se aplica/i);
+            expect(cutoutSwitch()).toBeEnabled();
+        });
+
+        it('notes that it does not apply with the Pestaña shape, without hiding the switch', async () => {
+            const user = userEvent.setup();
+            render(<ThemeSettingsTab />);
+
+            await user.click(within(screen.getByRole('radiogroup', { name: 'Forma del marco' })).getByRole('radio', { name: /Pestaña/ }));
+
+            expect(cutoutSection().textContent ?? '').toMatch(/ahora no se aplica/i);
+            expect(cutoutSection().textContent ?? '').toMatch(/Estándar/);
+            expect(cutoutSwitch()).toBeEnabled();
+        });
+
+        it('notes that it does not apply with another theme, without hiding the switch', async () => {
+            const user = userEvent.setup();
+            render(<ThemeSettingsTab />);
+
+            await user.click(screen.getByRole('radio', { name: /Contorno/ }));
+
+            expect(cutoutSection().textContent ?? '').toMatch(/ahora no se aplica/i);
+            expect(cutoutSection().textContent ?? '').toMatch(/Clásico/);
+            expect(cutoutSwitch()).toBeEnabled();
         });
     });
 });

@@ -26,8 +26,14 @@ import {
     readStoredFrameShape,
     writeStoredFrameShape,
 } from '../../services/frameShape.service';
+import {
+    previewIconCutout,
+    readStoredIconCutout,
+    writeStoredIconCutout,
+} from '../../services/iconCutout.service';
 import AdminActionButton from './AdminActionButton';
 import DockSliderField from './DockSliderField';
+import DockToggleField from './DockToggleField';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
     ADMIN_SIDEBAR_SECTION_CLS,
@@ -125,6 +131,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     // every preset keeps its own adjusted value while the selection moves between them.
     const initialRadii = useMemo<FrameRadiusOverrides>(() => readStoredFrameRadiusOverrides(), []);
     const [radii, setRadii] = useState<FrameRadiusOverrides>(initialRadii);
+    const initialCutout = useMemo(() => readStoredIconCutout(), []);
+    const [cutout, setCutout] = useState(initialCutout);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
@@ -132,6 +140,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const snapshotEntranceRef = useRef(initialEntrance);
     const snapshotShapeRef = useRef(initialShape);
     const snapshotRadiiRef = useRef(initialRadii);
+    const snapshotCutoutRef = useRef(initialCutout);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -175,10 +184,12 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         entrance: ViewerEntranceSettings;
         shape: FrameShape;
         radii: FrameRadiusOverrides;
+        cutout: boolean;
     }) => next.id !== snapshotIdRef.current
         || !areEntranceSettingsEqual(next.entrance, snapshotEntranceRef.current)
         || next.shape !== snapshotShapeRef.current
-        || !areRadiusOverridesEqual(next.radii, snapshotRadiiRef.current);
+        || !areRadiusOverridesEqual(next.radii, snapshotRadiiRef.current)
+        || next.cutout !== snapshotCutoutRef.current;
 
     const syncDirty = (isDirty: boolean) => {
         dirtyRef.current = isDirty;
@@ -194,7 +205,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         setSelectedId(id);
         previewThemeStyleOnDocument(id, document.documentElement, radii[getThemeStylePreset(id).id]);
 
-        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii }));
+        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout }));
     };
 
     // The shape is previewed on the whole document like a theme card: every framed widget of the
@@ -206,7 +217,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setShape(next);
         previewFrameShape(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout }));
     };
 
     // Moving a slider previews the value on the whole document right away
@@ -219,8 +230,24 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setEntrance(next);
         applyViewerEntranceSettingsToDocument(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout }));
     };
+
+    // The icon cutout is previewed on the whole document like the shape: framed widgets read it
+    // through `useIconCutoutActive`.
+    const handleCutoutChange = (next: boolean) => {
+        if (next === cutout) {
+            return;
+        }
+
+        setCutout(next);
+        previewIconCutout(next);
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next }));
+    };
+
+    // The cutout only shows with Clasico and the Estandar shape (see `useIconCutoutActive`); the
+    // section says so while the current selection makes it not apply.
+    const cutoutApplies = selectedId === CLASSIC_THEME_STYLE_ID && shape === 'standard';
 
     // The radius belongs to the selected preset: a value equal to the preset's own radius is "no
     // override", so it never lingers in state or storage.
@@ -242,7 +269,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setRadii(nextRadii);
         previewThemeStyleOnDocument(selectedId, document.documentElement, nextRadii[selectedPreset.id]);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout }));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -261,6 +288,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 );
                 applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
                 previewFrameShape(snapshotShapeRef.current);
+                previewIconCutout(snapshotCutoutRef.current);
             }
         };
     }, []);
@@ -277,10 +305,13 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             applyViewerEntranceSettingsToDocument(entrance);
             writeStoredFrameShape(shape);
             previewFrameShape(shape);
+            writeStoredIconCutout(cutout);
+            previewIconCutout(cutout);
             snapshotIdRef.current = selectedId;
             snapshotEntranceRef.current = entrance;
             snapshotShapeRef.current = shape;
             snapshotRadiiRef.current = radii;
+            snapshotCutoutRef.current = cutout;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -289,7 +320,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [entrance, onDirtyChange, radii, saveRef, selectedId, shape]);
+    }, [cutout, entrance, onDirtyChange, radii, saveRef, selectedId, shape]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -309,6 +340,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
             setShape(snapshotShapeRef.current);
             previewFrameShape(snapshotShapeRef.current);
+            setCutout(snapshotCutoutRef.current);
+            previewIconCutout(snapshotCutoutRef.current);
             dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
@@ -448,6 +481,31 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                         );
                     })}
                 </div>
+            </section>
+
+            <section aria-labelledby="theme-cutout-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
+                <div id="theme-cutout-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
+                    Calado del ícono
+                </div>
+                <p className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    Hace transparente el fondo del widget en un círculo detrás del ícono del encabezado, para que el
+                    ícono no quede sobre el vidrio. Se aplica con el tema Clásico y la forma de marco Estándar, en los
+                    widgets con ícono del dashboard.
+                </p>
+
+                <DockToggleField
+                    label="Calado del ícono"
+                    ariaLabel="Calado del ícono"
+                    labelClassName="w-auto flex-1"
+                    checked={cutout}
+                    onChange={handleCutoutChange}
+                />
+
+                {!cutoutApplies && (
+                    <p data-testid="theme-cutout-note" className={`mt-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                        Ahora no se aplica: requiere el tema Clásico y la forma de marco Estándar.
+                    </p>
+                )}
             </section>
 
             <section aria-labelledby="theme-entrance-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
