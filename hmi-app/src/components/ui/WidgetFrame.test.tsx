@@ -532,6 +532,61 @@ describe('WidgetFrame', () => {
             expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('47px');
         });
 
+        it('keeps the slanted side at the angle of the standard tab: the shell publishes the cut scaled with the height (19 x 47 / 25)', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            const { container } = renderFramed({ tabTitleFontSize: 35 });
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('35.72px');
+        });
+
+        it('follows the title size live with the cut', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+            const framed = (size: number) => (
+                <GridFrameScope>
+                    <WidgetFrame widgetType="group" title="Grupo" frameClassName="glass-panel" className="p-5" tabTitleFontSize={size}>
+                        <WidgetHeader title="Grupo" icon={Activity} />
+                    </WidgetFrame>
+                </GridFrameScope>
+            );
+            const { container, rerender } = render(framed(35));
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('35.72px');
+
+            rerender(framed(60));
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('56.62px');
+        });
+
+        it('keeps the token cut when the own size does not make the tab taller than the standard one', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            const { container } = renderFramed({ tabTitleFontSize: 12 });
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('19px');
+        });
+
+        it('publishes no cut for a tab without its own size (the token applies untouched)', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout();
+
+            const { container } = renderFramed();
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('');
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('');
+        });
+
+        it('publishes a finite token cut when the base height token cannot scale (zero)', () => {
+            previewFrameShape('tab');
+            mockOwnSizeLayout({ '--tab-frame-height': '0px' });
+
+            const { container } = renderFramed({ tabTitleFontSize: 35 });
+
+            expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('19px');
+        });
+
         it('never makes the tab shorter than the standard tab height', () => {
             previewFrameShape('tab');
             mockOwnSizeLayout();
@@ -562,7 +617,7 @@ describe('WidgetFrame', () => {
         it('draws the unified silhouette with the taller tab (clip, border, glow)', () => {
             previewFrameShape('tab');
             mockOwnSizeLayout();
-            const geometry = { width: 300, height: 200, tabWidth: 180, tabHeight: 47, tabCut: 19, bodyCut: 0, radius: 4, glowSpread: 2 };
+            const geometry = { width: 300, height: 200, tabWidth: 180, tabHeight: 47, tabCut: 35.72, bodyCut: 0, radius: 4, glowSpread: 2 };
 
             renderFramed({ tabTitleFontSize: 35, frameClassName: 'widget-state-warning' });
 
@@ -642,7 +697,7 @@ describe('WidgetFrame', () => {
                 previewFrameShape('tab');
                 mockOwnSizeLayout();
                 vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
-                const geometry = { width: 300, height: 60, tabWidth: 180, tabHeight: 52, tabCut: 19, bodyCut: 0, radius: 4, glowSpread: 2 };
+                const geometry = { width: 300, height: 60, tabWidth: 180, tabHeight: 52, tabCut: 39.52, bodyCut: 0, radius: 4, glowSpread: 2 };
 
                 renderFramed({ tabTitleFontSize: 200, frameClassName: 'widget-state-warning' });
 
@@ -651,6 +706,17 @@ describe('WidgetFrame', () => {
                 expect(screen.getByTestId('tab-frame-glow').style.clipPath).toBe(
                     `path(evenodd, '${buildTabFrameGlowClipPath(geometry, TAB_FRAME_GLOW_CLIP_MARGIN_PX)}')`,
                 );
+            });
+
+            it('scales the cut with the capped height, not with the requested one', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout();
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+
+                const { container } = renderFramed({ tabTitleFontSize: 200 });
+
+                // 19 x 52 / 25 (the uncapped 228.5 px tab would ask for 173.66).
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-tab-cut')).toBe('39.52px');
             });
 
             it('reports the SAME capped, finite height to the layers outside the shell', () => {

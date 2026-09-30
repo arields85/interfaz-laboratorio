@@ -52,3 +52,30 @@ export function capTabFrameHeight({ tabHeight, frameHeight, bodyCut, radius }: T
 
     return Math.round(capped * 100) / 100;
 }
+
+export interface TabFrameCutInput {
+    /** Slanted-side cut (px) of the standard tab (`--tab-frame-tab-cut`). */
+    baseCut: number;
+    /** Standard tab height (px, `--tab-frame-height`) that `baseCut` belongs to. */
+    baseHeight: number;
+    /** Effective tab height (px): the standard one, a taller one, or a capped one. */
+    tabHeight: number;
+}
+
+/**
+ * Cut (px) of the tab's slanted side for an effective tab height: the side keeps the angle of the
+ * standard tab (`baseCut` over `baseHeight`), so a taller tab is not steeper. The ONE place that
+ * derives it: the frame publishes it for the CSS tab and the silhouette, and the layers outside the
+ * frame (`useTabFrameGeometry`) derive the same value from the reported height. Never NaN and never
+ * negative: a base height that cannot scale (zero, negative, non-finite) or a non-finite tab height
+ * leaves the token cut as it is.
+ */
+export function scaleTabFrameCut({ baseCut, baseHeight, tabHeight }: TabFrameCutInput): number {
+    const cut = Number.isFinite(baseCut) ? Math.max(0, baseCut) : 0;
+
+    if (!(Number.isFinite(baseHeight) && baseHeight > 0 && Number.isFinite(tabHeight))) {
+        return cut;
+    }
+
+    return Math.round(cut * (Math.max(0, tabHeight) / baseHeight) * 100) / 100;
+}

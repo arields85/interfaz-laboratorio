@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
+import { scaleTabFrameCut } from '../utils/tabFrameHeight';
 import { parseCssLengthPx, type TabFramePathGeometry } from '../utils/tabFramePath';
 
 function isSameGeometry(a: TabFramePathGeometry | null, b: TabFramePathGeometry | null): boolean {
@@ -30,6 +31,9 @@ function isSameGeometry(a: TabFramePathGeometry | null, b: TabFramePathGeometry 
  * `tabHeight` is the effective tab height (px) of a frame whose tab is taller than the standard one
  * (a title with its own size, reported by its `WidgetFrame`); without it the `--tab-frame-height`
  * token applies. Layers outside the frame's shell cannot read the frame's own override, so they pass it.
+ * The slanted side of a taller tab keeps the angle of the standard one: its cut is the
+ * `--tab-frame-tab-cut` token scaled by `tabHeight` over the standard height (`scaleTabFrameCut`),
+ * both read from the document root because the shell's own overrides would scale twice.
  */
 export function useTabFrameGeometry(
     ref: RefObject<HTMLElement | null>,
@@ -55,14 +59,22 @@ export function useTabFrameGeometry(
             }
 
             const style = window.getComputedStyle(element);
-            const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+            const rootStyle = window.getComputedStyle(document.documentElement);
+            const rootFontSize = Number.parseFloat(rootStyle.fontSize) || 16;
             const token = (name: string) => parseCssLengthPx(style.getPropertyValue(name), rootFontSize);
+            const rootToken = (name: string) => parseCssLengthPx(rootStyle.getPropertyValue(name), rootFontSize);
             const next: TabFramePathGeometry = {
                 width,
                 height,
                 tabWidth,
                 tabHeight: tabHeight ?? token('--tab-frame-height'),
-                tabCut: token('--tab-frame-tab-cut'),
+                tabCut: tabHeight === undefined
+                    ? token('--tab-frame-tab-cut')
+                    : scaleTabFrameCut({
+                        baseCut: rootToken('--tab-frame-tab-cut'),
+                        baseHeight: rootToken('--tab-frame-height'),
+                        tabHeight,
+                    }),
                 bodyCut: token('--tab-frame-body-cut'),
                 radius: parseCssLengthPx(style.borderTopLeftRadius, rootFontSize),
                 glowSpread: token('--tab-frame-glow-spread'),

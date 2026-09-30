@@ -443,7 +443,9 @@ h1, h2, h3, h4, h5, h6 {
  * valores ya convertidos a px CSS). Relleno, desenfoque y color del borde del
  * cuerpo NO están aquí: siguen viniendo de los `--frame-*` del tema activo.
  *   --tab-frame-height       alto de la pestaña (= franja sobre el cuerpo)
- *   --tab-frame-tab-cut      recorte del lado derecho de la pestaña
+ *   --tab-frame-tab-cut      recorte del lado derecho de la pestaña estándar (alto --tab-frame-height);
+ *                            una pestaña más alta lo escala en proporción para conservar el ángulo
+ *                            (ver `scaleTabFrameCut` en `utils/tabFrameHeight.ts`)
  *   --tab-frame-body-cut     chaflán de la esquina superior derecha del cuerpo (0 = sin chaflán)
  *   --tab-frame-fill         relleno de la pestaña (blanco al 15 %); con alerta warning/critical
  *                            pasa a ser el color del estado a --tab-frame-alert-fill-opacity

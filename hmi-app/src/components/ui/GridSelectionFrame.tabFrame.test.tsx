@@ -8,7 +8,7 @@ import GridSelectionFrame from './GridSelectionFrame';
 // computed tokens are injected.
 const TOKENS: Record<string, string> = {
     '--tab-frame-height': '25px',
-    '--tab-frame-tab-cut': '25px',
+    '--tab-frame-tab-cut': '19px',
     '--tab-frame-body-cut': '50px',
 };
 
@@ -22,7 +22,7 @@ function mockLayout({ width, height, radius = '4px' }: { width: number; height: 
     }) as unknown as CSSStyleDeclaration);
 }
 
-const GEOMETRY = { width: 300, height: 200, tabWidth: 180, tabHeight: 25, tabCut: 25, bodyCut: 50, radius: 4 };
+const GEOMETRY = { width: 300, height: 200, tabWidth: 180, tabHeight: 25, tabCut: 19, bodyCut: 50, radius: 4 };
 
 describe('GridSelectionFrame in the tab frame shape', () => {
     beforeEach(() => {
@@ -52,13 +52,20 @@ describe('GridSelectionFrame in the tab frame shape', () => {
         expect(focus?.getAttribute('d')).toBe(buildTabFramePath(GEOMETRY, 1));
     });
 
-    it('traces the rings with the reported tab height (a taller tab), not with the token, which it cannot see per widget', () => {
+    // The slanted side keeps the angle of the standard tab: cut 19 over height 25 scales to 35.72 over 47.
+    it('traces the rings with the reported tab height (a taller tab) and its scaled cut, not with the token, which it cannot see per widget', () => {
         const { container } = render(<GridSelectionFrame isSelected tabWidth={180} tabHeight={47} />);
 
         expect(container.querySelector('path[data-ring="hover"]')?.getAttribute('d'))
-            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 47 }, 0.5));
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 47, tabCut: 35.72 }, 0.5));
         expect(container.querySelector('path[data-ring="focus"]')?.getAttribute('d'))
-            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 47 }, 1));
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 47, tabCut: 35.72 }, 1));
+    });
+
+    it('keeps the token cut for the standard tab height', () => {
+        const { container } = render(<GridSelectionFrame isSelected tabWidth={180} tabHeight={25} />);
+
+        expect(container.querySelector('path[data-ring="focus"]')?.getAttribute('d')).toBe(buildTabFramePath(GEOMETRY, 1));
     });
 
     it('follows the reported tab height live', () => {
@@ -67,7 +74,7 @@ describe('GridSelectionFrame in the tab frame shape', () => {
         rerender(<GridSelectionFrame isSelected tabWidth={180} tabHeight={74.5} />);
 
         expect(container.querySelector('path[data-ring="focus"]')?.getAttribute('d'))
-            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 74.5 }, 1));
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 74.5, tabCut: 56.62 }, 1));
     });
 
     it('strokes the focus path with the admin accent token and shows it only when selected', () => {

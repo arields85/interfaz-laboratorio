@@ -34,14 +34,16 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFrame
 //
 // A title with its own size (`tabTitleFontSize`, the `group` widget) makes the tab as tall as that
 // title needs, but never more than the shell can give while keeping a minimal body (`useTabFrameHeight`): the shell publishes the effective height as its own
-// `--tab-frame-height` (so the fill, the border clip, the tab and the icon host follow), the
-// silhouette and the icon placement use it, and it is reported next to the tab width for the layers
+// `--tab-frame-height` (so the fill, the border clip, the tab and the icon host follow) and the
+// slanted-side cut scaled to it as its own `--tab-frame-tab-cut` (the angle never changes), the
+// silhouette and the icon placement use them, and it is reported next to the tab width for the layers
 // outside the shell. The tab grows downward into the widget; the outer size never changes.
 // =============================================================================
 
 /** Inline style of the tab shell: the radius plus the custom properties computed from the tokens. */
 type TabFrameShellStyle = CSSProperties & {
     '--tab-frame-height'?: string;
+    '--tab-frame-tab-cut'?: string;
     '--tab-frame-icon-top'?: string;
     '--tab-frame-icon-reserve'?: string;
 };
@@ -101,17 +103,19 @@ export default function WidgetFrame({
         [titleHost, iconHost, alertState, titleFontSize],
     );
     const reportTabWidth = useContext(TabFrameReporterContext);
-    // Effective tab height of a title with its own size, capped so the body keeps room; null keeps the `--tab-frame-height` token.
-    const ownTabHeight = useTabFrameHeight(titleFontSize, shellRef);
-    const tabHeight = ownTabHeight ?? undefined;
+    // Effective tab size of a title with its own size (height capped so the body keeps room, and the
+    // slanted-side cut scaled with it); null keeps the `--tab-frame-height` / `--tab-frame-tab-cut` tokens.
+    const ownTabSize = useTabFrameHeight(titleFontSize, shellRef);
+    const tabHeight = ownTabSize?.height;
     const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null, tabHeight);
     const silhouette = geometry ? buildTabFramePath(geometry) : null;
     const iconPlacement = useTabFrameIconPlacement(shellRef, tabActive, tabHeight);
     // Tab height, icon top and the space the tab leaves free for it (index.css, `.hmi-tab-frame-icon-host`).
     const shellStyle: TabFrameShellStyle = { borderRadius: 'var(--frame-radius-rest)' };
 
-    if (ownTabHeight !== null) {
-        shellStyle['--tab-frame-height'] = `${ownTabHeight}px`;
+    if (ownTabSize !== null) {
+        shellStyle['--tab-frame-height'] = `${ownTabSize.height}px`;
+        shellStyle['--tab-frame-tab-cut'] = `${ownTabSize.tabCut}px`;
     }
 
     if (iconPlacement) {

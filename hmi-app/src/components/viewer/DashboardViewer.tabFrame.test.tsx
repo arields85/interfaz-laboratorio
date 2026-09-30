@@ -147,7 +147,7 @@ describe('DashboardViewer frame shape scope', () => {
         );
         measure(container);
 
-        const geometry = { width: 300, height: 200, tabWidth: 180, tabHeight: 47, tabCut: 19, bodyCut: 0, radius: 4 };
+        const geometry = { width: 300, height: 200, tabWidth: 180, tabHeight: 47, tabCut: 35.72, bodyCut: 0, radius: 4 };
         expect(screen.getByTestId('dashboard-viewer-entrance-outline-t').querySelector('path')?.getAttribute('d'))
             .toBe(buildTabFramePath(geometry));
         expect(screen.getByTestId('dashboard-viewer-entrance-flash-t').style.clipPath)

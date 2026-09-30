@@ -8,7 +8,7 @@ import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 // size and the computed tokens are injected.
 const TOKENS: Record<string, string> = {
     '--tab-frame-height': '25px',
-    '--tab-frame-tab-cut': '25px',
+    '--tab-frame-tab-cut': '19px',
     '--tab-frame-body-cut': '50px',
 };
 
@@ -22,7 +22,7 @@ function mockLayout({ width, height }: { width: number; height: number }) {
     }) as unknown as CSSStyleDeclaration);
 }
 
-const GEOMETRY = { width: 300, height: 200, tabWidth: 180, tabHeight: 25, tabCut: 25, bodyCut: 50, radius: 4 };
+const GEOMETRY = { width: 300, height: 200, tabWidth: 180, tabHeight: 25, tabCut: 19, bodyCut: 50, radius: 4 };
 
 describe('ViewerEntranceFrameOverlays', () => {
     beforeEach(() => {
@@ -79,7 +79,8 @@ describe('ViewerEntranceFrameOverlays', () => {
         it('clips the flash and traces the outline with the reported tab height (a taller tab)', () => {
             render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={180} tabHeight={47} />);
 
-            const geometry = { ...GEOMETRY, tabHeight: 47 };
+            // The slanted side keeps the standard angle: cut 19 over height 25 scales to 35.72 over 47.
+            const geometry = { ...GEOMETRY, tabHeight: 47, tabCut: 35.72 };
             expect(screen.getByTestId('dashboard-viewer-entrance-flash-w').style.clipPath)
                 .toBe(`path('${buildTabFramePath(geometry)}')`);
             expect(screen.getByTestId('dashboard-viewer-entrance-outline-w').querySelector('path')?.getAttribute('d'))

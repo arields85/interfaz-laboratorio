@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capTabFrameHeight, resolveTabFrameHeight } from './tabFrameHeight';
+import { capTabFrameHeight, resolveTabFrameHeight, scaleTabFrameCut } from './tabFrameHeight';
 
 describe('resolveTabFrameHeight', () => {
     it('never goes below the standard tab height', () => {
@@ -52,5 +52,43 @@ describe('capTabFrameHeight', () => {
         expect(capTabFrameHeight({ tabHeight: 47, frameHeight: Number.NaN, bodyCut: 0, radius: 4 })).toBe(47);
         expect(capTabFrameHeight({ tabHeight: 47, frameHeight: 200, bodyCut: Number.NaN, radius: 4 })).toBe(47);
         expect(capTabFrameHeight({ tabHeight: Number.NaN, frameHeight: 200, bodyCut: 0, radius: 4 })).toBe(0);
+    });
+});
+
+describe('scaleTabFrameCut', () => {
+    // The slanted side keeps the angle of the standard tab: cut 19 over height 25.
+    it('keeps the token cut for the standard tab height', () => {
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: 25 })).toBe(19);
+    });
+
+    it('scales the cut with the tab height so the angle never changes', () => {
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: 47 })).toBe(35.72);
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: 74.5 })).toBe(56.62);
+        expect(19 / 25).toBeCloseTo(35.72 / 47, 10);
+    });
+
+    it('scales the capped height like any other, down to nothing for a tab with no height', () => {
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: 52 })).toBe(39.52);
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: 0 })).toBe(0);
+    });
+
+    it('follows the tokens: another slope keeps its own angle', () => {
+        expect(scaleTabFrameCut({ baseCut: 10, baseHeight: 20, tabHeight: 40 })).toBe(20);
+    });
+
+    it('falls back to the token cut when the base height cannot scale (zero, negative or non-finite)', () => {
+        for (const baseHeight of [0, -25, Number.NaN, Number.POSITIVE_INFINITY]) {
+            expect(scaleTabFrameCut({ baseCut: 19, baseHeight, tabHeight: 47 })).toBe(19);
+        }
+    });
+
+    it('falls back to the token cut when the tab height is not finite', () => {
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: Number.NaN })).toBe(19);
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: Number.POSITIVE_INFINITY })).toBe(19);
+    });
+
+    it('never returns NaN or a negative cut', () => {
+        expect(scaleTabFrameCut({ baseCut: Number.NaN, baseHeight: 25, tabHeight: 47 })).toBe(0);
+        expect(scaleTabFrameCut({ baseCut: 19, baseHeight: 25, tabHeight: -10 })).toBe(0);
     });
 });
