@@ -16,6 +16,56 @@ function rule(selector: string): string {
     return match?.[1] ?? '';
 }
 
+/** Specificity (ids excluded: none are used) of a compound selector, enough for the selectors of this file. */
+function specificity(selector: string): number {
+    let score = 0;
+    const rest = selector.replace(/:is\(([^)]*)\)/g, (_match, args: string) => {
+        score += Math.max(...args.split(',').map((arg) => specificity(arg.trim())));
+
+        return '';
+    });
+    score += (rest.match(/\[[^\]]*\]|\.[\w-]+|(?<!:):[\w-]+/g) ?? []).length;
+
+    return score;
+}
+
+describe('icon cutout own-paint clearing is independent of source order', () => {
+    const FRAMES = ':is\\(\\.glass-panel, \\.widget-state-warning, \\.widget-state-critical\\)\\[data-icon-cutout\\]';
+    const clearing = indexCss.match(new RegExp(`(${FRAMES}),\\s*\\n\\s*(${FRAMES}:hover)\\s*{([\\s\\S]*?)\\n {2}}`));
+
+    it('clears background, border color and blur on the frame, rest and hover', () => {
+        expect(clearing).not.toBeNull();
+        const body = clearing?.[3] ?? '';
+
+        expect(body).toContain('background: none;');
+        expect(body).toContain('border-color: transparent;');
+        expect(body).toContain('backdrop-filter: none;');
+    });
+
+    it('is strictly more specific than every rule that paints the frame, at rest and on hover', () => {
+        const restSelector = clearing?.[1] ?? '';
+        const hoverSelector = clearing?.[2] ?? '';
+        expect(restSelector).not.toBe('');
+
+        for (const painter of ['.glass-panel', '.widget-state-warning', '.widget-state-critical']) {
+            expect(specificity(restSelector), `${restSelector} vs ${painter}`).toBeGreaterThan(specificity(painter));
+        }
+        for (const painter of ['.glass-panel:hover', '.widget-state-warning:hover', '.widget-state-critical:hover']) {
+            expect(specificity(hoverSelector), `${hoverSelector} vs ${painter}`).toBeGreaterThan(specificity(painter));
+        }
+    });
+
+    it('the rules it must beat really paint the alert background and border (premise of the comparison)', () => {
+        for (const state of ['warning', 'critical']) {
+            const base = indexCss.match(new RegExp(`\\.widget-state-${state}\\s*{\\s*\\n\\s*--frame-radius: var\\(--frame-radius-rest\\);([\\s\\S]*?)\\n {2}}`))?.[1] ?? '';
+            expect(base).toMatch(/background:/);
+            expect(base).toMatch(/border: 2px solid/);
+            const hover = indexCss.match(new RegExp(`\\.widget-state-${state}:hover\\s*{([\\s\\S]*?)\\n {2}}`))?.[1] ?? '';
+            expect(hover).toMatch(/border-color:/);
+        }
+    });
+});
+
 describe('index.css icon cutout', () => {
     it('defines the tokens with the lab defaults: 6px margin, hard edge, ring on, 1px ring', () => {
         const root = indexCss.match(/:root\s*{([^}]*--icon-cutout-margin[^}]*)}/s)?.[1] ?? '';
@@ -61,14 +111,9 @@ describe('index.css icon cutout', () => {
         expect(rule('[data-icon-cutout]::before')).toMatch(/background:\s*var\(--icon-cutout-ring-layer\),/);
     });
 
-    it('clears the frame own background, border color and blur, also on hover, so only the ::before paints them', () => {
-        const match = indexCss.match(/\[data-icon-cutout\],\s*\n\s*\[data-icon-cutout\]:hover\s*{([\s\S]*?)\n {2}}/);
-        expect(match).not.toBeNull();
-        const body = match?.[1] ?? '';
+    it('clears the frame own -webkit-backdrop-filter too, so only the ::before blurs', () => {
+        const body = indexCss.match(/:is\(\.glass-panel, \.widget-state-warning, \.widget-state-critical\)\[data-icon-cutout\]:hover\s*{([\s\S]*?)\n {2}}/)?.[1] ?? '';
 
-        expect(body).toContain('background: none;');
-        expect(body).toContain('border-color: transparent;');
-        expect(body).toContain('backdrop-filter: none;');
         expect(body).toContain('-webkit-backdrop-filter: none;');
     });
 
@@ -112,7 +157,6 @@ describe('index.css icon cutout', () => {
         expect(panel).not.toMatch(/icon-cutout/);
         expect(panel).not.toContain('::before');
         expect(panel).not.toMatch(/overflow-clip-margin/);
-        expect(indexCss).not.toMatch(/\.glass-panel[^\n{]*icon-cutout/);
     });
 
     it('opts in only through the attribute: no cutout selector targets a bare class', () => {

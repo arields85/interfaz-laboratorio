@@ -1800,8 +1800,10 @@ h1, h2, h3, h4, h5, h6 {
     overflow-clip-margin: 1px;
   }
 
-  [data-icon-cutout],
-  [data-icon-cutout]:hover {
+  /* Especificidad mayor que la de `.glass-panel` y `.widget-state-*` (en reposo y en hover) a
+   * propósito: el marco deja de pintar su propio fondo y borde sin depender del orden en el archivo. */
+  :is(.glass-panel, .widget-state-warning, .widget-state-critical)[data-icon-cutout],
+  :is(.glass-panel, .widget-state-warning, .widget-state-critical)[data-icon-cutout]:hover {
     background: none;
     border-color: transparent;
     -webkit-backdrop-filter: none;
