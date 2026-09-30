@@ -466,8 +466,9 @@ the `fallback` argument unvalidated; both callers pass in-range constants) — r
 ## Next step — EXACT RETURN POINT (updated 2026-09-30)
 
 CURRENT STATE: F1–F10 implemented; native review S1–S7 APPROVED (reviewed boundary `b35a532`); working tree clean except
-the untracked `.gga`. WAITING FOR: the user's second live look (group default 30, constant slope, hover actions on the
-top edge). Then step 3 (fast-forward merge, on the user's OK) and step 4 (push, when the user decides). History of the
+the untracked `.gga`. WAITING FOR: nothing in code. Second live look 2026-09-30: accepted ("quedó perfecto"). Step 3 DONE 2026-09-30: fast-forward merge
+into local `main` (`9f01d25`) on the user's OK ("sí, hacé el merge"). Step 4 (push `main`, 74 commits ahead of
+`origin/main`) still waits for the user's decision. Follow-up feature: `odd/tasks/tab-frame-charts.md`. History of the
 plan below.
 
 State: branch `feat/tab-frame-shape` (main checkout, the user's dev server serves it), HEAD = the commit that
