@@ -321,6 +321,26 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   This is the mechanism behind the black blocks incident (checkout + fast-forward in the same second). Rule: one write
   per CSS edit and check the served stylesheet afterwards.
 
+## C4c — Review of C4b and the placement-independent look (2026-09-30)
+
+- Review `f23ac5e..96b218c` (K1 lab + strip gap fix + C4b; 16 files / 952 lines, medium, `slice_budget_reached`,
+  standing consent): APPROVED and acknowledged (`review-796fb61dda677c7b`). Reviewed boundary `96b218c`. Findings:
+  - WARNING R3-intrinsic-width-depends-on-placement-variant — fixed: the selector rendered `underline` in the strip and
+    `pill` in the body-row fallback, so its measured width depended on the placement (history-dependent band, or an
+    oscillation if underline were wider). `WidgetHeader` now provides `TabFrameStripContext` to the trailing slot in BOTH
+    placements of an opted-in chart (`trailingInStrip || rowBelowStrip`), so it is always `underline` in the tab shape
+    (Estándar unchanged: `pill`). RED 1 failed (fallback still `theme-button`) -> GREEN (`src/components/ui/` 233/233).
+  - SUGGESTION R3-fallback-test-global-stub-leak — fixed: `vi.unstubAllGlobals()` in the shared `afterEach`, inline
+    calls removed.
+  - SUGGESTION R3-style-lab-push-vs-step-clamp — lab only (content pushed further than the drawn shelf when `computeStep`
+    caps the depth); recorded, to be fixed if the user picks Escalón.
+  - Commands: `npx tsc -b` clean, `npm run lint` clean, `npm test` 258 files / 3419 passed, `npm run build` ok.
+    Commit `db42752`.
+- Live check in the control Chrome (window hidden, so every step forces a rendered frame with a screenshot; restored
+  after): sweeping a prod-trend item 500 -> 320 -> 500 px gives the SAME placement at each width in both directions
+  (strip at frame >= 298 px, body row at <= 281 px), always `underline`, nothing visible outside the frame (the last
+  option is clipped by the row scroller). Fits and original width: strip, title tab visible, clearance 16.39 px.
+
 ## Next step
 
 C3 and C4b done. Then C4: live look with the user (selector fallback in narrow widgets included), RDD per work-unit
