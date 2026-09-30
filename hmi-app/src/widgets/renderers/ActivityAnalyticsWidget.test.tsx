@@ -8,7 +8,9 @@ import { ActivitySeriesAdapterError } from '../../adapters/activitySeries.adapte
 import type { ActivityAnalyticsWidgetConfig, WidgetConfig } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
+import { GridFrameScope } from '../../components/ui/GridFrameScope';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { isActivitySeriesResponseCompatible, useActivitySeries, type UseActivitySeriesResult } from '../../queries/useActivitySeries';
 import { resolveActivityAnalyticsDisplayOptions } from '../../utils/activityAnalyticsWidgetDefaults';
 import { DataServiceError } from '../../services/dataOverview.service';
@@ -8722,5 +8724,70 @@ describe('ActivityAnalyticsWidget', () => {
         rerender(<ActivityAnalyticsWidget widget={makeWidget()} machines={MACHINES} />);
 
         expect(computeSpy.mock.calls.length).toBe(initialCalls + 2);
+    });
+
+    // "Forma del marco": with Pestaña the chart takes the tab shape; both selectors (range and grouping) move into
+    // the top strip with the underline look; with Estándar nothing changes.
+    describe('tab frame shape', () => {
+        afterEach(() => {
+            resetFrameShapeOnDocument();
+        });
+
+        function renderInGrid(widget = makeWidget({ displayOptions: { ...makeWidget().displayOptions, dataMode: 'simulated' } })) {
+            return rtlRender(
+                <GridFrameScope>
+                    {preparePresentationElement(<ActivityAnalyticsWidget widget={widget} machines={MACHINES} />)}
+                </GridFrameScope>,
+            );
+        }
+
+        it('keeps the single framed root with the pill selectors in the header with the standard shape (guard)', () => {
+            const { container } = renderInGrid();
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            const framed = container.querySelector('.glass-panel') as HTMLElement;
+            expect(framed).toHaveClass('glass-panel', 'group', 'flex', 'h-full', 'w-full', 'flex-col', 'overflow-hidden', 'px-5', 'pt-5', 'pb-3');
+            expect(framed).toContainElement(screen.getByTestId('activity-analytics-runtime-controls'));
+            expect(screen.getByRole('button', { name: '7d' })).toHaveClass('theme-button', 'theme-button-segment-active');
+        });
+
+        it('takes the tab shape: title in the tab, both selectors in the strip (underline), body under the strip', () => {
+            previewFrameShape('tab');
+
+            const { container } = renderInGrid();
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(shell).not.toBeNull();
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Análisis de Actividad')).toBeInTheDocument();
+            expect(within(screen.getByTestId('tab-frame-icon-host')).getByTestId('activity-analytics-widget-header-icon')).toBeInTheDocument();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            const controls = within(strip).getByTestId('activity-analytics-runtime-controls');
+            expect(within(controls).getByTestId('activity-analytics-runtime-range-selector')).toBeInTheDocument();
+            expect(within(controls).getByTestId('activity-analytics-runtime-group-selector')).toBeInTheDocument();
+            expect(within(strip).getByRole('button', { name: '7d' })).not.toHaveClass('theme-button');
+            expect(shell).toContainElement(screen.getByTestId('activity-analytics-widget-body'));
+            expect(strip).not.toContainElement(screen.getByTestId('activity-analytics-widget-body'));
+        });
+
+        it('keeps both selectors working from the strip', async () => {
+            const user = userEvent.setup();
+            previewFrameShape('tab');
+
+            renderInGrid();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            await user.click(within(strip).getByRole('button', { name: '30d' }));
+
+            expect(within(strip).getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        it('takes the tab shape in the runtime states too (missing machine), with the selectors in the strip', () => {
+            previewFrameShape('tab');
+
+            const { container } = renderInGrid(makeWidget({ binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' } }));
+
+            expect(container.querySelector('[data-widget-frame-shape="tab"]')).not.toBeNull();
+            expect(screen.getByText('Seleccione una máquina')).toBeInTheDocument();
+            expect(within(screen.getByTestId('tab-frame-trailing-host')).getByTestId('activity-analytics-runtime-controls')).toBeInTheDocument();
+        });
     });
 });

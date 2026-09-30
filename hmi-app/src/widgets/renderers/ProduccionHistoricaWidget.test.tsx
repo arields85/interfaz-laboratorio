@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProdHistoryWidgetConfig } from '../../domain/admin.types';
 import {
@@ -6,6 +6,8 @@ import {
     WIDGET_CHART_CONTAINER_CLASS,
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
+import { GridFrameScope } from '../../components/ui/GridFrameScope';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import ProduccionHistoricaWidget from './ProduccionHistoricaWidget';
 
 const mockState = vi.hoisted(() => ({
@@ -695,4 +697,71 @@ describe('ProduccionHistoricaWidget', () => {
         expect(screen.getByRole('button', { name: 'Hora' })).toHaveAttribute('aria-pressed', 'true');
     });
 
+
+    // "Forma del marco": with Pestaña the chart takes the tab shape; the grouping selector moves into the top
+    // strip with the underline look and the legend controls stay in the body; with Estándar nothing changes.
+    describe('tab frame shape', () => {
+        afterEach(() => {
+            resetFrameShapeOnDocument();
+        });
+
+        function renderInGrid() {
+            return render(
+                <GridFrameScope>
+                    <ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} />
+                </GridFrameScope>,
+            );
+        }
+
+        it('keeps the single framed element with the pill selector in the header with the standard shape (guard)', () => {
+            const { container } = renderInGrid();
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            const framed = container.querySelector('.glass-panel') as HTMLElement;
+            expect(framed).toHaveClass('glass-panel', 'group', 'relative', 'w-full', 'h-full', 'p-5', 'flex', 'flex-col');
+            expect(framed).toContainElement(screen.getByTestId('prod-history-widget-runtime-controls'));
+            expect(screen.getByRole('button', { name: 'Hora' })).toHaveClass('theme-button', 'theme-button-segment-active');
+        });
+
+        it('takes the tab shape: title in the tab, icon in the corner host, grouping selector in the strip (underline), legend in the body', () => {
+            previewFrameShape('tab');
+
+            const { container } = renderInGrid();
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(shell).not.toBeNull();
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Producción Histórica')).toBeInTheDocument();
+            expect(within(screen.getByTestId('tab-frame-icon-host')).getByTestId('prod-history-widget-header-icon')).toBeInTheDocument();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            expect(within(strip).getByTestId('prod-history-widget-runtime-controls')).toBeInTheDocument();
+            expect(within(strip).getByRole('button', { name: 'Hora' })).not.toHaveClass('theme-button');
+            // The legend controls (OEE, bars/area) are body content, not header trailing.
+            const legend = screen.getByTestId('prod-history-widget-legend-controls');
+            expect(strip).not.toContainElement(legend);
+            expect(shell).toContainElement(legend);
+        });
+
+        it('keeps the grouping selector working from the strip', () => {
+            previewFrameShape('tab');
+
+            renderInGrid();
+            fireEvent.click(within(screen.getByTestId('tab-frame-trailing-host')).getByRole('button', { name: 'Turno' }));
+
+            expect(screen.getByRole('button', { name: 'Turno' })).toHaveAttribute('aria-pressed', 'true');
+            expect(screen.getByText('Turno A')).toBeInTheDocument();
+        });
+
+        it('keeps the loading root as it was (no header to put in a tab)', () => {
+            previewFrameShape('tab');
+
+            const { container } = render(
+                <GridFrameScope>
+                    <ProduccionHistoricaWidget widget={makeWidget()} equipmentMap={equipmentMap} isLoadingData />
+                </GridFrameScope>,
+            );
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            expect(screen.getByTestId('prod-history-widget-loading')).toBeInTheDocument();
+        });
+    });
 });

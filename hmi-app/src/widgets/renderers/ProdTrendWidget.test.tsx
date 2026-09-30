@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProdTrendWidgetConfig } from '../../domain/admin.types';
 import type { ContractMachine } from '../../domain/dataContract.types';
 import { isDataActivitySeriesEnabled } from '../../config/dataConnection.config';
+import { GridFrameScope } from '../../components/ui/GridFrameScope';
 import { useTemporalSettings } from '../../hooks/useTemporalSettings';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { useActivitySeries } from '../../queries/useActivitySeries';
 import { useProdTrendDataSource, type UseProdTrendDataSourceResult } from '../../queries/useProdTrendDataSource';
 import { resolveProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
@@ -1236,5 +1238,94 @@ describe('ProdTrendWidget', () => {
         expect(screen.queryByText('Sin conexión')).not.toBeInTheDocument();
         expect(screen.getByTestId('prod-trend-widget-runtime-state')).not.toHaveTextContent('La máquina configurada ya no coincide con el contrato disponible para Activity-Series.');
         expect(screen.getByTestId('prod-trend-widget-runtime-state').querySelector('svg')).toBeNull();
+    });
+
+    // "Forma del marco": with Pestaña the chart takes the tab shape; both selectors (range and grouping) move into
+    // the top strip with the underline look; with Estándar nothing changes.
+    describe('tab frame shape', () => {
+        afterEach(() => {
+            resetFrameShapeOnDocument();
+        });
+
+        function mockSeries() {
+            vi.mocked(useActivitySeries).mockReturnValue({
+                data: {
+                    contractVersion: '1.0.0',
+                    machineId: 101,
+                    variableKey: 'Total kW',
+                    range: '7d',
+                    unit: 'kW',
+                    purpose: 'activity-analytics',
+                    window: { start: '2026-06-18T00:00:00.000Z', end: '2026-06-20T23:55:00.000Z', timezone: 'UTC', bucket: '5m', bucketMs: 300000 },
+                    series: DENSE_ACTIVITY_SERIES,
+                    summary: null,
+                },
+                isLoading: false,
+                isError: false,
+                error: null,
+                isEnabled: true,
+            });
+        }
+
+        function renderInGrid(widget = makeWidget()) {
+            return rtlRender(
+                <GridFrameScope>
+                    {preparePresentationElement(<ProdTrendWidget widget={widget} machines={MACHINES} />)}
+                </GridFrameScope>,
+            );
+        }
+
+        it('keeps the single framed root with the pill selectors in the header with the standard shape (guard)', () => {
+            mockSeries();
+
+            const { container } = renderInGrid();
+
+            expect(container.querySelector('[data-widget-frame-shape]')).toBeNull();
+            const root = screen.getByTestId('prod-trend-widget-root');
+            expect(root).toHaveClass('glass-panel', 'group', 'relative', 'flex', 'h-full', 'w-full', 'flex-col', 'overflow-hidden', 'p-5');
+            expect(root).toContainElement(screen.getByTestId('prod-trend-widget-runtime-controls'));
+            expect(screen.getByRole('button', { name: '7d' })).toHaveClass('theme-button', 'theme-button-segment-active');
+        });
+
+        it('takes the tab shape: title in the tab, both selectors in the strip (underline), root test id on the content', () => {
+            previewFrameShape('tab');
+            mockSeries();
+
+            const { container } = renderInGrid();
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(shell).not.toBeNull();
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('PROD-TREND')).toBeInTheDocument();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            const controls = within(strip).getByTestId('prod-trend-widget-runtime-controls');
+            expect(within(controls).getByTestId('prod-trend-widget-runtime-range-selector')).toBeInTheDocument();
+            expect(within(controls).getByTestId('prod-trend-widget-runtime-group-selector')).toBeInTheDocument();
+            expect(within(strip).getByRole('button', { name: '7d' })).not.toHaveClass('theme-button');
+            expect(screen.getByTestId('prod-trend-widget-root').parentElement).toBe(shell);
+        });
+
+        it('keeps both selectors working from the strip', async () => {
+            const user = userEvent.setup();
+            previewFrameShape('tab');
+            mockSeries();
+
+            renderInGrid();
+            const strip = screen.getByTestId('tab-frame-trailing-host');
+            await user.click(within(strip).getByRole('button', { name: '30d' }));
+
+            expect(within(strip).getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'true');
+            expect(within(strip).getByRole('button', { name: 'DÍA' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        it('takes the tab shape in the runtime states too (missing machine), with the selectors in the strip', () => {
+            previewFrameShape('tab');
+            vi.mocked(useActivitySeries).mockReturnValue({ data: null, isLoading: false, isError: false, error: null, isEnabled: false });
+
+            const { container } = renderInGrid(makeWidget({ binding: { mode: 'real_variable', bindingVersion: 'node-red-v1' } }));
+
+            expect(container.querySelector('[data-widget-frame-shape="tab"]')).not.toBeNull();
+            expect(screen.getByText('Seleccione una máquina')).toBeInTheDocument();
+            expect(within(screen.getByTestId('tab-frame-trailing-host')).getByTestId('prod-trend-widget-runtime-controls')).toBeInTheDocument();
+        });
     });
 });

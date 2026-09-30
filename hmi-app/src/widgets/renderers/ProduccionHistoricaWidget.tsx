@@ -34,6 +34,7 @@ import {
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeCheckbox from '../../components/ui/WidgetRuntimeCheckbox';
 import WidgetRuntimeToggle from '../../components/ui/WidgetRuntimeToggle';
@@ -781,7 +782,13 @@ export default function ProdHistoryWidget({
     }
 
     return (
-        <div className={`glass-panel group relative w-full h-full p-5 flex flex-col ${className ?? ''}`}>
+        <WidgetFrame
+            widgetType={widget.type}
+            title={chartTitle}
+            frameClassName="glass-panel"
+            className="group relative w-full h-full p-5 flex flex-col"
+            outerClassName={className}
+        >
             <div className={WIDGET_CHART_HEADER_CLASS} data-testid="prod-history-widget-header-area">
                 <WidgetHeader
                     title={chartTitle}
@@ -863,6 +870,6 @@ export default function ProdHistoryWidget({
                     productionUnit={productionUnit}
                 />
             </div>
-        </div>
+        </WidgetFrame>
     );
 }

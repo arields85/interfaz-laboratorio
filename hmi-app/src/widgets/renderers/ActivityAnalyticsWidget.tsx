@@ -9,6 +9,7 @@ import ChartHoverLayer from '../../components/ui/ChartHoverLayer';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
@@ -165,7 +166,8 @@ const PROD_TREND_LATEST_VALUE_TEXT_STYLE: CSSProperties = {
     letterSpacing: 'var(--tracking-widget-value-activity-analytics-prod-trend)',
 };
 
-const WIDGET_SHELL_CLASS = 'glass-panel group flex h-full w-full flex-col overflow-hidden px-5 pt-5 pb-3';
+const WIDGET_FRAME_CLASS = 'glass-panel';
+const WIDGET_SHELL_CLASS = 'group flex h-full w-full flex-col overflow-hidden px-5 pt-5 pb-3';
 const GROUPED_TOOLTIP_PANEL_CLASS = 'rounded-lg border border-industrial-border bg-[linear-gradient(135deg,rgba(9,13,22,0.57)_0%,rgba(17,24,39,0.52)_100%)] px-3 py-2 shadow-lg backdrop-blur-sm';
 const GROUPED_TOOLTIP_LABEL_CLASS = 'mb-1 whitespace-nowrap text-industrial-muted';
 const ANALYTICS_PANEL_CLASS = 'rounded-2xl border border-industrial-border';
@@ -843,9 +845,10 @@ export default function ActivityAnalyticsWidget({
         groups: groupsVisualLayout,
     };
 
+    const frameTitle = widget.title?.trim() || DEFAULT_ACTIVITY_ANALYTICS_TITLE;
     const header = (
         <WidgetHeader
-            title={widget.title?.trim() || DEFAULT_ACTIVITY_ANALYTICS_TITLE}
+            title={frameTitle}
             icon={BarChart2}
             iconPosition="left"
             iconTestId="activity-analytics-widget-header-icon"
@@ -916,6 +919,8 @@ export default function ActivityAnalyticsWidget({
     if (!isSimulated && machineBinding.status === 'missing') {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Seleccione una máquina',
             state: 'invalid-config',
@@ -926,6 +931,8 @@ export default function ActivityAnalyticsWidget({
         if (isLoadingOverview && machineBinding.reason === 'machine_lookup_pending_or_missing') {
             return renderRuntimeState({
                 className,
+                widgetType: widget.type,
+                title: frameTitle,
                 header,
                 state: 'loading',
             });
@@ -934,6 +941,8 @@ export default function ActivityAnalyticsWidget({
         if (isOverviewUnavailable) {
             return renderRuntimeState({
                 className,
+                widgetType: widget.type,
+                title: frameTitle,
                 header,
                 state: 'disconnected',
             });
@@ -941,6 +950,8 @@ export default function ActivityAnalyticsWidget({
 
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Seleccione una máquina válida',
             state: 'invalid-config',
@@ -950,6 +961,8 @@ export default function ActivityAnalyticsWidget({
     if (!isSimulated && !isDataActivitySeriesEnabled()) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Endpoint Activity-Series no configurado',
             state: 'invalid-config',
@@ -964,6 +977,8 @@ export default function ActivityAnalyticsWidget({
     } catch {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Configuración de umbrales inválida',
             state: 'invalid-config',
@@ -973,6 +988,8 @@ export default function ActivityAnalyticsWidget({
     if (!isSimulated && (isLoadingData || activitySeries.isLoading) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             state: 'loading',
         });
@@ -981,6 +998,8 @@ export default function ActivityAnalyticsWidget({
     if (!isSimulated && activitySeries.isError && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             state: 'error',
         });
@@ -989,6 +1008,8 @@ export default function ActivityAnalyticsWidget({
     if ((!activityData || activityData.series.length === 0) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Sin datos de actividad',
             state: 'empty',
@@ -998,6 +1019,8 @@ export default function ActivityAnalyticsWidget({
     if (validatedProcessingErrorState !== null && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             ...validatedProcessingErrorState,
         });
@@ -1006,6 +1029,8 @@ export default function ActivityAnalyticsWidget({
     if ((computedAnalytics?.grouped.length ?? 0) === 0 && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Sin grupos para mostrar',
             state: 'empty',
@@ -1013,7 +1038,13 @@ export default function ActivityAnalyticsWidget({
     }
 
     return (
-        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
+        <WidgetFrame
+            widgetType={widget.type}
+            title={frameTitle}
+            frameClassName={WIDGET_FRAME_CLASS}
+            className={WIDGET_SHELL_CLASS}
+            outerClassName={className}
+        >
             {header}
 
             <div
@@ -1052,7 +1083,7 @@ export default function ActivityAnalyticsWidget({
                     emptyMessage={visibleSnapshot!.emptyMessage}
                 />
             </div>
-        </div>
+        </WidgetFrame>
     );
 }
 
@@ -1228,17 +1259,27 @@ function toPositiveInteger(value: unknown): number | null {
 
 function renderRuntimeState({
     className,
+    widgetType,
+    title,
     header,
     label,
     state,
 }: {
     className?: string;
+    widgetType: string;
+    title: string;
     header: React.ReactNode;
     label?: string;
     state: 'loading' | 'disconnected' | 'error' | 'invalid-config' | 'empty';
 }) {
     return (
-        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`}>
+        <WidgetFrame
+            widgetType={widgetType}
+            title={title}
+            frameClassName={WIDGET_FRAME_CLASS}
+            className={WIDGET_SHELL_CLASS}
+            outerClassName={className}
+        >
             <WidgetCenteredContentLayout header={header} contentClassName="pt-14">
                 <WidgetRuntimeState
                     state={state}
@@ -1246,7 +1287,7 @@ function renderRuntimeState({
                     testId="activity-analytics-widget-runtime-state"
                 />
             </WidgetCenteredContentLayout>
-        </div>
+        </WidgetFrame>
     );
 }
 

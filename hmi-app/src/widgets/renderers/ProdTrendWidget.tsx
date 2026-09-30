@@ -11,6 +11,7 @@ import {
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import type { ChartTooltipSeries } from '../../components/ui/ChartTooltip';
 import WidgetHeader from '../../components/ui/WidgetHeader';
+import WidgetFrame from '../../components/ui/WidgetFrame';
 import WidgetHeaderTemporalControls from '../../components/ui/WidgetHeaderTemporalControls';
 import WidgetRuntimeState from '../../components/ui/WidgetRuntimeState';
 import HistoricalChartNotice from '../../components/ui/HistoricalChartNotice';
@@ -99,7 +100,9 @@ const PROD_TREND_LATEST_VALUE_TEXT_STYLE: CSSProperties = {
     letterSpacing: 'var(--tracking-widget-value-activity-analytics-prod-trend)',
 };
 
-const WIDGET_SHELL_CLASS = 'glass-panel group relative flex h-full w-full flex-col overflow-hidden p-5';
+const WIDGET_FRAME_CLASS = 'glass-panel';
+const WIDGET_SHELL_CLASS = 'group relative flex h-full w-full flex-col overflow-hidden p-5';
+const DEFAULT_WIDGET_TITLE = 'PROD-TREND';
 const GROUPED_TOOLTIP_PANEL_CLASS = 'rounded-lg border border-industrial-border bg-[linear-gradient(135deg,rgba(9,13,22,0.57)_0%,rgba(17,24,39,0.52)_100%)] px-3 py-2 shadow-lg backdrop-blur-sm';
 const GROUPED_TOOLTIP_LABEL_CLASS = 'mb-1 whitespace-nowrap text-industrial-muted';
 const CHART_MARGIN = { top: 8, right: 12, bottom: 24, left: 38 } as const;
@@ -404,9 +407,10 @@ export default function ProdTrendWidget({
         return () => observer.disconnect();
     }, [visibleGrouped.length]);
 
+    const frameTitle = widget.title ?? DEFAULT_WIDGET_TITLE;
     const header = (
         <WidgetHeader
-            title={widget.title ?? 'PROD-TREND'}
+            title={frameTitle}
             icon={TrendingUp}
             iconPosition="left"
             iconTestId="prod-trend-widget-header-icon"
@@ -467,6 +471,8 @@ export default function ProdTrendWidget({
     if (displayOptions.dataMode === 'real' && machineBinding.status === 'missing') {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Seleccione una máquina',
             state: 'invalid-config',
@@ -478,6 +484,8 @@ export default function ProdTrendWidget({
             && machineBinding.reason === 'machine_lookup_pending_or_missing') {
             return renderRuntimeState({
                 className,
+                widgetType: widget.type,
+                title: frameTitle,
                 header,
                 state: 'loading',
             });
@@ -486,6 +494,8 @@ export default function ProdTrendWidget({
         if (isOverviewUnavailable) {
             return renderRuntimeState({
                 className,
+                widgetType: widget.type,
+                title: frameTitle,
                 header,
                 state: 'disconnected',
             });
@@ -493,6 +503,8 @@ export default function ProdTrendWidget({
 
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Seleccione una máquina válida',
             state: 'invalid-config',
@@ -502,6 +514,8 @@ export default function ProdTrendWidget({
     if (displayOptions.dataMode !== 'simulated' && !isDataActivitySeriesEnabled()) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Endpoint Activity-Series no configurado',
             state: 'invalid-config',
@@ -516,6 +530,8 @@ export default function ProdTrendWidget({
     } catch {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Configuración de umbrales inválida',
             state: 'invalid-config',
@@ -525,6 +541,8 @@ export default function ProdTrendWidget({
     if (displayOptions.dataMode !== 'simulated' && (isLoadingData || dataSource.isLoading) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             state: 'loading',
         });
@@ -533,6 +551,8 @@ export default function ProdTrendWidget({
     if (displayOptions.dataMode !== 'simulated' && dataSource.error && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             state: 'error',
         });
@@ -541,6 +561,8 @@ export default function ProdTrendWidget({
     if ((!activityData || activityData.series.length === 0) && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Sin datos de actividad',
             state: 'empty',
@@ -550,6 +572,8 @@ export default function ProdTrendWidget({
     if (processingErrorState !== null && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: processingErrorState.label,
             state: processingErrorState.state,
@@ -559,6 +583,8 @@ export default function ProdTrendWidget({
     if ((computedAnalytics?.grouped.length ?? 0) === 0 && visibleSnapshot === null) {
         return renderRuntimeState({
             className,
+            widgetType: widget.type,
+            title: frameTitle,
             header,
             label: 'Sin grupos para mostrar',
             state: 'empty',
@@ -575,7 +601,14 @@ export default function ProdTrendWidget({
     });
 
     return (
-        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`} data-testid="prod-trend-widget-root">
+        <WidgetFrame
+            widgetType={widget.type}
+            title={frameTitle}
+            frameClassName={WIDGET_FRAME_CLASS}
+            className={WIDGET_SHELL_CLASS}
+            outerClassName={className}
+            data-testid="prod-trend-widget-root"
+        >
             {header}
 
             <div className="flex min-h-0 flex-1 flex-col" data-testid="prod-trend-widget-body">
@@ -615,7 +648,7 @@ export default function ProdTrendWidget({
                     </div>
                 </div>
             </div>
-        </div>
+        </WidgetFrame>
     );
 }
 
@@ -1779,17 +1812,28 @@ function resolveProcessingErrorState(error: unknown) {
 
 function renderRuntimeState({
     className,
+    widgetType,
+    title,
     header,
     label,
     state,
 }: {
     className?: string;
+    widgetType: string;
+    title: string;
     header: ReactNode;
     label?: string;
     state: 'loading' | 'disconnected' | 'error' | 'invalid-config' | 'empty';
 }) {
     return (
-        <div className={`${WIDGET_SHELL_CLASS} ${className ?? ''}`} data-testid="prod-trend-widget-root">
+        <WidgetFrame
+            widgetType={widgetType}
+            title={title}
+            frameClassName={WIDGET_FRAME_CLASS}
+            className={WIDGET_SHELL_CLASS}
+            outerClassName={className}
+            data-testid="prod-trend-widget-root"
+        >
             <WidgetCenteredContentLayout header={header} contentClassName="pt-14">
                 <WidgetRuntimeState
                     state={state}
@@ -1797,6 +1841,6 @@ function renderRuntimeState({
                     testId="prod-trend-widget-runtime-state"
                 />
             </WidgetCenteredContentLayout>
-        </div>
+        </WidgetFrame>
     );
 }
