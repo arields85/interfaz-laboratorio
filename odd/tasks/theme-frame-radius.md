@@ -84,6 +84,15 @@ are the user's decisions.
   - Verification (hmi-app): `npx tsc -b` clean; `npm run lint` clean; `npm test` 259 files / 3451 tests passed;
     `npm run build` ok (chunk-size warning only).
 
+- 2026-09-30 parent: live check in the control Chrome (user's view in Estándar): previewing 16 px on the page root
+  moved every standard frame from 24 px to 16 px (screenshot), restored after; the Tema dialog itself was not driven
+  (to avoid changing the user's saved settings); the tab silhouette with a changed radius is covered by
+  `WidgetFrame.radius.test.tsx`. Review `96b218c..ac2f1a2` (lab L1 + R1-R3 + C4c; 14 files / 986 lines, medium,
+  standing consent): APPROVED and acknowledged (`review-3f0dc8d8ec471f8b`). Findings: WARNING
+  R3-read-keeps-preset-equal-override — fixed in `a28e619` (the read path drops a stored value that lands on the preset
+  radius after clamping/snapping; RED 1 -> GREEN); SUGGESTION R3-radius-test-ambiguous-selector — fixed in the same
+  commit (the test reads the surface layer by test id). `npm test` 259 files / 3452 passed, tsc/lint/build clean.
+
 ## Next step
 
 Live check in the browser (control Chrome): move the slider per preset in both frame shapes (tab silhouette, builder
