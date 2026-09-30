@@ -207,7 +207,33 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   the staggered entrance of the widget itself is unchanged. RED 2 failed (status and connection-status frameless still
   got both overlays) -> GREEN 29/29 (`DashboardViewer.entrance.test.tsx`). `npx tsc -b` clean, `npm run lint` clean,
   `npm test` 258 files / 3381 tests passed, `npm run build` ok. Commit `6421d74`. Needs the browser: the live look.
-- [ ] **K1** — Style lab: alternatives for the finish of the body's top-right corner under the header icon (the user
+- [x] **K1** — DONE 2026-09-30, commit `6a6e97d` (`feat(style-lab): add three finishes for the body's top-right corner
+  under the header icon`, +260/-12 in `tools/style-lab/style-lab.html` and `README.md`), republished to the same artifact
+  URL (version 16). Controls ("Remate de la esquina", remembered and validated on load): switch Actual / 1 · Escalón /
+  2 · Esquina abierta / 3 · Ícono sobre la línea; Escalón: *profundidad* (= "Corte cuerpo", 0-60 px; picking Escalón with
+  0 loads 16 and gives the 0 back on leaving it untouched) and *desplazamiento* (shelf width, 0-80 px); Esquina abierta:
+  *desvanecer* (8-120 px); Ícono sobre la línea: *separación* (0-16 px). Applies to the five main sample widgets (alert
+  card included) and the chart sample A and B (not C: its icon is inside its own tab). Implementation: Escalón is a
+  path variant (`computeStep`, three vertices, slope = tab cut / tab height, same radius rules) so fill, border, glow
+  and hover follow it; the icon stays in the strip above the shelf; the content is pushed down to sit 6 px below the
+  shelf (header bottom margin in main widgets, body top padding in the chart) and the step is clamped against the title
+  tab (+ radius), the widget height and, in B, the selector (diagonal cannot start left of the selector's right edge,
+  which also caps the depth). Esquina abierta and Ícono sobre la línea are masks on the border layer only (radial fade
+  centered on the body's top-right corner; a hole around the icon box widened by the gap, capped at the strip gap in B);
+  the "line" icon is centered on the body's top line (18 px main icon, 21.6 px chart icon) and in chart A the body row
+  moves down 6 px to clear it. Decisions: the chamfer of "Actual" (Corte cuerpo > 0) also applies to Esquina abierta and
+  Ícono sobre la línea (closed silhouette "as today"); the icon of the main widgets stays at the top of the strip in
+  Escalón (it does not drop onto the shelf). "Copiar elección" appends ` · Remate de la esquina | remate elegido: <rule>
+  | <values>` (Escalón: profundidad = Corte cuerpo, desplazamiento, slope = tab's 19 / 25, vertices, limits; Abierta:
+  largo del desvanecimiento; Línea: separación) and a note that C is not affected. Verification: extracted script
+  `node --check` OK; headless Chrome with an isolated profile (`--user-data-dir` in the scratch directory) at window
+  widths 1500 and 1000, each finish x rest/hover (widget hover state forced through the lab's control) over the five main
+  widgets and chart A/B/C at 460 px, plus extremes (step 60 / 80 at chart width 300, depth 0), reading rectangles, path
+  vertices, masks and content tops (no NaN, no script errors, content clear of the shelf, B diagonal right of the
+  selector); screenshots of the three finishes; stored-state cases (garbage cf, missing cf) and the depth restore. Not
+  verified: hover by a real pointer, the light theme, phone width, every preset (the finishes only touch shape code shared
+  by all presets, checked with the default and by reading the code), the two alert kinds (only warning was rendered).
+- Original brief of K1: alternatives for the finish of the body's top-right corner under the header icon (the user
   likes the icon, not the rounded corner under it). Options on the sample widget, next to "Actual" (today's rounded
   corner): (1) **Escalón** (the user's sketch): the cut is displaced to the left and a lower flat shelf runs from the
   diagonal to the right edge, where the icon rests; two controls: depth (the existing "corte del cuerpo") and
