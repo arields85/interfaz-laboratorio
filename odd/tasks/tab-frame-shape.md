@@ -365,8 +365,42 @@ F1–F6 done and accepted live; F7 implemented 2026-09-30 (commits `8af3bc2`..`1
    User authorization (2026-09-29, new session): steps 1 and 2 run autonomously; the user GRANTED in advance the
    consent of every RDD review of this feature (native review slices included) and approves the sliced review.
    Steps 3 and 4 wait for the user's visual review.
-3. Fast-forward merge `feat/tab-frame-shape` into local `main` (only on the user's OK).
+   DONE 2026-09-30: all 5 slices APPROVED and acknowledged (see "Native review outcome" below); worktrees deleted.
+3. Fast-forward merge `feat/tab-frame-shape` into local `main` (only on the user's OK, after the visual review).
 4. Push `main` to `origin` only when the user decides.
+
+## Native review outcome (2026-09-30)
+
+Every slice: risk medium, one lens (`review-reliability`), consent granted (user, in advance), APPROVED, exact
+acknowledgement ran (authority burned). Reviewed in temporary worktrees at each slice end, committed-only.
+
+| Slice | Range | Files / lines | Lineage |
+|---|---|---|---|
+| S1 | `40ad436..cc1450b` | 27 / 1622 | `review-a7710c7b729d12e9` |
+| S2 | `cc1450b..84ee23d` | 33 / 1426 | `review-19c2678ab5977ce5` |
+| S3 | `84ee23d..e4a07ef` | 16 / 1020 | `review-c0d8d81566e6607a` |
+| S4 | `e4a07ef..3bece2f` | 17 / 1268 | `review-8b5b22694acbbc07` |
+| S5 | `3bece2f..688eed2` | 38 / 1058 | `review-57890c968d9ed705` |
+
+Advisory (non-blocking) findings, re-checked at HEAD `688eed2` by a read-only explorer (source + tests, not run):
+
+- Real but niche (user-visible):
+  - R3-path-degenerate-geometry (S2): `buildTabFramePath` does not guard `height < tabHeight + bodyCut`; with the F7
+    taller group tab (size 200 -> ~228 px tab) on a short group the silhouette inverts/spikes.
+  - R3-001 (S5): `GroupWidget` passes the stored `titleFontSize` unclamped/unvalidated; a non-numeric persisted value gives
+    a NaN tab height (`--tab-frame-height: NaNpx`, NaN path). The UI input already limits 12–200.
+- Latent / low: R3-frame-toggle-remount (S1: standard vs tab trees differ, subtree remounts on a shape switch);
+  R3-token-parse-zero (S2: `parseCssLengthPx` accepts only px/rem, `calc()`/`var()` token overrides read as 0);
+  R3-deferred-entrance-flash-mount (S3, partially: ~one commit of delay, never skipped); R3-pending-fallback-full-strip
+  (S3, partially: full-width band only if the title host stays at width 0).
+- Test/tooling quality: R3-hex-guard-loophole (S1, `tabFrame.css.test.ts` hex guard skips hex followed by `var`, stale
+  test title); R3-radius-test-mocked (S2); R3-spy-leak-on-failure (S2, `WidgetFrame.test.tsx` no `afterEach` restore);
+  R3-icon-placement-remeasure-untested (S4); R3-002 (S5, `useTabFrameHeight` re-measure untested);
+  R3-stylelab-instrument-preset-stale (S4, `tools/style-lab` Instrumento still 3 / 8 / 20 vs app 5 / 12 / 25).
+- Resolved at HEAD: R3-tab-hover-lost (S1: `.group:hover .glass-panel` reaches the surface inside the `group` shell);
+  R3-icon-portal-inherited-style (S4: icon color is inline, `group-hover` still applies inside the shell).
+
+None is in scope without the user's decision (findings never expand scope by themselves).
 
 - 2026-09-30 (F7, delegated writer, strict TDD, Vitest). Route: delegated writer (writer trigger: 2+ non-trivial files);
   the writer mapped every reader of the tab height first (`rg`, see the F7 item). Commits: `8af3bc2`
