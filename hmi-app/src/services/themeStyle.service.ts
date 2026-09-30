@@ -7,8 +7,18 @@ import type {
     ThemeSurfaceStateStyle,
     ThemeTagStyle,
 } from '../domain/themeStyle.types';
+import { normalizeStepValue } from '../utils/normalizeStepValue';
 
 export const THEME_STYLE_STORAGE_KEY = 'hmi-theme-style';
+
+/**
+ * Per-preset override of the widget frame corner radius, edited from Configuracion general -> Tema.
+ * Stored as `{ [presetId]: radiusPx }` holding only the radii that differ from their preset
+ * (absent = the preset's own radius), like the rest of the visual configuration.
+ */
+export const FRAME_RADIUS_STORAGE_KEY = 'hmi-theme-frame-radius';
+
+export const FRAME_RADIUS_LIMITS = { min: 0, max: 24, step: 1 } as const;
 
 export const CLASSIC_THEME_STYLE_ID = 'classic';
 export const OUTLINE_THEME_STYLE_ID = 'outline';
@@ -375,24 +385,99 @@ export function writeStoredThemeStylePresetId(id: string): void {
     } catch { /* ignore unavailable storage */ }
 }
 
+/** Frame radius tokens a radius override writes (rest and hover share the same value). */
+const FRAME_RADIUS_TOKENS = ['--frame-radius-rest', '--frame-radius-hover'] as const;
+
+/** Sets both frame radius tokens to `radiusPx` on `target`. */
+function applyFrameRadiusToDocument(radiusPx: number, target: HTMLElement): void {
+    for (const name of FRAME_RADIUS_TOKENS) {
+        target.style.setProperty(name, pxToken(radiusPx));
+    }
+}
+
+function snapRadiusToLimits(value: number): number {
+    const { min, max, step } = FRAME_RADIUS_LIMITS;
+
+    return normalizeStepValue(value, min, max, step);
+}
+
+/** Valid stored radius overrides by preset id (out-of-range clamped, off-step snapped, unknown presets dropped). */
+export function readStoredFrameRadiusOverrides(): Record<string, number> {
+    try {
+        const raw = localStorage.getItem(FRAME_RADIUS_STORAGE_KEY);
+        const parsed: unknown = raw ? JSON.parse(raw) : null;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return {};
+        }
+
+        const overrides: Record<string, number> = {};
+        for (const preset of THEME_STYLE_PRESETS) {
+            const value = (parsed as Record<string, unknown>)[preset.id];
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                overrides[preset.id] = snapRadiusToLimits(value);
+            }
+        }
+
+        return overrides;
+    } catch {
+        return {};
+    }
+}
+
+/** Persists only the radii that differ from their preset's own; nothing to store removes the key. */
+export function writeStoredFrameRadiusOverrides(overrides: Readonly<Record<string, number>>): void {
+    const stored: Record<string, number> = {};
+    for (const preset of THEME_STYLE_PRESETS) {
+        const value = overrides[preset.id];
+        if (value !== undefined && value !== preset.frame.rest.radiusPx) {
+            stored[preset.id] = value;
+        }
+    }
+
+    try {
+        if (Object.keys(stored).length === 0) {
+            localStorage.removeItem(FRAME_RADIUS_STORAGE_KEY);
+        } else {
+            localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, JSON.stringify(stored));
+        }
+    } catch { /* ignore unavailable storage */ }
+}
+
 /**
  * Applies the given preset on `target` without persisting it -- Clasico
  * resets to the CSS `:root` defaults instead of writing its (identical)
  * values explicitly, matching `setActiveThemeStyle`'s own rule. Route this
- * from the Tema tab's live preview and its revert.
+ * from the Tema tab's live preview and its revert. `frameRadiusPx` (the
+ * preset's radius override, when it has one) replaces the rest AND hover frame
+ * radius tokens; every element that derives from the frame radius reads them.
  */
-export function previewThemeStyleOnDocument(id: string, target: HTMLElement = document.documentElement): void {
+export function previewThemeStyleOnDocument(
+    id: string,
+    target: HTMLElement = document.documentElement,
+    frameRadiusPx?: number,
+): void {
     const preset = getThemeStylePreset(id);
     if (preset.id === CLASSIC_THEME_STYLE_ID) {
         resetThemeStyleOnDocument(target);
     } else {
         applyThemeStyleToDocument(preset, target);
     }
+
+    if (frameRadiusPx !== undefined) {
+        applyFrameRadiusToDocument(frameRadiusPx, target);
+    }
 }
 
-/** Applies and persists the given preset. Routed from the Tema tab (TH4). */
-export function setActiveThemeStyle(id: string, target: HTMLElement = document.documentElement): void {
-    previewThemeStyleOnDocument(id, target);
+/**
+ * Applies and persists the given preset (its radius override, if any, is only applied here; the
+ * overrides are persisted with `writeStoredFrameRadiusOverrides`). Routed from the Tema tab (TH4).
+ */
+export function setActiveThemeStyle(
+    id: string,
+    target: HTMLElement = document.documentElement,
+    frameRadiusPx?: number,
+): void {
+    previewThemeStyleOnDocument(id, target, frameRadiusPx);
     writeStoredThemeStylePresetId(getThemeStylePreset(id).id);
 }
 
@@ -402,12 +487,16 @@ export function setActiveThemeStyle(id: string, target: HTMLElement = document.d
  */
 export function applyThemeStyleOverrides(): void {
     const storedId = readStoredThemeStylePresetId();
-    if (!storedId || storedId === CLASSIC_THEME_STYLE_ID) {
+    const preset = storedId ? THEME_STYLE_PRESETS.find((candidate) => candidate.id === storedId) : undefined;
+    if (storedId && !preset) {
         return;
     }
-    const preset = THEME_STYLE_PRESETS.find((candidate) => candidate.id === storedId);
-    if (!preset) {
+
+    const presetId = preset?.id ?? CLASSIC_THEME_STYLE_ID;
+    const frameRadiusPx = readStoredFrameRadiusOverrides()[presetId];
+    if (presetId === CLASSIC_THEME_STYLE_ID && frameRadiusPx === undefined) {
         return;
     }
-    applyThemeStyleToDocument(preset);
+
+    previewThemeStyleOnDocument(presetId, document.documentElement, frameRadiusPx);
 }

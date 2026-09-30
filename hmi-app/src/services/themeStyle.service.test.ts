@@ -6,17 +6,22 @@ import {
     CLASSIC_THEME_STYLE,
     CLASSIC_THEME_STYLE_ID,
     DEFAULT_GROUP_STYLE,
+    FRAME_RADIUS_LIMITS,
+    FRAME_RADIUS_STORAGE_KEY,
     getThemeStylePreset,
     INSTRUMENT_THEME_STYLE,
     INSTRUMENT_THEME_STYLE_ID,
     OUTLINE_THEME_STYLE,
     OUTLINE_THEME_STYLE_ID,
+    previewThemeStyleOnDocument,
+    readStoredFrameRadiusOverrides,
     readStoredThemeStylePresetId,
     resetThemeStyleOnDocument,
     setActiveThemeStyle,
     THEME_STYLE_PRESETS,
     THEME_STYLE_STORAGE_KEY,
     themeStyleToCssProperties,
+    writeStoredFrameRadiusOverrides,
     writeStoredThemeStylePresetId,
 } from './themeStyle.service';
 
@@ -498,5 +503,124 @@ describe('applyThemeStyleOverrides (boot re-apply)', () => {
         applyThemeStyleOverrides();
 
         expect(document.documentElement.style.getPropertyValue('--frame-radius-rest')).toBe('');
+    });
+});
+
+describe('frame radius override (per preset)', () => {
+    const rootStyle = () => document.documentElement.style;
+
+    beforeEach(() => {
+        localStorage.clear();
+        resetThemeStyleOnDocument(document.documentElement);
+    });
+
+    afterEach(() => {
+        localStorage.clear();
+        resetThemeStyleOnDocument(document.documentElement);
+    });
+
+    it('exposes the slider limits', () => {
+        expect(FRAME_RADIUS_LIMITS).toEqual({ min: 0, max: 24, step: 1 });
+    });
+
+    it('reads no overrides when nothing is stored', () => {
+        expect(readStoredFrameRadiusOverrides()).toEqual({});
+    });
+
+    it('persists only the radii that differ from their preset and keeps each preset apart', () => {
+        writeStoredFrameRadiusOverrides({ classic: 24, outline: 8, instrument: 12 });
+
+        expect(JSON.parse(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY) ?? 'null')).toEqual({ outline: 8, instrument: 12 });
+        expect(readStoredFrameRadiusOverrides()).toEqual({ outline: 8, instrument: 12 });
+    });
+
+    it('removes the storage key when no override remains', () => {
+        writeStoredFrameRadiusOverrides({ outline: 8 });
+        writeStoredFrameRadiusOverrides({ outline: 0 });
+
+        expect(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY)).toBeNull();
+    });
+
+    it('ignores invalid stored values: corrupt JSON, unknown presets, non-numbers', () => {
+        localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, '{oops');
+        expect(readStoredFrameRadiusOverrides()).toEqual({});
+
+        localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, JSON.stringify({ nope: 4, outline: 'big', classic: null, instrument: 9 }));
+        expect(readStoredFrameRadiusOverrides()).toEqual({ instrument: 9 });
+
+        localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, '[1,2]');
+        expect(readStoredFrameRadiusOverrides()).toEqual({});
+    });
+
+    it('clamps out-of-range and snaps off-step stored values', () => {
+        localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, JSON.stringify({ classic: 7.4, outline: 99, instrument: -3 }));
+
+        expect(readStoredFrameRadiusOverrides()).toEqual({ classic: 7, outline: 24, instrument: 0 });
+    });
+
+    it('previews the preset radius unchanged when no override is given', () => {
+        previewThemeStyleOnDocument(OUTLINE_THEME_STYLE_ID);
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('0px');
+        expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('0px');
+    });
+
+    it('applies the override to the rest AND hover radius tokens, leaving the other frame tokens alone', () => {
+        previewThemeStyleOnDocument(INSTRUMENT_THEME_STYLE_ID, document.documentElement, 14);
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('14px');
+        expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('14px');
+        expect(rootStyle().getPropertyValue('--frame-blur-rest')).toBe('3px');
+        expect(rootStyle().getPropertyValue('--tag-radius')).toBe('3px');
+    });
+
+    it('applies an override on Clasico, whose preview otherwise writes no tokens', () => {
+        previewThemeStyleOnDocument(CLASSIC_THEME_STYLE_ID, document.documentElement, 10);
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('10px');
+        expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('10px');
+        expect(rootStyle().getPropertyValue('--frame-blur-rest')).toBe('');
+    });
+
+    it('drops a previous override when the preview runs again without one', () => {
+        previewThemeStyleOnDocument(CLASSIC_THEME_STYLE_ID, document.documentElement, 10);
+        previewThemeStyleOnDocument(CLASSIC_THEME_STYLE_ID);
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('');
+    });
+
+    it('setActiveThemeStyle applies the override and persists the preset id only', () => {
+        setActiveThemeStyle(OUTLINE_THEME_STYLE_ID, document.documentElement, 6);
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('6px');
+        expect(localStorage.getItem(THEME_STYLE_STORAGE_KEY)).toBe(OUTLINE_THEME_STYLE_ID);
+        expect(localStorage.getItem(FRAME_RADIUS_STORAGE_KEY)).toBeNull();
+    });
+
+    it('re-applies the stored override of the stored preset on boot', () => {
+        writeStoredThemeStylePresetId(INSTRUMENT_THEME_STYLE_ID);
+        writeStoredFrameRadiusOverrides({ instrument: 12, outline: 3 });
+
+        applyThemeStyleOverrides();
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('12px');
+        expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('12px');
+    });
+
+    it('re-applies a stored override on boot even when Clasico is the active preset', () => {
+        writeStoredFrameRadiusOverrides({ classic: 16 });
+
+        applyThemeStyleOverrides();
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('16px');
+        expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('16px');
+    });
+
+    it('resetThemeStyleOnDocument clears an applied radius override', () => {
+        previewThemeStyleOnDocument(CLASSIC_THEME_STYLE_ID, document.documentElement, 10);
+        resetThemeStyleOnDocument(document.documentElement);
+
+        expect(rootStyle().getPropertyValue('--frame-radius-rest')).toBe('');
+        expect(rootStyle().getPropertyValue('--frame-radius-hover')).toBe('');
     });
 });
