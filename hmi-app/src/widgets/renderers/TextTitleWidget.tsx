@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { TextTitleDisplayOptions, TextTitleWidgetConfig } from '../../domain/admin.types';
 import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
+import { buildDashboardTitleTypography } from '../../utils/dashboardTitleTypography';
 
 export const DEFAULT_TEXT_TITLE_FONT_SIZE = 35;
 
@@ -22,11 +23,7 @@ export default function TextTitleWidget({ widget, className, presentationData }:
     const textAlign = displayOptions?.textAlign ?? 'left';
     const textColor = displayOptions?.textColor ?? 'muted';
     const titleStyle: CSSProperties = {
-        fontFamily: 'var(--font-dashboard-title)',
-        fontWeight: 'var(--font-weight-dashboard-title)',
-        letterSpacing: 'var(--tracking-dashboard-title)',
-        fontSize: `${fontSize}px`,
-        lineHeight: 1.1,
+        ...buildDashboardTitleTypography(fontSize),
         color: TEXT_COLOR_MAP[textColor] ?? TEXT_COLOR_MAP.muted,
         textAlign,
     };

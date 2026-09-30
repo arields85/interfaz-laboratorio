@@ -74,6 +74,7 @@ Configuración general → Tema → "Forma del marco" elige entre **Estándar** 
 | `--tab-frame-icon-min-top` | `0px` | Tope superior del ícono (nunca sube más arriba del borde del widget; sin margen) |
 | `--tab-frame-icon-tab-gap` | `8px` | Separación entre el final de la pestaña y el ícono cuando este ocupa la franja |
 | `--tab-frame-icon-scale` | `0.9` | Escala del ícono hacia la esquina superior derecha (la regla de ubicación usa el tamaño escalado) |
+| `--tab-frame-title-pad-y` | `4.25px` | Espacio vertical sobre y bajo un título con tamaño propio (widget `group`); la pestaña mide la caja de línea del título más este espacio por lado, nunca menos que `--tab-frame-height` (por defecto, el espacio de la pestaña estándar) |
 
 La altura de la pestaña, el recorte, el chaflán del cuerpo, el relleno, el color del texto y los tokens del ícono son la elección del laboratorio de estilos del 2026-09-29 (con el marco de Instrumento: radio de 5 px); se afinan desde `index.css`.
 

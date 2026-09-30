@@ -41,6 +41,9 @@ describe('index.css tab frame shape', () => {
         expect(root).toContain('--tab-frame-icon-scale: 0.9;');
         expect(root).toContain('--tab-frame-icon-tab-gap: 8px;');
         expect(root).not.toContain('--tab-frame-icon-shift');
+        // Breathing space above and below a title that has its own size (group): the standard tab's
+        // 25 px around the 11 px x 1.5 line box of the standard title = 4.25 px.
+        expect(root).toContain('--tab-frame-title-pad-y: 4.25px;');
     });
 
     it('keeps the base .glass-panel rule untouched by the tab shape (opt-in classes only)', () => {

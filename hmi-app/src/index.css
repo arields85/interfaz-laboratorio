@@ -457,6 +457,10 @@ h1, h2, h3, h4, h5, h6 {
  *                            línea superior del cuerpo, holgura respecto de la diagonal, tope superior,
  *                            separación entre el final de la pestaña y el ícono, y escala del ícono (hacia la
  *                            esquina superior derecha) (ver `utils/tabFrameIcon.ts`)
+ *   --tab-frame-title-pad-y  espacio vertical sobre y bajo un título con tamaño propio (widget group):
+ *                            la pestaña mide la caja de línea del título más este espacio por lado,
+ *                            nunca menos que --tab-frame-height (por defecto = el de la pestaña estándar:
+ *                            (25 px - 11 px x 1,5) / 2) (ver `utils/tabFrameHeight.ts`)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --tab-frame-height: 25px;
@@ -478,6 +482,7 @@ h1, h2, h3, h4, h5, h6 {
   --tab-frame-icon-min-top: 0px;
   --tab-frame-icon-tab-gap: 8px;
   --tab-frame-icon-scale: 0.9;
+  --tab-frame-title-pad-y: 4.25px;
 }
 
 /* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
