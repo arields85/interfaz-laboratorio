@@ -249,6 +249,37 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   Restarting the launcher fixed it. Rules from now on: never switch branches in this checkout (fast-forward `main` by
   ref, `git push . <branch>:main`); headless browser checks use an isolated `--user-data-dir` in the scratch directory.
 
+## C4 — Review and live tuning (2026-09-30)
+
+- Review of `80366a5..f23ac5e` (lab fix + C3 + V1; 35 files / 1890 lines, medium, `review-reliability`; consent granted by
+  the user via prompt): APPROVED and acknowledged (`review-5196731e3e85e1e5`, burned). Reviewed boundary `f23ac5e`.
+  From 2026-09-30 the user gave STANDING consent for every RDD review (no more prompts; merge and push stay theirs).
+  Advisory findings (none blocking), recorded, not fixed yet:
+  - WARNING R3-trailing-strip-applies-to-every-tab-widget: `WidgetHeader` moves ANY truthy `trailing` into the strip in a
+    tab frame (kpi, metric-card, info-card, group, machine-activity would lose their header row if they ever pass one);
+    no test pins that those widgets pass no trailing.
+  - WARNING R3-selector-wider-than-frame-unbounded: the trailing host is right-anchored, `max-content`, `nowrap`; a
+    selector wider than the frame (two groups in prod-trend / activity-analytics, or selector + "Back to preset") extends
+    past the frame's left edge and can intercept clicks of a neighbouring widget; `titleRoom` goes negative unhandled.
+  - SUGGESTION R3-hidden-title-sentinel-unproved-consumers (-1 sentinel not tested through the reporter store / ghosts);
+    R3-strip-reserve-two-pass-measure (reserve measured before the icon padding applies); R3-frame-title-duplicated-from-header
+    (trend-chart / trend-chart-v2 recompute the frame title per call site); R3-test-global-stub-leak-on-failure
+    (`WidgetFrame.trailing.test.tsx` unstub not in `afterEach`).
+- [x] **C4a** — User live look: "las unidades y el gráfico se encima mucho a la pestaña y al selector, usa chrome control
+  para arreglarlo". Measured in the control Chrome (CDP 127.0.0.1:9222, viewer scale 0.818): the strip ends 25 px below
+  the frame top; the header clearance (25 - 20 padding - border = ~4 px) put the header bottom exactly on the body's top
+  line and every chart container's `-mt-1` pulled the chart 4 px INTO the strip; charts draw at their very top edge (unit
+  label on the line; trend-chart-v2 "min / max / avg" 3 px higher, under the selector). Fix (route: parent inline, TDD):
+  new token `--tab-frame-strip-gap: 12px` added to the clearance in `hooks/useTabFrameStrip.ts` (25 - above + gap), so the
+  content starts 8 px below the line and the topmost chart text 5 px below it. Previewed live with the value before
+  coding; verified live after (prod-trend: svg top +8 px, top text +5 px, clearance 16.39 px). RED 2 failed
+  (`WidgetFrame.trailing.test.tsx` clearance 4 -> 16, `tabFrame.css.test.ts` token) -> GREEN 37/37. `npx tsc -b` clean,
+  `npm run lint` clean, `npm test` 258 files / 3381 tests passed, `npm run build` ok. Commit `7f22c58`.
+- Dev server finding (reproduced): two writes to `hmi-app/src/index.css` within milliseconds leave the Vite dev server
+  serving the first version of the stylesheet indefinitely (TS modules update); one later single rewrite refreshes it.
+  This is the mechanism behind the black blocks incident (checkout + fast-forward in the same second). Rule: one write
+  per CSS edit and check the served stylesheet afterwards.
+
 ## Next step
 
 C3 done. Then C4: live look with the user, RDD per work-unit commit (consent is
