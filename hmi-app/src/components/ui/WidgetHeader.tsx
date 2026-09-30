@@ -45,7 +45,8 @@ import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 // =============================================================================
 
 /**
- * Tab title colors (tab frame shape, including the title with its own typography): the SAME
+ * Title colors of a title with its own typography (the tab title, and the same title in the standard
+ * frame: one definition for both shapes). Tab title colors (tab frame shape, including the title with its own typography): the SAME
  * behavior as the standard title (muted, white while the widget is hovered, `transition-colors`)
  * but through the `--tab-frame-text` / `-hover` tokens so the tab color can be tuned in one place.
  * Full class names so Tailwind finds them.
@@ -139,6 +140,12 @@ export interface WidgetHeaderProps {
      * - `none`: sin ajuste extra (solo para casos excepcionales).
      */
     alignment?: 'standard' | 'none';
+    /**
+     * Size (px) of a title with its own typography (the `group` widget): in the standard frame the title
+     * then uses the `text-title` type styles, is shown as typed and takes the tab title colors. In the tab
+     * shape the size comes from the frame (`tabTitleFontSize`), so this has no effect there.
+     */
+    titleFontSize?: number;
 }
 
 interface WidgetHeaderDataModeProps {
@@ -219,6 +226,7 @@ export default function WidgetHeader({
     className = '',
     iconTestId,
     alignment = 'standard',
+    titleFontSize,
 }: WidgetHeaderProps) {
     const tabFrame = useContext(TabFrameContext);
     const hasSubtitle = Boolean(subtitle);
@@ -263,6 +271,15 @@ export default function WidgetHeader({
     ) : null;
     const titleNode = inTab ? (
         <TabFrameTitle title={title} alertState={tabFrame.alertState} fontSize={tabFrame.titleFontSize} />
+    ) : titleFontSize !== undefined && !centered ? (
+        // A title with its own typography in the standard frame: the same look as in the tab (type styles,
+        // as typed, rest/hover colors), in the same header row, which grows with the size.
+        <span
+            className={`min-w-0 flex-1 truncate ${TAB_TITLE_COLOR_CLASSES}`}
+            style={buildDashboardTitleTypography(titleFontSize)}
+        >
+            {title}
+        </span>
     ) : (
         <span className={centered
             ? 'min-w-0 text-center uppercase text-industrial-muted group-hover:text-white transition-colors'

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type {
@@ -267,14 +267,47 @@ describe('tab frame shape rollout', () => {
             expect((huge.container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement).style.getPropertyValue('--tab-frame-height')).toBe('220px');
         });
 
-        it('keeps the group title exactly as today in the standard shape (uppercase in the body, no own size)', () => {
+        it('gives the group title in the standard shape the same typography, size, as-typed text and colors as the tab', () => {
             const { container } = renderInGrid(<GroupWidget widget={makeGroup({ displayOptions: { icon: 'Group', titleFontSize: 50 } })} />);
 
             const title = screen.getByText('Compresión 01');
-            expect(title).toHaveClass('uppercase');
-            expect(title.style.fontSize).toBe('');
+            expect(title.style.fontFamily).toBe('var(--font-dashboard-title)');
+            expect(title.style.fontWeight).toBe('var(--font-weight-dashboard-title)');
+            expect(title.style.letterSpacing).toBe('var(--tracking-dashboard-title)');
+            expect(title.style.fontSize).toBe('50px');
+            expect(title.style.lineHeight).toBe('1.1');
+            expect(title).not.toHaveClass('uppercase');
+            expect(title).toHaveClass('text-(color:--tab-frame-text)', 'group-hover:text-(color:--tab-frame-text-hover)', 'transition-colors');
+            expect(title).not.toHaveClass('text-industrial-muted');
             expect(screen.queryByTestId('tab-frame-tab')).toBeNull();
+            // The outer frame keeps the standard element: no tab height is published.
             expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-height')).toBe('');
+        });
+
+        it('uses the group default size (30) in the standard shape and falls back to it for an invalid stored size', () => {
+            renderInGrid(<GroupWidget widget={makeGroup()} />);
+            expect(screen.getByText('Compresión 01').style.fontSize).toBe('30px');
+            cleanup();
+
+            const stored = { icon: 'Group', titleFontSize: Number.NaN } as GroupWidgetConfig['displayOptions'];
+            renderInGrid(<GroupWidget widget={makeGroup({ displayOptions: stored })} />);
+            expect(screen.getByText('Compresión 01').style.fontSize).toBe(`${DEFAULT_GROUP_TITLE_FONT_SIZE}px`);
+        });
+
+        it('keeps the group title size in the standard shape outside a dashboard grid too', () => {
+            render(<GroupWidget widget={makeGroup({ displayOptions: { icon: 'Group', titleFontSize: 40 } })} />);
+
+            const title = screen.getByText('Compresión 01');
+            expect(title.style.fontSize).toBe('40px');
+            expect(title).not.toHaveClass('uppercase');
+        });
+
+        it('leaves another widget type with its uppercase muted standard title', () => {
+            renderInGrid(<KpiWidget widget={kpiWidget} equipmentMap={new Map()} className="w-full h-full" />);
+
+            const title = screen.getByText('Potencia');
+            expect(title).toHaveClass('uppercase', 'text-industrial-muted', 'group-hover:text-white');
+            expect(title.style.fontSize).toBe('');
         });
 
         it('leaves the other tab widgets with their uppercase standard tab title and token height', () => {

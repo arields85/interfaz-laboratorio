@@ -1777,7 +1777,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     placeholder={isDashboardTitle ? 'ej. Producción' : 'ej. Velocidad'}
                                 />
                             </DockFieldRow>
-                            {/* Tamaño del título en la pestaña (group): el mismo control que text-title, sin Alinear ni Color. */}
+                            {/* Tamaño del título (group, en Estándar y en Pestaña): el mismo control que text-title, sin Alinear ni Color. */}
                             {selectedWidget.type === 'group' && (
                                 <DockFieldRow label="Tamaño">
                                     <AdminNumberInput

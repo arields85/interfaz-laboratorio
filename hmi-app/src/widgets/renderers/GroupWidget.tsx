@@ -32,9 +32,9 @@ import { DEFAULT_GROUP_TITLE_FONT_SIZE, normalizeTitleFontSize } from '../../uti
 // si el contenedor está cerrado (`locked`) es estado de edición del builder;
 // este renderer no lee ni necesita esos campos.
 //
-// Con la forma de marco Pestaña el título va en la pestaña con la tipografía del widget
-// `text-title` (tamaño `displayOptions.titleFontSize`, por defecto `DEFAULT_GROUP_TITLE_FONT_SIZE`) y la
-// pestaña crece hacia abajo con ese tamaño (ver `WidgetFrame`). Con la forma Estándar nada cambia.
+// El título usa la tipografía del widget `text-title` (tamaño `displayOptions.titleFontSize`, por defecto
+// `DEFAULT_GROUP_TITLE_FONT_SIZE`) con ambas formas de marco: con Pestaña va en la pestaña y esta crece
+// hacia abajo con ese tamaño (ver `WidgetFrame`); con Estándar queda en la fila del header, que crece con él.
 // =============================================================================
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -86,6 +86,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
     // spaced row.
     const trimmedTitle = widget.title?.trim() ?? '';
     const hasHeaderContent = trimmedTitle.length > 0 || Icon !== undefined;
+    const titleFontSize = normalizeTitleFontSize(displayOptions?.titleFontSize, DEFAULT_GROUP_TITLE_FONT_SIZE);
 
     return (
         <WidgetFrame
@@ -94,7 +95,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
             frameClassName="glass-panel glass-panel-group"
             className="group flex h-full w-full flex-col p-4"
             outerClassName={className}
-            tabTitleFontSize={normalizeTitleFontSize(displayOptions?.titleFontSize, DEFAULT_GROUP_TITLE_FONT_SIZE)}
+            tabTitleFontSize={titleFontSize}
         >
             {hasHeaderContent && (
                 <WidgetHeader
@@ -103,6 +104,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
                     iconColor={iconColor}
                     iconPosition="right"
                     iconTestId="group-header-icon"
+                    titleFontSize={titleFontSize}
                 />
             )}
         </WidgetFrame>
