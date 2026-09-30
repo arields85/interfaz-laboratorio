@@ -275,6 +275,47 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   coding; verified live after (prod-trend: svg top +8 px, top text +5 px, clearance 16.39 px). RED 2 failed
   (`WidgetFrame.trailing.test.tsx` clearance 4 -> 16, `tabFrame.css.test.ts` token) -> GREEN 37/37. `npx tsc -b` clean,
   `npm run lint` clean, `npm test` 258 files / 3381 tests passed, `npm run build` ok. Commit `7f22c58`.
+- [x] **C4b** — DONE 2026-09-30 (user authorized the fix of the two review WARNINGs). Route: delegated writer (writer
+  trigger: 2+ non-trivial files); strict TDD (source: global user config), runner `npx vitest run <file>` in `hmi-app/`.
+  - **R3-trailing-strip-applies-to-every-tab-widget** (fixed): the opt-in is a capability next to `supportsTabFrame`,
+    `supportsTabFrameTrailingStrip` in `utils/widgetCapabilities.ts` (`trend-chart`, `trend-chart-v2`, `prod-trend`,
+    `prod-history`, `activity-analytics`). `WidgetFrame` decides it in ONE place and carries it to the header as
+    `trailingPlacement` (+ `trailingBelowStrip`, `reportTrailingWidth`) in `TabFrameContext`. Any other tab widget that passes
+    `trailing` keeps it in its header row with the row's height (invisible spacer, icon slot) and the strip publishes nothing for
+    it. Tests pin it for kpi, metric-card, info-card, group and machine-activity (`WidgetFrame.trailing.test.tsx`).
+  - **R3-selector-wider-than-frame-unbounded** (fixed): rule decided in `resolveTabFrameTrailing` (`utils/tabFrameTrailing.ts`,
+    new `placement`): strip while right offset + (selector + icon extent) + one gap (`--tab-frame-trailing-gap`) <= frame
+    width (boundary = fits), otherwise `body`. The header measures the INTRINSIC width on the trailing slot itself (`w-max`,
+    `shrink-0`, same in the strip or the row) and reports it to the frame, so the decision is a pure function of the intrinsic
+    width and the frame width: no hysteresis needed, no oscillation. In `body`: the selector sits right-aligned in the body
+    header row (pill look, like the standard frame), the row starts under the strip (clearance + `--tab-frame-strip-gap`, no
+    slot for the icon, which stays in the strip: the lab's alternative A), the row shrinks (`min-w-0`) and scrolls
+    (`overflow-x-auto hmi-scrollbar`) so nothing renders outside the frame, the title tab is back to normal (standard
+    reserve, never hidden by the selector, silhouette with tab) and the chart starts under that row. Unmeasured frame or
+    content: strip, as before.
+  - Commits (Conventional, no attribution; GGA passed each): `7d520c1` feat(theme): add the chart-only trailing strip opt-in
+    and the strip fit rule (112+/4-, pure modules + tests); `75a873b` fix(theme): fall back to the body header row when the
+    chart selector is wider than the frame (341+/58-, hook, context, frame, header + tests); `520c492` fix(theme): start the
+    body row of a fallback chart selector under the strip (46+/15-); docs commit after this (DESIGN_SYSTEM.md,
+    WIDGET_AUTHORING.md, this file).
+  - RED/GREEN: `tabFrameTrailing` 6 failed / 10 passed -> 16/16; `widgetCapabilities` 13 failed / 27 passed -> 40/40;
+    `WidgetFrame.trailing` 20 failed / 10 passed -> 30/30; after the row-under-the-strip adjustment 2 failed / 28 passed ->
+    30/30. No CSS change (the stale-stylesheet rule did not apply).
+  - Final commands (in `hmi-app/`, after the last code commit `520c492`): `npx tsc -b` exit 0; `npm run lint` exit 0;
+    `npm test` 258 files / 3419 tests passed; `npm run build` ok.
+  - Browser check (headless Chrome, isolated profile in the scratch directory, own debugging port, scratch page with the real
+    components and `index.css`, deleted, not committed): one-group selector 165.8 px wide goes to the body row at frame width
+    217 and back to the strip at 218 (live resize 700 -> 200 -> 700 -> 240..215 -> 700, stable after 6 more frames each time,
+    no flip-flop); two-group selector (327 px) in 330 and 180 px frames falls back with the scroller inside the frame (21 px
+    from the right edge, scrollWidth 343 > 130); title tab visible in both; kpi with trailing keeps it in its row (top 17 px,
+    chart 60 px); strip case unchanged (selector 22.5 px tall, top 1.3 px, chart 37 px). Not verified: the real five renderers
+    in the viewer/builder (only the shared frame and header), hover and focus look of the row selector, the builder hover
+    actions over the row, phone-width viewports, real pointer scrolling of the row.
+  - Decisions for the parent: (1) the fallback row also takes the strip gap (16 px clearance, row top ~8 px under the strip)
+    instead of the plain header row position of the tab widgets, because at the plain position the pill straddled the body's
+    top line; kpi-like widgets keep the old position. (2) One gap, not two, is kept to the frame's left edge in the fit test.
+  - Review findings R3-trailing-strip-applies-to-every-tab-widget and R3-selector-wider-than-frame-unbounded are closed by
+    this task; the SUGGESTIONs stay open.
 - Dev server finding (reproduced): two writes to `hmi-app/src/index.css` within milliseconds leave the Vite dev server
   serving the first version of the stylesheet indefinitely (TS modules update); one later single rewrite refreshes it.
   This is the mechanism behind the black blocks incident (checkout + fast-forward in the same second). Rule: one write
@@ -282,5 +323,5 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
 
 ## Next step
 
-C3 done. Then C4: live look with the user, RDD per work-unit commit (consent is
-relayed per candidate for this feature), merge on the user's OK. Separate pending user decision: push of `main`.
+C3 and C4b done. Then C4: live look with the user (selector fallback in narrow widgets included), RDD per work-unit
+commit (standing consent), merge on the user's OK. Separate pending user decision: push of `main`.
