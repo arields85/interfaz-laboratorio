@@ -25,6 +25,12 @@ interface GridSelectionFrameProps {
      * tab + chamfered body silhouette instead of the rounded rect; `null`/absent keeps the rect.
      */
     tabWidth?: number | null;
+    /**
+     * Effective tab height (px) when the widget's tab is taller than the standard one (a title with its
+     * own size, reported by its `WidgetFrame`). This layer lives outside the frame's shell and cannot
+     * see the frame's own `--tab-frame-height`; absent = the token.
+     */
+    tabHeight?: number;
 }
 
 const GRID_RADIUS_DELTA_PX = 0;
@@ -52,9 +58,10 @@ export default function GridSelectionFrame({
     className = '',
     inset = 'var(--widget-spacing)',
     tabWidth = null,
+    tabHeight,
 }: GridSelectionFrameProps) {
     const frameRef = useRef<HTMLDivElement>(null);
-    const tabGeometry = useTabFrameGeometry(frameRef, tabWidth);
+    const tabGeometry = useTabFrameGeometry(frameRef, tabWidth, tabHeight);
     const outerRadius = outerRingRadius(radius, GRID_RADIUS_DELTA_PX);
     // rx/ry del hover-rect (trazo de 1px, centrado 0.5px hacia adentro del outer edge).
     const hoverRingRadius = strokeCenterRadius(radius, GRID_RADIUS_DELTA_PX, 0.5);

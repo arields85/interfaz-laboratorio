@@ -14,6 +14,7 @@ import { collectWidgetIdsInOtherLockedGroups, computeGroupMembers, duplicateLock
 import { useHistoryState } from '../../hooks/useHistoryState';
 import { generateWidgetId } from '../../utils/idGenerator';
 import { createDefaultStatusDisplayOptions } from '../../utils/statusWidget';
+import { buildTabFramePath } from '../../utils/tabFramePath';
 
 type ResizeObserverCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 
@@ -234,16 +235,22 @@ vi.mock('../viewer/WidgetPresentationBoundary', async () => {
     }) {
         const inGrid = useContext(GridFrameScopeContext);
         const reportTabWidth = useContext(TabFrameReporterContext);
-        const hasTab = widget.title === 'Tab Widget';
+        const hasTab = widget.title === 'Tab Widget' || widget.title === 'Tall Tab Widget';
+        // A taller tab (title with its own size) reports its effective height next to the width.
+        const tabHeight = widget.title === 'Tall Tab Widget' ? 47 : undefined;
 
         useEffect(() => {
             if (!hasTab) {
                 return undefined;
             }
-            reportTabWidth?.(120);
+            if (tabHeight === undefined) {
+                reportTabWidth?.(120);
+            } else {
+                reportTabWidth?.(120, tabHeight);
+            }
 
             return () => reportTabWidth?.(null);
-        }, [hasTab, reportTabWidth]);
+        }, [hasTab, tabHeight, reportTabWidth]);
 
         return widget.title === 'Editable Input'
             ? <input data-testid={`widget-renderer-input-${widget.id}`} defaultValue="editable" />
@@ -2848,6 +2855,48 @@ describe('BuilderCanvas', () => {
             const item = screen.getByTestId('builder-canvas-item-widget-1');
             expect(within(item).getByTestId('widget-hover-actions').getAttribute('style'))
                 .toContain('top: calc(var(--widget-spacing) + var(--tab-frame-height));');
+        });
+
+        describe('a taller tab (title with its own size)', () => {
+            // jsdom computes no tokens: token lengths read as 0 and the reported height (47) is the only source.
+            const TALL_GEOMETRY = { width: 180, height: 120, tabWidth: 120, tabHeight: 47, tabCut: 0, bodyCut: 0, radius: 0, glowSpread: 0 };
+
+            it('moves the hover actions down by the reported tab height, not by the standard token', async () => {
+                await renderInteractiveCanvas({
+                    widgets: [makeWidget({ id: 'widget-1', title: 'Tall Tab Widget' })],
+                });
+
+                const item = screen.getByTestId('builder-canvas-item-widget-1');
+                const style = within(item).getByTestId('widget-hover-actions').getAttribute('style') ?? '';
+                expect(style).toContain('top: calc(var(--widget-spacing) + 47px);');
+                expect(style).not.toContain('--tab-frame-height');
+            });
+
+            it('traces the selection rings along the taller tab', async () => {
+                await withMeasuredBoxes(() => renderInteractiveCanvas({
+                    selectedWidgetId: 'widget-1',
+                    widgets: [makeWidget({ id: 'widget-1', title: 'Tall Tab Widget' })],
+                }));
+
+                const frame = within(screen.getByTestId('builder-canvas-item-widget-1')).getByTestId('grid-selection-frame');
+                expect(frame.querySelector('path[data-ring="focus"]')?.getAttribute('d')).toBe(buildTabFramePath(TALL_GEOMETRY, 1));
+                expect(frame.querySelector('path[data-ring="hover"]')?.getAttribute('d')).toBe(buildTabFramePath(TALL_GEOMETRY, 0.5));
+            });
+
+            it('draws the placement ghost along the taller tab', async () => {
+                await withMeasuredBoxes(() => renderInteractiveCanvas({
+                    cols: 20,
+                    rows: 12,
+                    resizeWidth: 1200,
+                    resizeHeight: 720,
+                    layout: [makeLayout({ widgetId: 'widget-1', x: 2, y: 1, w: 3, h: 2 })],
+                    widgets: [makeWidget({ id: 'widget-1', title: 'Tall Tab Widget' })],
+                    placementSourceWidgetId: 'widget-1',
+                }));
+
+                const ghost = screen.getByTestId('builder-canvas-placement-ghost-source');
+                expect(ghost.querySelector('path[data-ring="hover"]')?.getAttribute('d')).toBe(buildTabFramePath(TALL_GEOMETRY, 0.5));
+            });
         });
 
         it('draws the placement ghost of a tab widget with the silhouette too', async () => {

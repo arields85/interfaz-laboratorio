@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardViewer from './DashboardViewer';
 import { makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
+import { buildTabFramePath } from '../../utils/tabFramePath';
 
 type ResizeCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
 const resizeCallbacks = new Map<Element, Set<ResizeCallback>>();
@@ -32,6 +33,12 @@ vi.mock('./WidgetPresentationBoundary', async () => {
         const reportTabWidth = useContext(TabFrameReporterContext);
 
         useEffect(() => {
+            if (props.widget.id === 't') {
+                // A taller tab (title with its own size) reports its height next to the width.
+                reportTabWidth?.(180, 47);
+
+                return () => reportTabWidth?.(null);
+            }
             if (props.widget.id !== 'a') {
                 return undefined;
             }
@@ -73,6 +80,7 @@ describe('DashboardViewer frame shape scope', () => {
 
     afterEach(() => {
         vi.unstubAllGlobals();
+        vi.restoreAllMocks();
     });
 
     it('marks every grid widget as rendered inside a dashboard grid', () => {
@@ -113,6 +121,37 @@ describe('DashboardViewer frame shape scope', () => {
         // Widget "b" is a standard frame: flash and traced rect as always.
         expect(screen.getByTestId('dashboard-viewer-entrance-flash-b')).toBeInTheDocument();
         expect(screen.getByTestId('dashboard-viewer-entrance-outline-b').querySelector('rect')).not.toBeNull();
+    });
+
+    it('hands the reported tab height to the entrance overlays: flash and outline follow the taller tab', () => {
+        const tokens: Record<string, string> = { '--tab-frame-height': '25px', '--tab-frame-tab-cut': '19px', '--tab-frame-body-cut': '0px' };
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(300);
+        vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
+        vi.spyOn(window, 'getComputedStyle').mockImplementation(() => ({
+            getPropertyValue: (name: string) => tokens[name] ?? '',
+            borderTopLeftRadius: '4px',
+            fontSize: '16px',
+        }) as unknown as CSSStyleDeclaration);
+        const widgets = [makeWidget({ id: 't' })];
+        const layout = [makeLayout({ widgetId: 't', x: 0, y: 0 })];
+
+        const { container } = render(
+            <DashboardViewer
+                widgets={widgets}
+                layout={layout}
+                equipmentMap={new Map()}
+                cols={24}
+                rows={12}
+                entranceKey="dash:view"
+            />,
+        );
+        measure(container);
+
+        const geometry = { width: 300, height: 200, tabWidth: 180, tabHeight: 47, tabCut: 19, bodyCut: 0, radius: 4 };
+        expect(screen.getByTestId('dashboard-viewer-entrance-outline-t').querySelector('path')?.getAttribute('d'))
+            .toBe(buildTabFramePath(geometry));
+        expect(screen.getByTestId('dashboard-viewer-entrance-flash-t').style.clipPath)
+            .toBe(`path('${buildTabFramePath(geometry)}')`);
     });
 
     it('treats a tab that reported width 0 (pending) as tab shape: no rectangle in the meantime', () => {

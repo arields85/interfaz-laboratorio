@@ -76,6 +76,16 @@ describe('ViewerEntranceFrameOverlays', () => {
             expect(outline.style.inset).toBe('0px');
         });
 
+        it('clips the flash and traces the outline with the reported tab height (a taller tab)', () => {
+            render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={180} tabHeight={47} />);
+
+            const geometry = { ...GEOMETRY, tabHeight: 47 };
+            expect(screen.getByTestId('dashboard-viewer-entrance-flash-w').style.clipPath)
+                .toBe(`path('${buildTabFramePath(geometry)}')`);
+            expect(screen.getByTestId('dashboard-viewer-entrance-outline-w').querySelector('path')?.getAttribute('d'))
+                .toBe(buildTabFramePath(geometry));
+        });
+
         it('never draws a rectangle while the tab width is pending (frame is the tab shape, width not measured yet)', () => {
             render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={0} />);
 

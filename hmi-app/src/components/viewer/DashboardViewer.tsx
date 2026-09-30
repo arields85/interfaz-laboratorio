@@ -94,7 +94,7 @@ export default function DashboardViewer({
 
     // Tab frame shape: each widget reports the width of its tab so the entrance overlays follow the
     // tab + chamfered body silhouette (only widgets whose frame is the tab shape appear here).
-    const { widths: tabWidths, reporterFor } = useTabFrameWidths();
+    const { widths: tabWidths, heights: tabHeights, reporterFor } = useTabFrameWidths();
 
     // G5 group hover: shared state so a locked group's container can show its hover look while
     // the pointer is anywhere over the group (container or any member) — they are sibling grid
@@ -225,6 +225,7 @@ export default function DashboardViewer({
                                             widgetId={widget.id}
                                             inset={resolveWidgetSurfaceInset(widget)}
                                             tabWidth={tabWidths[widget.id] ?? null}
+                                            tabHeight={tabHeights[widget.id]}
                                         />
                                     ) : null}
                                 </div>

@@ -29,11 +29,13 @@ interface ViewerEntranceFrameOverlaysProps {
     inset: string;
     /** Tab width (px) of the widget's tab frame, when it is the tab shape. */
     tabWidth?: number | null;
+    /** Effective tab height (px) of a taller tab (title with its own size); absent = `--tab-frame-height`. */
+    tabHeight?: number;
 }
 
-export default function ViewerEntranceFrameOverlays({ widgetId, inset, tabWidth = null }: ViewerEntranceFrameOverlaysProps) {
+export default function ViewerEntranceFrameOverlays({ widgetId, inset, tabWidth = null, tabHeight }: ViewerEntranceFrameOverlaysProps) {
     const outlineRef = useRef<HTMLDivElement>(null);
-    const tabGeometry = useTabFrameGeometry(outlineRef, tabWidth);
+    const tabGeometry = useTabFrameGeometry(outlineRef, tabWidth, tabHeight);
     const isTabShape = tabWidth !== null;
     const silhouette = tabGeometry ? buildTabFramePath(tabGeometry) : null;
     const flashStyle: CSSProperties = silhouette ? { inset, clipPath: `path('${silhouette}')` } : { inset };

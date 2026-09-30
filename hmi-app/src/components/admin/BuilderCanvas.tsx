@@ -182,6 +182,19 @@ function resolvePointerGridCell(args: {
 
 // TextTitle no tiene frame (sin .glass-panel); el resto sigue el radio de tema activo
 // (--frame-radius-rest, ver services/themeStyle.service.ts) en vez de un valor fijo.
+/**
+ * Top offset of the hover actions: the widget's surface inset, plus the tab height when its frame is
+ * the tab shape (the visible top edge under the tab strip is the body's). A taller tab (title with
+ * its own size) reports its own height; the others use the token.
+ */
+function resolveHoverActionsTop(inset: string, tabWidth: number | undefined, tabHeight: number | undefined): string {
+    if (tabWidth === undefined) {
+        return inset;
+    }
+
+    return `calc(${inset} + ${tabHeight === undefined ? 'var(--tab-frame-height)' : `${tabHeight}px`})`;
+}
+
 function getWidgetCornerRadius(type: WidgetConfig['type']): string {
     return type === 'text-title' ? '0px' : 'var(--frame-radius-rest)';
 }
@@ -196,12 +209,15 @@ function PlacementGhostRect({
     px,
     widgetType,
     tabWidth = null,
+    tabHeight,
 }: {
     testId: string;
     px: WidgetPixelBounds;
     widgetType: WidgetConfig['type'];
     /** Tab width (px) of the source widget when its frame is the tab shape: the ghost follows it. */
     tabWidth?: number | null;
+    /** Effective tab height (px) of a taller tab (title with its own size); absent = the token. */
+    tabHeight?: number;
 }) {
     return (
         <div
@@ -220,6 +236,7 @@ function PlacementGhostRect({
                 radius={getWidgetCornerRadius(widgetType)}
                 inset={resolveWidgetSurfaceInset({ type: widgetType })}
                 tabWidth={tabWidth}
+                tabHeight={tabHeight}
             />
         </div>
     );
@@ -417,7 +434,7 @@ export default function BuilderCanvas({
     const isGridVisible = useUIStore((state) => state.isGridVisible);
     // Tab frame shape: each widget reports the width of its tab so the selection ring, the placement
     // ghosts and the hover actions follow the tab + chamfered body silhouette (WYSIWYG with the viewer).
-    const { widths: tabWidths, reporterFor: tabWidthReporterFor } = useTabFrameWidths();
+    const { widths: tabWidths, heights: tabHeights, reporterFor: tabWidthReporterFor } = useTabFrameWidths();
     const { containerRef, width, height, rowHeight, cellWidth, hasFirstValidMeasurement } = useCanvasReference({
         cols,
         rows,
@@ -1126,6 +1143,7 @@ export default function BuilderCanvas({
                                     radius={getWidgetCornerRadius(widget.type)}
                                     inset={resolveWidgetSurfaceInset(widget)}
                                     tabWidth={tabWidths[widget.id] ?? null}
+                                    tabHeight={tabHeights[widget.id]}
                                 />
 
                                 <WidgetHoverActions
@@ -1133,10 +1151,9 @@ export default function BuilderCanvas({
                                     // visible top border — a group container's border now sits
                                     // at the grid line (no inset), so its actions must not use
                                     // the standard --widget-spacing offset either.
-                                    // Tab shape: the visible top edge under the tab strip is the body's.
-                                    top={tabWidths[widget.id] !== undefined
-                                        ? `calc(${resolveWidgetSurfaceInset(widget)} + var(--tab-frame-height))`
-                                        : resolveWidgetSurfaceInset(widget)}
+                                    // Tab shape: the visible top edge under the tab strip is the body's; a
+                                    // taller tab (title with its own size) reports its own height.
+                                    top={resolveHoverActionsTop(resolveWidgetSurfaceInset(widget), tabWidths[widget.id], tabHeights[widget.id])}
                                     // D6: a member of a locked group NOT in edit mode acts as
                                     // part of the container — it gets no hover actions of its
                                     // own; the container's own actions (copy/delete/lock/pencil,
@@ -1257,6 +1274,7 @@ export default function BuilderCanvas({
                                     px={containerPx}
                                     widgetType={placementSource.type}
                                     tabWidth={tabWidths[placementSourceWidgetId] ?? null}
+                                    tabHeight={tabHeights[placementSourceWidgetId]}
                                 />
                                 {placementSource.memberGhosts.map((member) => {
                                     const memberPx = layoutToPixelBounds(
@@ -1275,6 +1293,7 @@ export default function BuilderCanvas({
                                             px={memberPx}
                                             widgetType={member.type}
                                             tabWidth={tabWidths[member.id] ?? null}
+                                            tabHeight={tabHeights[member.id]}
                                         />
                                     );
                                 })}

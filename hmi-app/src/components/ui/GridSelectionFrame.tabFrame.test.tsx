@@ -52,6 +52,24 @@ describe('GridSelectionFrame in the tab frame shape', () => {
         expect(focus?.getAttribute('d')).toBe(buildTabFramePath(GEOMETRY, 1));
     });
 
+    it('traces the rings with the reported tab height (a taller tab), not with the token, which it cannot see per widget', () => {
+        const { container } = render(<GridSelectionFrame isSelected tabWidth={180} tabHeight={47} />);
+
+        expect(container.querySelector('path[data-ring="hover"]')?.getAttribute('d'))
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 47 }, 0.5));
+        expect(container.querySelector('path[data-ring="focus"]')?.getAttribute('d'))
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 47 }, 1));
+    });
+
+    it('follows the reported tab height live', () => {
+        const { container, rerender } = render(<GridSelectionFrame isSelected tabWidth={180} tabHeight={47} />);
+
+        rerender(<GridSelectionFrame isSelected tabWidth={180} tabHeight={74.5} />);
+
+        expect(container.querySelector('path[data-ring="focus"]')?.getAttribute('d'))
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabHeight: 74.5 }, 1));
+    });
+
     it('strokes the focus path with the admin accent token and shows it only when selected', () => {
         const { container, rerender } = render(<GridSelectionFrame isSelected tabWidth={180} />);
         const focus = () => container.querySelector('path[data-ring="focus"]') as SVGPathElement;
