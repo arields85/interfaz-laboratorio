@@ -206,7 +206,8 @@ en vez de depender de un widget de título individual.
 
 - **Campos de configuración**: `title` (texto del header), `displayOptions.icon` (ícono Lucide del
   header), `displayOptions.titleFontSize` (tamaño en px del título en la pestaña; por defecto
-  `DEFAULT_TEXT_TITLE_FONT_SIZE`, el de `text-title`; solo aplica con la forma de marco Pestaña) y hereda
+  `DEFAULT_TEXT_TITLE_FONT_SIZE`, el de `text-title`; un valor guardado no numérico vuelve al defecto y uno numérico se
+  limita a `MIN_/MAX_TEXT_TITLE_FONT_SIZE` con `normalizeTitleFontSize`; solo aplica con la forma de marco Pestaña) y hereda
   `navigationTargetDashboardId` de `WidgetConfigBase` como cualquier widget — no redeclararlo. Con la forma
   Pestaña el título usa la tipografía de `text-title` (`utils/dashboardTitleTypography.ts`, sin Alinear ni
   Color) y `WidgetFrame` recibe `tabTitleFontSize` para que la pestaña crezca con él; con la forma Estándar

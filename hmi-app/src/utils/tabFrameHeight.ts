@@ -21,6 +21,9 @@ export interface TabFrameHeightInput {
 
 export function resolveTabFrameHeight({ baseHeight, titleFontSize, padY }: TabFrameHeightInput): number {
     const titleHeight = titleFontSize * DASHBOARD_TITLE_LINE_HEIGHT + 2 * padY;
+    // Never NaN: whatever is not finite drops out, and a title that cannot be measured leaves the base height.
+    const floor = Number.isFinite(baseHeight) ? baseHeight : 0;
+    const height = Number.isFinite(titleHeight) ? Math.max(floor, titleHeight) : floor;
 
-    return Math.round(Math.max(baseHeight, titleHeight) * 100) / 100;
+    return Math.round(height * 100) / 100;
 }

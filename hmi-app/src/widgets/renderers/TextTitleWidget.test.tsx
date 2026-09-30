@@ -2,7 +2,8 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { TextTitleWidgetConfig } from '../../domain/admin.types';
-import TextTitleWidget, { DEFAULT_TEXT_TITLE_FONT_SIZE } from './TextTitleWidget';
+import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../utils/dashboardTitleTypography';
+import TextTitleWidget from './TextTitleWidget';
 
 function makeWidget(overrides?: Partial<TextTitleWidgetConfig>): TextTitleWidgetConfig {
     return {
@@ -77,5 +78,15 @@ describe('TextTitleWidget', () => {
 
         expect(screen.queryByRole('button')).not.toBeInTheDocument();
         expect(screen.getByText('Producción Línea A')).toBeInTheDocument();
+    });
+});
+
+describe('TextTitleWidget with an invalid stored size', () => {
+    it('renders the default size for a non-numeric or non-finite persisted value', () => {
+        const stored = { fontSize: Number.NaN } as TextTitleWidgetConfig['displayOptions'];
+
+        render(<TextTitleWidget widget={makeWidget({ displayOptions: stored })} />);
+
+        expect(screen.getByText('Producción Línea A')).toHaveStyle({ fontSize: `${DEFAULT_TEXT_TITLE_FONT_SIZE}px` });
     });
 });

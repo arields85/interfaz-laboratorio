@@ -45,7 +45,7 @@ import { createDefaultActivityAnalyticsDisplayOptions } from '../../utils/activi
 import { createDefaultProdTrendDisplayOptions } from '../../utils/prodTrendWidgetDefaults';
 import { ADMIN_SIDEBAR_INPUT_CLS } from '../../components/admin/adminSidebarStyles';
 import { getDashboardViewIconComponent } from '../../utils/dashboardViewIcons';
-import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
+import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../utils/dashboardTitleTypography';
 import { DEFAULT_INFO_CARD_VALUE_FONT_SIZE } from '../../utils/infoCardDisplayOptions';
 import { getAncestors } from '../../utils/hierarchyTree';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';

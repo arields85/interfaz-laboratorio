@@ -54,7 +54,12 @@ import {
     ADMIN_SIDEBAR_PANEL_TITLE_CLS,
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
-import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../widgets/renderers/TextTitleWidget';
+import {
+    DEFAULT_TEXT_TITLE_FONT_SIZE,
+    MAX_TEXT_TITLE_FONT_SIZE,
+    MIN_TEXT_TITLE_FONT_SIZE,
+    normalizeTitleFontSize,
+} from '../../utils/dashboardTitleTypography';
 import {
     DEFAULT_INFO_CARD_VALUE_FONT_SIZE,
     DEFAULT_WIDGET_VALUE_FONT_SIZE,
@@ -1776,9 +1781,9 @@ export default function PropertyDock(props: PropertyDockProps) {
                             {selectedWidget.type === 'group' && (
                                 <DockFieldRow label="Tamaño">
                                     <AdminNumberInput
-                                        value={(selectedWidget.displayOptions as GroupDisplayOptions | undefined)?.titleFontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE}
-                                        min={12}
-                                        max={200}
+                                        value={normalizeTitleFontSize((selectedWidget.displayOptions as GroupDisplayOptions | undefined)?.titleFontSize)}
+                                        min={MIN_TEXT_TITLE_FONT_SIZE}
+                                        max={MAX_TEXT_TITLE_FONT_SIZE}
                                         step={1}
                                         commitOnBlur
                                         onChange={val => handleNumericDisplayOptionChange('titleFontSize', val)}
@@ -2041,8 +2046,8 @@ export default function PropertyDock(props: PropertyDockProps) {
                                         <DockFieldRow label="Tamaño">
                                             <AdminNumberInput
                                                 value={(selectedWidget.displayOptions as TextTitleDisplayOptions | undefined)?.fontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE}
-                                                min={12}
-                                                max={200}
+                                                min={MIN_TEXT_TITLE_FONT_SIZE}
+                                                max={MAX_TEXT_TITLE_FONT_SIZE}
                                                 step={1}
                                                 commitOnBlur
                                                 onChange={val => handleNumericDisplayOptionChange('fontSize', val)}

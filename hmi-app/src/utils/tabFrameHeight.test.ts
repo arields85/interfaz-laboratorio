@@ -20,4 +20,15 @@ describe('resolveTabFrameHeight', () => {
     it('rounds float noise to two decimals', () => {
         expect(resolveTabFrameHeight({ baseHeight: 25, titleFontSize: 33, padY: 4.25 })).toBe(44.8);
     });
+
+    it('never returns NaN: a non-finite title size or padding falls back to the standard tab height', () => {
+        expect(resolveTabFrameHeight({ baseHeight: 25, titleFontSize: Number.NaN, padY: 4.25 })).toBe(25);
+        expect(resolveTabFrameHeight({ baseHeight: 25, titleFontSize: Number.POSITIVE_INFINITY, padY: 4.25 })).toBe(25);
+        expect(resolveTabFrameHeight({ baseHeight: 25, titleFontSize: 35, padY: Number.NaN })).toBe(25);
+    });
+
+    it('never returns NaN even when the standard height itself is not finite', () => {
+        expect(resolveTabFrameHeight({ baseHeight: Number.NaN, titleFontSize: 35, padY: 4.25 })).toBe(47);
+        expect(resolveTabFrameHeight({ baseHeight: Number.NaN, titleFontSize: Number.NaN, padY: 4.25 })).toBe(0);
+    });
 });

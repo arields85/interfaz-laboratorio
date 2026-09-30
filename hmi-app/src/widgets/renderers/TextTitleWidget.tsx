@@ -1,9 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { TextTitleDisplayOptions, TextTitleWidgetConfig } from '../../domain/admin.types';
 import type { PresentationPayload } from '../../domain/dashboardPresentation.types';
-import { buildDashboardTitleTypography } from '../../utils/dashboardTitleTypography';
-
-export const DEFAULT_TEXT_TITLE_FONT_SIZE = 35;
+import { buildDashboardTitleTypography, normalizeTitleFontSize } from '../../utils/dashboardTitleTypography';
 
 const TEXT_COLOR_MAP: Record<string, string> = {
     white: 'var(--color-industrial-text)',
@@ -19,7 +17,7 @@ interface TextTitleWidgetProps {
 
 export default function TextTitleWidget({ widget, className, presentationData }: TextTitleWidgetProps) {
     const displayOptions = widget.displayOptions as TextTitleDisplayOptions | undefined;
-    const fontSize = displayOptions?.fontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE;
+    const fontSize = normalizeTitleFontSize(displayOptions?.fontSize);
     const textAlign = displayOptions?.textAlign ?? 'left';
     const textColor = displayOptions?.textColor ?? 'muted';
     const titleStyle: CSSProperties = {

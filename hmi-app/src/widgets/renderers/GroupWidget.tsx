@@ -21,7 +21,7 @@ import {
 import type { GroupWidgetConfig } from '../../domain/admin.types';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetFrame from '../../components/ui/WidgetFrame';
-import { DEFAULT_TEXT_TITLE_FONT_SIZE } from './TextTitleWidget';
+import { normalizeTitleFontSize } from '../../utils/dashboardTitleTypography';
 
 // =============================================================================
 // GroupWidget
@@ -94,7 +94,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
             frameClassName="glass-panel glass-panel-group"
             className="group flex h-full w-full flex-col p-4"
             outerClassName={className}
-            tabTitleFontSize={displayOptions?.titleFontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE}
+            tabTitleFontSize={normalizeTitleFontSize(displayOptions?.titleFontSize)}
         >
             {hasHeaderContent && (
                 <WidgetHeader

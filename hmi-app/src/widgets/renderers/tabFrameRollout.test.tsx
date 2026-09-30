@@ -14,7 +14,7 @@ import GroupWidget from './GroupWidget';
 import InfoCardWidget from './InfoCardWidget';
 import KpiWidget from './KpiWidget';
 import MetricWidget from './MetricWidget';
-import { DEFAULT_TEXT_TITLE_FONT_SIZE } from './TextTitleWidget';
+import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../utils/dashboardTitleTypography';
 
 // Tab frame shape rollout (F2): kpi, metric-card, info-card and titled group take the tab shape
 // inside a dashboard grid; the standard shape keeps today's single framed element.
@@ -245,6 +245,26 @@ describe('tab frame shape rollout', () => {
             expect(title.style.fontSize).toBe('50px');
             // No CSS in jsdom: the tokens read as 0, so the tab is the bare line box (50 x 1.1).
             expect((container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement).style.getPropertyValue('--tab-frame-height')).toBe('55px');
+        });
+
+        it('never publishes a NaN tab height for an invalid stored size (falls back to the default size)', () => {
+            previewFrameShape('tab');
+            const stored = { icon: 'Group', titleFontSize: Number.NaN } as GroupWidgetConfig['displayOptions'];
+
+            const { container } = renderInGrid(<GroupWidget widget={makeGroup({ displayOptions: stored })} />);
+
+            const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Compresión 01').style.fontSize).toBe(`${DEFAULT_TEXT_TITLE_FONT_SIZE}px`);
+            // Tokens read as 0 in jsdom: 35 x 1.1.
+            expect(shell.style.getPropertyValue('--tab-frame-height')).toBe('38.5px');
+        });
+
+        it('clamps a stored size outside the allowed range', () => {
+            previewFrameShape('tab');
+            const huge = renderInGrid(<GroupWidget widget={makeGroup({ displayOptions: { icon: 'Group', titleFontSize: 5000 } })} />);
+
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Compresión 01').style.fontSize).toBe('200px');
+            expect((huge.container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement).style.getPropertyValue('--tab-frame-height')).toBe('220px');
         });
 
         it('keeps the group title exactly as today in the standard shape (uppercase in the body, no own size)', () => {
