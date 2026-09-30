@@ -298,9 +298,8 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
   - The tab height grows with the title font size so the text always has an even breathing space above and
     below; the tab grows DOWNWARD, into the widget (the widget's outer height never changes; the body's top line
     moves down with it). The icon placement rule and the unified silhouette follow the taller tab.
-  - Scope note to confirm with the user: the user said "solo en el tema Instrumento (como lo venimos haciendo)",
-    but the tab shape is the independent "Forma del marco" setting (combinable with any preset). F7 follows the
-    same rule as the other tab widgets unless the user decides to tie Pestaña to Instrumento.
+  - Scope (decided by the user 2026-09-29): Pestaña stays the independent "Forma del marco" setting, combinable
+    with any preset — NOT tied to Instrumento. F7 follows the same rule as the other tab widgets.
   - Property panel: the group's title needs the text-title "Tamaño" control (load the project skill
     `widget-property-panel` before touching property panels).
 
@@ -311,7 +310,7 @@ records this closeout on top of `ce94353`; working tree clean except the untrack
 Local `main` = `40ad436` (viewer entrance animation merged), 26 commits ahead of `origin/main`, NOT pushed.
 F1–F6 done and accepted live; F7 pending. Order agreed with the user:
 
-1. F7 — group widget tab title (above). Implement first (the user wants it before the closeout steps), with TDD,
+1. F7 — group widget tab title (above). Implement first (the user wants it before the closeout steps; Pestaña stays independent of the theme), with TDD,
    then a live look.
 2. Native review of the branch in slices (the whole branch, ~5500 lines, exceeds the reviewer budget —
    `lens_context_budget_exceeded`). Proposed slices from the F1 boundary `40ad436`: `..cc1450b` (F1, ~1600),
