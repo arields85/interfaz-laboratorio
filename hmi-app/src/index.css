@@ -463,6 +463,10 @@ h1, h2, h3, h4, h5, h6 {
  *                            la pestaña mide la caja de línea del título más este espacio por lado,
  *                            nunca menos que --tab-frame-height (por defecto = el de la pestaña estándar:
  *                            (25 px - 11 px x 1,5) / 2) (ver `utils/tabFrameHeight.ts`)
+ *   --tab-frame-trailing-gap separación entre los elementos de la franja superior de un gráfico con selector:
+ *                            pestaña, selector (contenido `trailing` del header) e ícono
+ *   --tab-frame-min-title    espacio mínimo para el rótulo del título; con menos, la pestaña del título se
+ *                            oculta en lugar de dibujarse bajo el selector (ver `utils/tabFrameTrailing.ts`)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --tab-frame-height: 25px;
@@ -485,6 +489,8 @@ h1, h2, h3, h4, h5, h6 {
   --tab-frame-icon-tab-gap: 8px;
   --tab-frame-icon-scale: 0.9;
   --tab-frame-title-pad-y: 4.25px;
+  --tab-frame-trailing-gap: 15px;
+  --tab-frame-min-title: 12px;
 }
 
 /* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
@@ -1931,5 +1937,45 @@ h1, h2, h3, h4, h5, h6 {
   /* Con ícono, la pestaña (y su título truncado) se detiene antes de él cuando ocupa la franja. */
   .hmi-tab-frame:has(> .hmi-tab-frame-icon-host > *) {
     --tab-frame-tab-reserve: var(--tab-frame-icon-reserve, var(--tab-frame-body-cut));
+  }
+
+  /* Contenido `trailing` del header (el selector de escala de un gráfico): en la franja superior, a la
+   * derecha, centrado verticalmente y a la izquierda del ícono. El anfitrión deja libre al final el ancho
+   * del ícono más un hueco (`--tab-frame-icon-strip-extent`, calculado por `WidgetFrame`) y no captura
+   * el puntero: solo sus hijos (los botones) lo hacen, así ese margen nunca tapa al ícono. `WidgetFrame`
+   * mide su ancho y publica `--tab-frame-tab-reserve` para que la pestaña del título se detenga antes. */
+  .hmi-tab-frame-trailing-host {
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    right: var(--tab-frame-icon-right);
+    display: flex;
+    align-items: center;
+    height: var(--tab-frame-height);
+    width: max-content;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .hmi-tab-frame-trailing-host > * {
+    pointer-events: auto;
+  }
+
+  .hmi-tab-frame-trailing-host:empty {
+    display: none;
+  }
+
+  .hmi-tab-frame:has(> .hmi-tab-frame-icon-host > *) > .hmi-tab-frame-trailing-host {
+    padding-right: var(--tab-frame-icon-strip-extent, 0px);
+  }
+
+  /* Sin espacio para el rótulo del título, la pestaña se oculta por completo (la silueta tampoco la dibuja). */
+  .hmi-tab-frame[data-tab-title-hidden='true'] > .hmi-tab-frame-tab {
+    visibility: hidden;
+  }
+
+  /* Header de un marco con contenido en la franja: solo ocupa lo que falta para llegar bajo la franja. */
+  .hmi-tab-frame-header-clearance {
+    height: var(--tab-frame-header-clearance, 0px);
   }
 }

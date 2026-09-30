@@ -44,6 +44,10 @@ describe('index.css tab frame shape', () => {
         // Breathing space above and below a title that has its own size (group): the standard tab's
         // 25 px around the 11 px x 1.5 line box of the standard title = 4.25 px.
         expect(root).toContain('--tab-frame-title-pad-y: 4.25px;');
+        // Chart widgets: the selector moves up into the strip; the gap between the strip elements and the
+        // least room a title label needs before its tab is hidden (lab rule).
+        expect(root).toContain('--tab-frame-trailing-gap: 15px;');
+        expect(root).toContain('--tab-frame-min-title: 12px;');
     });
 
     it('keeps the base .glass-panel rule untouched by the tab shape (opt-in classes only)', () => {
@@ -180,6 +184,43 @@ describe('index.css tab frame shape', () => {
         const body = ruleBody('\\.hmi-tab-frame:has\\(> \\.hmi-tab-frame-icon-host > \\*\\)');
 
         expect(body).toContain('--tab-frame-tab-reserve: var(--tab-frame-icon-reserve, var(--tab-frame-body-cut));');
+    });
+
+    it('places the header trailing content (the chart selector) in the strip, left of the icon, centered in the strip', () => {
+        const body = ruleBody('\\.hmi-tab-frame-trailing-host');
+
+        expect(body).toContain('position: absolute;');
+        expect(body).toContain('top: 0;');
+        expect(body).toContain('right: var(--tab-frame-icon-right);');
+        expect(body).toContain('height: var(--tab-frame-height);');
+        expect(body).toContain('align-items: center;');
+        expect(body).toContain('width: max-content;');
+        expect(body).toContain('white-space: nowrap;');
+        // Above the tab and the icon host in paint order; only its children take pointer events, so the
+        // padding that clears the icon never blocks it.
+        expect(body).toContain('z-index: 2;');
+        expect(body).toContain('pointer-events: none;');
+        expect(ruleBody('\\.hmi-tab-frame-trailing-host > \\*')).toContain('pointer-events: auto;');
+    });
+
+    it('leaves the icon its width plus the gap at the end of the trailing host, only when the frame holds an icon', () => {
+        const body = ruleBody('\\.hmi-tab-frame:has\\(> \\.hmi-tab-frame-icon-host > \\*\\) > \\.hmi-tab-frame-trailing-host');
+
+        expect(body).toContain('padding-right: var(--tab-frame-icon-strip-extent, 0px);');
+    });
+
+    it('takes no space while nothing is portaled into the trailing host', () => {
+        expect(ruleBody('\\.hmi-tab-frame-trailing-host:empty')).toContain('display: none;');
+    });
+
+    it('hides the title tab cleanly (no overlapped label) when the frame reports no room for it', () => {
+        const body = ruleBody("\\.hmi-tab-frame\\[data-tab-title-hidden='true'\\] > \\.hmi-tab-frame-tab");
+
+        expect(body).toContain('visibility: hidden;');
+    });
+
+    it('lets the header row of a frame with strip content take only the clearance under the strip', () => {
+        expect(ruleBody('\\.hmi-tab-frame-header-clearance')).toContain('height: var(--tab-frame-header-clearance, 0px);');
     });
 
     it('does not hardcode colors in the tab rules other than the fill token definition', () => {

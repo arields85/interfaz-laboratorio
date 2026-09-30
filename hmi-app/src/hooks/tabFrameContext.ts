@@ -13,6 +13,11 @@ export interface TabFrameContextValue {
     titleHost: HTMLElement | null;
     /** The shell element that receives the header icon (null until it is mounted). */
     iconHost: HTMLElement | null;
+    /**
+     * The shell element in the top strip, left of the icon, that receives the header's trailing
+     * content (a chart's period selector; null until it is mounted).
+     */
+    trailingHost: HTMLElement | null;
     /** Alert state of the widget frame (`widget-state-*`): the tab title takes its color. */
     alertState: TabFrameAlertState | null;
     /**
@@ -24,6 +29,13 @@ export interface TabFrameContextValue {
 
 export type TabFrameAlertState = 'warning' | 'critical';
 
+/**
+ * True inside the trailing host of a tab frame (the top strip). Controls that have a strip look
+ * (the period selector's `underline` variant) read it to pick it in ONE place instead of each
+ * widget repeating the condition.
+ */
+export const TabFrameStripContext = createContext(false);
+
 /** `null` whenever the enclosing frame is not the tab shape: headers then render as today. */
 export const TabFrameContext = createContext<TabFrameContextValue | null>(null);
 
@@ -33,7 +45,9 @@ export const TabFrameContext = createContext<TabFrameContextValue | null>(null);
  * widget so sibling layers that cannot see the tab (builder selection ring, placement ghost, viewer
  * entrance overlays, hover actions) can follow the tab + body silhouette. A frame whose tab is
  * taller than the standard one (a title with its own size) passes the effective tab height (px) as
- * the second argument; without it the layers read `--tab-frame-height`.
+ * the second argument; without it the layers read `--tab-frame-height`. `0` means the tab is not
+ * measured yet; `TAB_FRAME_TITLE_HIDDEN` (`utils/tabFramePath.ts`) means the frame hid its title tab
+ * (a chart whose selector leaves the title no room): the silhouette then has no tab.
  */
 export type TabFrameReporter = (tabWidthPx: number | null, tabHeightPx?: number) => void;
 

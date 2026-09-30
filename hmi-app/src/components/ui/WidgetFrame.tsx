@@ -1,11 +1,12 @@
-import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from 'react';
 import { useTabFrameActive } from '../../hooks/useTabFrameActive';
 import { useTabFrameGeometry } from '../../hooks/useTabFrameGeometry';
 import { useTabFrameHeight } from '../../hooks/useTabFrameHeight';
 import { useTabFrameIconPlacement } from '../../hooks/useTabFrameIconPlacement';
+import { useTabFrameStrip } from '../../hooks/useTabFrameStrip';
 import { TabFrameContext, TabFrameReporterContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
-import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
+import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, TAB_FRAME_TITLE_HIDDEN, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
 
 // =============================================================================
 // WidgetFrame
@@ -38,6 +39,12 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFrame
 // slanted-side cut scaled to it as its own `--tab-frame-tab-cut` (the angle never changes), the
 // silhouette and the icon placement use them, and it is reported next to the tab width for the layers
 // outside the shell. The tab grows downward into the widget; the outer size never changes.
+//
+// Header trailing content (a chart's period selector) is portaled into a host in the top strip, left of the
+// icon (`useTabFrameStrip`): the tab's reserve grows by the host width plus one gap
+// (`--tab-frame-trailing-gap`), and a tab whose label would have less than `--tab-frame-min-title` of room
+// is hidden (`data-tab-title-hidden`, reported as `TAB_FRAME_TITLE_HIDDEN`, silhouette without the tab).
+// The header then keeps only the clearance under the strip (`--tab-frame-header-clearance`).
 // =============================================================================
 
 /** Inline style of the tab shell: the radius plus the custom properties computed from the tokens. */
@@ -46,7 +53,19 @@ type TabFrameShellStyle = CSSProperties & {
     '--tab-frame-tab-cut'?: string;
     '--tab-frame-icon-top'?: string;
     '--tab-frame-icon-reserve'?: string;
+    '--tab-frame-tab-reserve'?: string;
+    '--tab-frame-icon-strip-extent'?: string;
+    '--tab-frame-header-clearance'?: string;
 };
+
+/** Writes `node` to a ref that is either an object or a callback (the content element is ref'd twice). */
+function assignRef<T>(ref: Ref<T> | undefined, node: T | null) {
+    if (typeof ref === 'function') {
+        ref(node);
+    } else if (ref) {
+        ref.current = node;
+    }
+}
 
 const ALERT_STATE_PATTERN = /(?:^|\s)widget-state-(warning|critical)(?:\s|$)/;
 
@@ -95,21 +114,30 @@ export default function WidgetFrame({
     const shellRef = useRef<HTMLDivElement>(null);
     const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
     const [iconHost, setIconHost] = useState<HTMLElement | null>(null);
+    const [trailingHost, setTrailingHost] = useState<HTMLElement | null>(null);
+    const [content, setContent] = useState<HTMLElement | null>(null);
     const [tabWidth, setTabWidth] = useState(0);
     const alertState = resolveAlertState(frameClassName);
     const titleFontSize = tabActive ? (tabTitleFontSize ?? null) : null;
     const tabContext = useMemo(
-        () => ({ titleHost, iconHost, alertState, titleFontSize }),
-        [titleHost, iconHost, alertState, titleFontSize],
+        () => ({ titleHost, iconHost, trailingHost, alertState, titleFontSize }),
+        [titleHost, iconHost, trailingHost, alertState, titleFontSize],
     );
+    // The content element is measured by the strip (its padding) and still handed to the widget's own ref.
+    const setContentRef = useCallback((node: HTMLElement | null) => {
+        setContent(node);
+        assignRef(ref, node);
+    }, [ref]);
     const reportTabWidth = useContext(TabFrameReporterContext);
     // Effective tab size of a title with its own size (height capped so the body keeps room, and the
     // slanted-side cut scaled with it); null keeps the `--tab-frame-height` / `--tab-frame-tab-cut` tokens.
     const ownTabSize = useTabFrameHeight(titleFontSize, shellRef);
     const tabHeight = ownTabSize?.height;
-    const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null, tabHeight);
-    const silhouette = geometry ? buildTabFramePath(geometry) : null;
     const iconPlacement = useTabFrameIconPlacement(shellRef, tabActive, tabHeight);
+    const strip = useTabFrameStrip({ shellRef, trailingHost, content, active: tabActive, tabHeight, iconPlacement });
+    const titleHidden = strip?.titleHidden ?? false;
+    const geometry = useTabFrameGeometry(shellRef, tabActive ? (titleHidden ? TAB_FRAME_TITLE_HIDDEN : tabWidth) : null, tabHeight);
+    const silhouette = geometry ? buildTabFramePath(geometry) : null;
     // Tab height, icon top and the space the tab leaves free for it (index.css, `.hmi-tab-frame-icon-host`).
     const shellStyle: TabFrameShellStyle = { borderRadius: 'var(--frame-radius-rest)' };
 
@@ -123,17 +151,26 @@ export default function WidgetFrame({
         shellStyle['--tab-frame-icon-reserve'] = `${iconPlacement.reserve}px`;
     }
 
+    // Strip content (a chart's selector): the tab stops before it and the header row keeps only the clearance.
+    if (strip && strip.reserve !== null) {
+        shellStyle['--tab-frame-tab-reserve'] = `${strip.reserve}px`;
+        shellStyle['--tab-frame-icon-strip-extent'] = `${strip.iconExtent}px`;
+        shellStyle['--tab-frame-header-clearance'] = `${strip.clearance}px`;
+    }
+
     // Publish the tab width (it follows the title) for the layers that trace the silhouette. It is
     // published from the very first layout pass: 0 means "tab shape, width not measured yet" so those
     // layers wait for the silhouette instead of showing a rectangle; `null` only when the frame is not
-    // the tab shape (or unmounts).
+    // the tab shape (or unmounts); `TAB_FRAME_TITLE_HIDDEN` when the title tab is hidden.
     useLayoutEffect(() => {
         if (!tabActive) {
             return undefined;
         }
 
         const publish = () => {
-            const measured = titleHost && titleHost.offsetWidth > 0 ? titleHost.offsetWidth : 0;
+            const measured = titleHidden
+                ? TAB_FRAME_TITLE_HIDDEN
+                : titleHost && titleHost.offsetWidth > 0 ? titleHost.offsetWidth : 0;
             setTabWidth(measured);
 
             if (tabHeight === undefined) {
@@ -152,7 +189,7 @@ export default function WidgetFrame({
         resizeObserver.observe(titleHost);
 
         return () => resizeObserver.disconnect();
-    }, [tabActive, titleHost, reportTabWidth, tabHeight]);
+    }, [tabActive, titleHost, reportTabWidth, tabHeight, titleHidden]);
 
     // Leaving the tab shape (or unmounting) is the only thing that reports the standard shape.
     useLayoutEffect(() => {
@@ -182,9 +219,12 @@ export default function WidgetFrame({
             ref={shellRef}
             data-widget-frame-shape="tab"
             data-alert-state={alertState ?? undefined}
+            data-tab-title-hidden={titleHidden ? 'true' : undefined}
             style={shellStyle}
             className={['hmi-tab-frame group relative w-full h-full min-h-0', outerClassName].filter(Boolean).join(' ')}
         >
+            {/* First child: the strip content comes before the chart in keyboard order (it paints above via z-index). */}
+            <div ref={setTrailingHost} data-testid="tab-frame-trailing-host" className="hmi-tab-frame-trailing-host" />
             {alertState && (
                 <div
                     data-testid="tab-frame-glow"
@@ -212,7 +252,7 @@ export default function WidgetFrame({
                 </svg>
             </div>
             <Tag
-                ref={ref as Ref<never>}
+                ref={setContentRef as Ref<never>}
                 className={['relative', className].filter(Boolean).join(' ')}
                 {...rest}
             >

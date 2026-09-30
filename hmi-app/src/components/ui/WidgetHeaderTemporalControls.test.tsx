@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { TabFrameStripContext } from '../../hooks/tabFrameContext';
 import WidgetHeaderTemporalControls from './WidgetHeaderTemporalControls';
 
 describe('WidgetHeaderTemporalControls', () => {
@@ -200,5 +201,38 @@ describe('WidgetHeaderTemporalControls', () => {
         await user.click(disabledButton);
 
         expect(handleSelect).not.toHaveBeenCalled();
+    });
+
+    describe('in the top strip of the tab frame shape', () => {
+        const groups = [
+            {
+                selectedValue: '5m',
+                onSelect: vi.fn(),
+                options: [
+                    { value: '1m', label: '1m' },
+                    { value: '5m', label: '5m' },
+                ],
+            },
+        ];
+
+        it('renders the underline variant even when the widget asks for pill (decided here, once, for every chart)', () => {
+            render(
+                <TabFrameStripContext.Provider value>
+                    <WidgetHeaderTemporalControls variant="pill" indicatorTestId="temporal-indicator" groups={groups} />
+                </TabFrameStripContext.Provider>,
+            );
+
+            const activeButton = screen.getByRole('button', { name: '5m' });
+            expect(activeButton).toHaveClass('group/control', 'transition-colors', 'text-industrial-text');
+            expect(activeButton).not.toHaveClass('theme-button', 'theme-button-segment-active');
+            expect(within(activeButton).getByTestId('temporal-indicator')).toHaveClass('bg-current');
+            expect(within(screen.getByRole('button', { name: '1m' })).getByTestId('temporal-indicator')).toHaveClass('bg-transparent');
+        });
+
+        it('keeps the requested pill variant everywhere else (standard frame, no strip)', () => {
+            render(<WidgetHeaderTemporalControls variant="pill" groups={groups} />);
+
+            expect(screen.getByRole('button', { name: '5m' })).toHaveClass('theme-button', 'theme-button-segment-active');
+        });
     });
 });

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsDataMode } from '../../domain/analyticsDataMode.types';
 import AnalyticsDataModeDot from './AnalyticsDataModeDot';
-import { TabFrameContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
+import { TabFrameContext, TabFrameStripContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
 import { buildDashboardTitleTypography } from '../../utils/dashboardTitleTypography';
 import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 
@@ -17,6 +17,9 @@ import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 //   - Subtítulo opcional debajo del título (mismo tamaño, color semántico del ícono)
 //   - Ícono a la derecha: size=24, strokeWidth=2, shrink-0, color semántico
 //   - Trailing content opcional a la derecha del ícono (ej: indicador lumínico)
+//   - Forma Pestaña: el título (y el punto de modo) va en la pestaña del marco y el ícono en la esquina
+//     superior derecha; el trailing (ej. el selector de escala de un gráfico) sube a la franja superior,
+//     a la izquierda del ícono, y entonces la fila del header no ocupa altura (ver `WidgetFrame`).
 //
 // Conceptos:
 //   - `subtitle` (header): texto secundario en el encabezado, junto al título.
@@ -183,9 +186,12 @@ export default function WidgetHeader({
     const alignmentClassName = alignment === 'standard' ? '-translate-y-1' : '';
     const centered = iconPosition === 'centered';
     const iconOnLeft = iconPosition === 'left';
-    // Tab frame shape: the title (and its data-mode dot) live in the tab, the icon in the cut-off
-    // corner; the title row keeps its height so the subtitle and the content below never move.
-    const inTab = tabFrame !== null && !centered && !iconOnLeft;
+    // Tab frame shape: the title (and its data-mode dot) live in the tab and the icon in the top-right
+    // corner (whatever its position in the standard header). Without trailing content the title row
+    // keeps its height so the subtitle and the content below never move; WITH trailing content (a chart's
+    // selector) everything lives in the strip and the row only keeps the clearance under it.
+    const inTab = tabFrame !== null && !centered;
+    const trailingInStrip = inTab && Boolean(trailing);
     const dataModeNode = dataMode ? (
         <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId={dataModeTestId} onTab={inTab} />
     ) : null;
@@ -210,6 +216,38 @@ export default function WidgetHeader({
         </span>
     );
 
+    // Everything the tab frame hosts outside the header row: title, icon and trailing content.
+    const tabPortals = inTab ? (
+        <>
+            {tabFrame.titleHost && createPortal(
+                <>
+                    {titleLeading}
+                    {dataModeNode}
+                    {titleNode}
+                </>,
+                tabFrame.titleHost,
+            )}
+
+            {/* El ícono se dibuja en el anfitrión del marco (`WidgetFrame`); en el header queda, según el
+                caso, un hueco invisible del mismo tamaño para que la fila conserve su alto y su ancho. */}
+            {iconNode && tabFrame.iconHost && createPortal(
+                <span data-tab-frame-slot="icon" className="hmi-tab-frame-icon flex items-center">
+                    {iconNode}
+                </span>,
+                tabFrame.iconHost,
+            )}
+
+            {trailingInStrip && tabFrame.trailingHost && createPortal(
+                <TabFrameStripContext.Provider value>
+                    <div data-tab-frame-slot="trailing" className="flex items-center gap-2 leading-none">
+                        {trailing}
+                    </div>
+                </TabFrameStripContext.Provider>,
+                tabFrame.trailingHost,
+            )}
+        </>
+    ) : null;
+
     if (centered) {
         const hasTitle = title.trim().length > 0;
 
@@ -229,45 +267,42 @@ export default function WidgetHeader({
         );
     }
 
+    if (trailingInStrip) {
+        return (
+            <div className={`grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] gap-y-0 ${className}`}>
+                {tabPortals}
+                {/* Título, ícono y trailing viven en la franja: la fila 1 solo deja libre la franja (el gráfico gana el resto). */}
+                <div aria-hidden="true" className="row-start-1 hmi-tab-frame-header-clearance" />
+                {hasSubtitle && (
+                    <span className="row-start-2 min-w-0 truncate uppercase" style={{ color: iconColor }}>
+                        {subtitle}
+                    </span>
+                )}
+            </div>
+        );
+    }
+
     return (
         <div className={`grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] gap-y-0 ${alignmentClassName} ${className}`}>
+            {tabPortals}
             {/* Fila 1: título + bloque derecho. El subtítulo no participa de esta alineación. */}
             <div className="row-start-1 flex items-center justify-between gap-2">
                 {inTab ? (
                     <>
                         {/* Pestaña: el título va en la pestaña del marco; este espaciador invisible
                             conserva la altura de la fila para que nada debajo se mueva. */}
-                        {tabFrame.titleHost && createPortal(
-                            <>
-                                {titleLeading}
-                                {dataModeNode}
-                                {titleNode}
-                            </>,
-                            tabFrame.titleHost,
-                        )}
                         <div className="flex min-w-0 flex-1 items-center gap-2">
                             <span aria-hidden="true" className="invisible min-w-0 flex-1 truncate uppercase">{'\u00A0'}</span>
                         </div>
 
-                        {/* El ícono se dibuja en el anfitrión del marco (`WidgetFrame`); aquí queda un hueco
-                            invisible del mismo tamaño para que la fila conserve su alto y su ancho. */}
-                        {iconNode && tabFrame.iconHost && createPortal(
-                            <span data-tab-frame-slot="icon" className="hmi-tab-frame-icon flex items-center">
-                                {iconNode}
-                            </span>,
-                            tabFrame.iconHost,
-                        )}
-                        {(iconNode || trailing) && (
+                        {iconNode && (
                             <div className="flex items-center gap-2 shrink-0 leading-none">
-                                {iconNode && (
-                                    <span
-                                        data-tab-frame-slot="icon-placeholder"
-                                        aria-hidden="true"
-                                        className="invisible shrink-0"
-                                        style={{ width: TAB_FRAME_ICON_SIZE_PX, height: TAB_FRAME_ICON_SIZE_PX }}
-                                    />
-                                )}
-                                {trailing}
+                                <span
+                                    data-tab-frame-slot="icon-placeholder"
+                                    aria-hidden="true"
+                                    className="invisible shrink-0"
+                                    style={{ width: TAB_FRAME_ICON_SIZE_PX, height: TAB_FRAME_ICON_SIZE_PX }}
+                                />
                             </div>
                         )}
                     </>

@@ -1,3 +1,6 @@
+import { useContext } from 'react';
+import { TabFrameStripContext } from '../../hooks/tabFrameContext';
+
 export interface WidgetHeaderTemporalControlOption<TValue extends string = string> {
     value: TValue;
     label: string;
@@ -13,6 +16,11 @@ export interface WidgetHeaderTemporalControlGroup<TValue extends string = string
 }
 
 export interface WidgetHeaderTemporalControlsProps {
+    /**
+     * Look of the options. Inside the top strip of the tab frame shape (`TabFrameStripContext`, where
+     * `WidgetHeader` places its trailing content) every widget gets `underline`, whatever it asks for:
+     * that decision lives here, not in each chart.
+     */
     variant: 'pill' | 'underline';
     groups: ReadonlyArray<WidgetHeaderTemporalControlGroup>;
     testId?: string;
@@ -22,13 +30,16 @@ export interface WidgetHeaderTemporalControlsProps {
 }
 
 export default function WidgetHeaderTemporalControls({
-    variant,
+    variant: requestedVariant,
     groups,
     testId,
     indicatorTestId,
     separatorTestId,
     className = '',
 }: WidgetHeaderTemporalControlsProps) {
+    const inTabStrip = useContext(TabFrameStripContext);
+    const variant = inTabStrip ? 'underline' : requestedVariant;
+
     return (
         <div data-testid={testId} className={`flex items-center gap-2.5 ${className}`.trim()}>
             {groups.map((group, groupIndex) => (
