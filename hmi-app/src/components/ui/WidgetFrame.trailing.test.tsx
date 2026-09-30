@@ -29,6 +29,7 @@ const TOKENS: Record<string, string> = {
     '--tab-frame-pad-end': '4.8px',
     '--tab-frame-trailing-gap': '15px',
     '--tab-frame-min-title': '12px',
+    '--tab-frame-strip-gap': '12px',
 };
 
 function mockLayout({ frameWidth, hostWidth, tabWidth = 90 }: { frameWidth: number; hostWidth: number; tabWidth?: number }) {
@@ -168,13 +169,15 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             expect(screen.getByTestId('tab-frame-tab')).not.toContainElement(subtitle);
         });
 
-        it('publishes the clearance: the tab height minus the padding and the border above the header (25 - 20 - 1)', () => {
+        it('publishes the clearance: what is left to reach the strip bottom (25 - 20 - 1) plus the gap under the strip (12)', () => {
             previewFrameShape('tab');
             mockLayout({ frameWidth: 460, hostWidth: 157 });
 
             const { container } = renderChart();
 
-            expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-header-clearance')).toBe('4px');
+            // The content's first element (a chart, its unit label, its summary) starts BELOW the strip,
+            // never on the body's top line or under the selector.
+            expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-header-clearance')).toBe('16px');
         });
 
         it('makes the tab stop before the selector: reserve = right offset + host width + one gap', () => {

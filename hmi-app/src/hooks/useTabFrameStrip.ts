@@ -97,7 +97,8 @@ export function useTabFrameStrip({
                 reserve: hasTrailing ? trailing.reserve : null,
                 iconExtent: hasTrailing ? resolveTabFrameStripExtent({ inStrip: iconInStrip, iconSize, gap }) : 0,
                 titleHidden: trailing.titleHidden,
-                clearance: Math.max(0, Math.round(((tabHeight ?? token('--tab-frame-height')) - above) * 100) / 100),
+                // Up to the strip bottom, plus the gap under it: the first content never sits on the body's top line.
+                clearance: Math.max(0, Math.round(((tabHeight ?? token('--tab-frame-height')) - above + token('--tab-frame-strip-gap')) * 100) / 100),
             };
 
             setLayout((current) => (isSameLayout(current, next) ? current : next));

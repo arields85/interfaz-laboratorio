@@ -48,6 +48,7 @@ describe('index.css tab frame shape', () => {
         // least room a title label needs before its tab is hidden (lab rule).
         expect(root).toContain('--tab-frame-trailing-gap: 15px;');
         expect(root).toContain('--tab-frame-min-title: 12px;');
+        expect(root).toContain('--tab-frame-strip-gap: 12px;');
     });
 
     it('keeps the base .glass-panel rule untouched by the tab shape (opt-in classes only)', () => {

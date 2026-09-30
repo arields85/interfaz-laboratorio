@@ -467,6 +467,9 @@ h1, h2, h3, h4, h5, h6 {
  *                            pestaña, selector (contenido `trailing` del header) e ícono
  *   --tab-frame-min-title    espacio mínimo para el rótulo del título; con menos, la pestaña del título se
  *                            oculta en lugar de dibujarse bajo el selector (ver `utils/tabFrameTrailing.ts`)
+ *   --tab-frame-strip-gap    aire bajo la franja en un marco cuyo header vive entero en la franja (gráfico
+ *                            con selector): el contenido (unidad, resumen, gráfico) empieza esta distancia
+ *                            por debajo de la línea superior del cuerpo (ver `hooks/useTabFrameStrip.ts`)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --tab-frame-height: 25px;
@@ -491,6 +494,7 @@ h1, h2, h3, h4, h5, h6 {
   --tab-frame-title-pad-y: 4.25px;
   --tab-frame-trailing-gap: 15px;
   --tab-frame-min-title: 12px;
+  --tab-frame-strip-gap: 12px;
 }
 
 /* ── Motor de tema: fondo propio del contenedor de grupo (GroupWidget) ────
