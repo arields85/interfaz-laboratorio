@@ -42,11 +42,11 @@ function renderTabFrame(radiusPx: number) {
     );
 }
 
-function glowClipPath(): string {
-    const glow = document.querySelector<HTMLElement>('.hmi-tab-frame-glow, [style*="clip-path"]');
-    expect(glow).not.toBeNull();
+function surfaceClipPath(): string {
+    const surface = document.querySelector<HTMLElement>('[data-testid="tab-frame-surface"]');
+    expect(surface).not.toBeNull();
 
-    return glow?.style.clipPath ?? '';
+    return surface?.style.clipPath ?? '';
 }
 
 describe('WidgetFrame tab shell follows the frame radius token', () => {
@@ -64,11 +64,11 @@ describe('WidgetFrame tab shell follows the frame radius token', () => {
 
     it('builds a different silhouette when the computed frame radius changes', () => {
         const small = renderTabFrame(4);
-        const smallPath = glowClipPath();
+        const smallPath = surfaceClipPath();
         small.unmount();
 
         renderTabFrame(16);
-        const largePath = glowClipPath();
+        const largePath = surfaceClipPath();
 
         expect(smallPath).not.toBe('');
         expect(largePath).not.toBe('');

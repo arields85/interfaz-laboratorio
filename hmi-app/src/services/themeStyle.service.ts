@@ -401,7 +401,10 @@ function snapRadiusToLimits(value: number): number {
     return normalizeStepValue(value, min, max, step);
 }
 
-/** Valid stored radius overrides by preset id (out-of-range clamped, off-step snapped, unknown presets dropped). */
+/**
+ * Valid stored radius overrides by preset id (out-of-range clamped, off-step snapped, unknown presets dropped, and a
+ * value that lands on the preset's own radius dropped: that is no override).
+ */
 export function readStoredFrameRadiusOverrides(): Record<string, number> {
     try {
         const raw = localStorage.getItem(FRAME_RADIUS_STORAGE_KEY);
@@ -414,7 +417,11 @@ export function readStoredFrameRadiusOverrides(): Record<string, number> {
         for (const preset of THEME_STYLE_PRESETS) {
             const value = (parsed as Record<string, unknown>)[preset.id];
             if (typeof value === 'number' && Number.isFinite(value)) {
-                overrides[preset.id] = snapRadiusToLimits(value);
+                const radiusPx = snapRadiusToLimits(value);
+                // A value equal to the preset's own radius is no override (same rule as the write path).
+                if (radiusPx !== preset.frame.rest.radiusPx) {
+                    overrides[preset.id] = radiusPx;
+                }
             }
         }
 

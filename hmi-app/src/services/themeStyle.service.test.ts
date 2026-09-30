@@ -558,6 +558,13 @@ describe('frame radius override (per preset)', () => {
         expect(readStoredFrameRadiusOverrides()).toEqual({ classic: 7, outline: 24, instrument: 0 });
     });
 
+    it('drops a stored value that lands on the preset radius once clamped or snapped (no override)', () => {
+        // Clásico 30 -> 24 (its radius), Contorno 0.4 -> 0 (its radius), Instrumento 5.2 -> 5 (its radius).
+        localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, JSON.stringify({ classic: 30, outline: 0.4, instrument: 5.2 }));
+
+        expect(readStoredFrameRadiusOverrides()).toEqual({});
+    });
+
     it('previews the preset radius unchanged when no override is given', () => {
         previewThemeStyleOnDocument(OUTLINE_THEME_STYLE_ID);
 
