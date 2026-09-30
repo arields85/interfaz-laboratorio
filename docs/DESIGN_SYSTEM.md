@@ -86,6 +86,25 @@ Configuración general → Tema → "Forma del marco" elige entre **Estándar** 
 
 La altura de la pestaña, el recorte, el chaflán del cuerpo, el relleno, el color del texto y los tokens del ícono son la elección del laboratorio de estilos del 2026-09-29 (con el marco de Instrumento: radio de 5 px); se afinan desde `index.css`.
 
+## Calado del ícono
+
+Configuración general → Tema → "Calado del ícono" (interruptor, apagado por defecto) hace **transparente el fondo del widget dentro de un círculo centrado en el ícono del header**, de modo que el ícono no queda sobre el relleno de vidrio: se ve lo que hay detrás del widget a través del círculo, con un anillo fino en su borde. El contenido (ícono, título, valores) no cambia.
+
+- **Cuándo aplica:** solo con el tema **Clásico**, la forma de marco **Estándar**, el ajuste activado y un widget del grid del dashboard (visor y builder) con ícono en el header. Cualquier otra combinación (otros temas, forma Pestaña, widgets sin ícono, el contenedor `group`, widgets de header-slot, diálogos y páginas) se dibuja exactamente como antes. La sección del Tema avisa ("Ahora no se aplica") cuando la selección actual no lo admite; el interruptor sigue visible.
+- **Persistencia:** como el resto de la configuración visual, solo se guarda el override (`hmi-icon-cutout` = `true`; apagado elimina la clave) y el código es la fuente del valor por defecto. Vive en `store/iconCutout.store.ts` (estado vivo) y `services/iconCutout.service.ts` (persistencia y vista previa); entra en el flujo sucio / Guardar / Descartar de la pestaña Tema. Qué tema está activo lo informa `store/themeStylePreset.store.ts`, escrito por `themeStyle.service` al aplicar un tema al documento.
+- **Elegibilidad en un solo lugar:** `hooks/useIconCutoutActive.ts` (ajuste + Clásico + Estándar + grid + `supportsIconCutout`, que es la lista de la forma Pestaña sin `group`). `WidgetFrame` lo usa solo en su rama estándar.
+- **Medición:** `hooks/useIconCutoutGeometry.ts` busca el ícono del header (`data-header-icon`, que dibuja `WidgetHeader`), mide su centro respecto de la caja del marco y publica en el marco `data-icon-cutout="true"`, `--icon-cutout-x`, `--icon-cutout-y` y `--icon-cutout-half` (mitad del tamaño renderizado). Vuelve a medir antes de pintar cuando cambia el tamaño del marco o del ícono (`ResizeObserver`) o el contenido del marco (la posición del ícono derecha / izquierda / centrada mueve el ícono); un marco sin ícono visible no se marca y conserva su aspecto. Un marco escalado (zoom del builder) se convierte a píxeles de layout con la razón entre su ancho renderizado y su `offsetWidth`.
+- **Mecanismo (`index.css`, `[data-icon-cutout]`, opt-in por atributo):** el fondo, el desenfoque y el borde del marco pasan a un `::before` (`inset: -1px`, o `-2px` con alerta) con `mask-image` (y `-webkit-mask-image`) radial centrado en el ícono; el acento de esquina (`::after`) usa la misma máscara; el anillo es la capa superior del mismo `::before`. El marco deja su propio `background`, color de borde y `backdrop-filter` en `none` (también en hover) y amplía su recorte con `overflow-clip-margin` (1 px, 2 px con alerta) para que el `::before` cubra el área del borde. El reposo/hover sigue saliendo de los tokens `--frame-*` (el `::before` los hereda); en `widget-state-warning/-critical` el fondo de estado y su borde de 2 px (35 % / 55 % en hover) también pasan al `::before` y el brillo exterior (`box-shadow`) queda en el marco (no entra en el círculo). La regla base `.glass-panel` no cambia. Limitación: `overflow-clip-margin` no lo soporta Safari; allí el borde del `::before` queda recortado (el relleno y el círculo se ven igual).
+
+| Token | Valor inicial | Uso |
+|-------|---------------|-----|
+| `--icon-cutout-margin` | `6px` | Margen entre el ícono y el borde del círculo (radio = mitad del ícono medido + margen) |
+| `--icon-cutout-feather` | `0px` | Suavizado del borde del círculo, centrado en el radio (0 = borde duro) |
+| `--icon-cutout-ring` | `1` | 1 = anillo fino sobre el borde del círculo, 0 = sin anillo |
+| `--icon-cutout-ring-width` | `1px` | Grosor del anillo (en alerta lo fija la regla del estado a 2 px, el grosor de su borde) |
+
+El anillo usa el color del borde del marco (`--frame-border`) y, en alerta, el color del estado (35 % en reposo, 55 % en hover). Margen 6 px, borde duro y anillo activado son la elección del laboratorio de estilo (2026-09-30); hoy son tokens, no controles de la interfaz.
+
 ## Entrada animada del visor
 
 Al entrar a un dashboard o cambiar de vista, el visor arma la pantalla con movimiento: los marcos aparecen en orden aleatorio, los indicadores (barra y aro) se llenan hasta su valor y los gráficos SVG se revelan de izquierda a derecha. Es CSS puro, no retrasa ni condiciona la carga de datos, no se reproduce con el refresco periódico y queda desactivada con `prefers-reduced-motion`. Solo aplica bajo el marco del visor (`[data-viewer-entrance='true']`): el builder nunca anima.
