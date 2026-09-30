@@ -404,7 +404,7 @@ separate user decision. RDD on: work-unit commits assessed `--committed-only` fr
 
 User verdict of the live look (2026-09-30): F8 short-group behavior "funciona perfecto"; the group title shown as typed
 (no uppercase) is confirmed correct. Corrections requested: the group title default size and a constant tab slope.
-Pending, NOT part of F9: **F10** — builder hover actions (lock/copy/delete) above the tab; scope to be confirmed by the user.
+Not part of F9: **F10** — builder hover actions (lock/copy/delete) above the tab; DONE, see the F10 section below.
 
 - [x] **F9** — Two corrections. Route: delegated writer (writer trigger: 2+ non-trivial files).
   - [x] Group title default size = 30 (user: "30 tiene que ser el valor por defecto"). `DEFAULT_GROUP_TITLE_FONT_SIZE = 30` next to
@@ -440,7 +440,35 @@ Pending, NOT part of F9: **F10** — builder hover actions (lock/copy/delete) ab
     angle as the other widgets' tabs; the builder rings/ghosts and the viewer entrance outline follow the scaled cut; the shape switch
     and the resize re-cap keep the cut in step with the height.
 
-## Next step — EXACT RETURN POINT (session closed 2026-09-29)
+## F10 — Builder hover actions above the tab (user, 2026-09-30)
+
+User request from the live look (screenshot: on a titled group the lock/copy/delete buttons straddled the tab's bottom
+edge): "los botones, eliminar copiar y candado, deben aparecer arriba de la pestaña". Scope confirmed by the user when
+asked (group only or every tab widget?): "subí los botones al borde superior del widget y de todos los widgets con
+pestaña". This supersedes the F3 behavior (actions one tab height lower, on the body's top line).
+
+- [x] **F10** — In the tab shape the hover actions stay on the widget's top edge, above the tab, whatever the tab height:
+  the same position as the standard frame, for EVERY tab widget. Route: parent inline (one mechanical file + its test +
+  one doc line). `BuilderCanvas` passes `top={resolveWidgetSurfaceInset(widget)}`; `resolveHoverActionsTop` is deleted
+  (the reported tab height is still used by the selection rings and the placement ghosts). `docs/DESIGN_SYSTEM.md` updated.
+  - RED: 2 failed in `BuilderCanvas.test.tsx` (tab widget and taller tab still offset by the tab height) -> GREEN 89/89.
+  - Commit `b35a532` fix(builder): keep the hover actions on the widget top edge, above the tab (14+/26-). GGA passed.
+  - Final commands (in `hmi-app/`, before the commit, same tree): `npx tsc -b` clean; `npm run lint` clean; `npm test`
+    256 files / 3323 tests passed; `npm run build` ok.
+  - Needs the browser: the buttons sit on the top edge of the tab/widget for the group and for the 25 px tab widgets.
+
+Review S7 (`ea955e3..b35a532`: F8 follow-ups + F9 + F10, 23 files / 447 lines, medium, `review-reliability`; assess
+`review_due` `slice_budget_reached`; consent granted in advance): APPROVED and acknowledged (`review-2d9788e6a8b6352d`,
+burned). Reviewed boundary is now `b35a532`. Advisory: R3-hover-actions-scope-unrecorded (WARNING: this document still
+said F10 was pending) — resolved by this section; R3-fallback-unvalidated (SUGGESTION: `normalizeTitleFontSize` returns
+the `fallback` argument unvalidated; both callers pass in-range constants) — recorded, not in scope.
+
+## Next step — EXACT RETURN POINT (updated 2026-09-30)
+
+CURRENT STATE: F1–F10 implemented; native review S1–S7 APPROVED (reviewed boundary `b35a532`); working tree clean except
+the untracked `.gga`. WAITING FOR: the user's second live look (group default 30, constant slope, hover actions on the
+top edge). Then step 3 (fast-forward merge, on the user's OK) and step 4 (push, when the user decides). History of the
+plan below.
 
 State: branch `feat/tab-frame-shape` (main checkout, the user's dev server serves it), HEAD = the commit that
 records this closeout on top of `ce94353`; working tree clean except the untracked `.gga` (never commit it).
