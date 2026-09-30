@@ -72,8 +72,9 @@ Configuración general → Tema.
   (live value), `services/iconCutout.service.ts` (read/write/preview/boot re-apply in `main.tsx`). The Tema tab keeps
   it in its dirty / Guardar / Descartar / unmount-restore flow and shows "Ahora no se aplica: requiere el tema Clásico y
   la forma de marco Estándar." while the current selection (local preset + shape) does not admit it; the switch stays.
-- Active preset: new `store/themeStylePreset.store.ts` (`classic` flag), written by `previewThemeStyleOnDocument` only
-  when the target is the document root (preset cards are scoped elements and never write it).
+- Active preset: new `store/themeStylePreset.store.ts` (`classic` flag), written in ONE place (`syncActivePreset` in
+  `themeStyle.service`) from `applyThemeStyleToDocument` and `resetThemeStyleOnDocument` when the target is the document
+  root, plus the boot path `applyThemeStyleOverrides` (preset cards are scoped elements and never write it).
 - Eligibility: `useIconCutoutActive(widgetType)` = setting + Clásico + Estándar + grid scope + `supportsIconCutout`
   (tab-frame list without `group`, whose frame already uses `::before`). Header-slot widgets and widgets outside the
   list never qualify. `WidgetFrame` calls it in the standard branch only.
@@ -99,6 +100,26 @@ Configuración general → Tema.
 - The alert glow (`box-shadow`) stays on the frame: it is outside the box, so it never enters the circle.
 - Alert ring color changes on hover without a transition (the alert border does transition); minor.
 - `group` is excluded (its own `::before` base) and stays as today.
+
+## Native review outcome
+
+- Slice `ac2f1a2..6fb69eb`: APPROVED and acknowledged (lineage `review-909e5f18d8184ec7`). Two findings, both fixed:
+  1. WARNING `R3-preset-store-only-synced-on-preview`: the Clásico flag was only written by
+     `previewThemeStyleOnDocument`. Fix `c328445` (+58/-10): the sync moved into `applyThemeStyleToDocument` and
+     `resetThemeStyleOnDocument` (every root-token path goes through them, including `setActiveThemeStyle`), and
+     `applyThemeStyleOverrides` syncs Clásico first. Tests: root apply, reset, `setActiveThemeStyle`, boot with a stored
+     non-Clásico / Clásico / none / unknown id; the manual `setClassic(true)` cleanups were removed from three test files.
+     RED: 5 failed (3 new sync tests + 2 tests leaking the flag without the manual reset) -> GREEN: 36 files / 632 tests
+     of the affected areas.
+  2. SUGGESTION `R3-alert-frame-own-paint-unproved`: the clearing rule `[data-icon-cutout]` tied in specificity with
+     `.widget-state-*` (rest and hover) and won only by source order. Fix `498d4db` (+46/-10): the selector is now
+     `:is(.glass-panel, .widget-state-warning, .widget-state-critical)[data-icon-cutout]` (and `:hover`), strictly more
+     specific than every painter. New CSS contract tests compute specificity and assert it beats `.glass-panel`,
+     `.widget-state-*` and their `:hover`, plus a premise check that those rules still paint background and 2 px border.
+     RED: 3 failed -> GREEN 72/72 (with `index.css.test.ts`, `tabFrame.css.test.ts`). Served stylesheet checked after the
+     single `index.css` write; the headless harness renders the same.
+- Re-verification after the last code commit, in `hmi-app/`: `npx tsc -b` clean; `npm run lint` clean; `npm test` 264 files /
+  3520 tests passed; `npm run build` built.
 
 ## Needs the browser (parent live check)
 
