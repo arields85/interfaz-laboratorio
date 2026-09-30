@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import { scaleTabFrameCut } from '../utils/tabFrameHeight';
-import { parseCssLengthPx, type TabFramePathGeometry } from '../utils/tabFramePath';
+import { TAB_FRAME_TITLE_HIDDEN, parseCssLengthPx, type TabFramePathGeometry } from '../utils/tabFramePath';
 
 function isSameGeometry(a: TabFramePathGeometry | null, b: TabFramePathGeometry | null): boolean {
     if (a === null || b === null) {
@@ -22,8 +22,9 @@ function isSameGeometry(a: TabFramePathGeometry | null, b: TabFramePathGeometry 
  * Pixel geometry of the tab frame silhouette for the layer rendered in `ref` (a box that has the
  * frame's size): its measured size, the tab width reported by the frame, the `--tab-frame-*` tokens
  * and the corner radius (`border-radius` of `ref`, so callers decide which radius applies).
- * `null` while there is no tab (`tabWidth` null), its width is still unknown (`<= 0`, the frame has
- * not measured its title yet) or the box has not been laid out yet. Callers that know the frame IS
+ * `null` while there is no tab shape (`tabWidth` null), the tab width is still unknown (`0`, the frame has
+ * not measured its title yet) or the box has not been laid out yet. `TAB_FRAME_TITLE_HIDDEN` (a chart
+ * whose strip content leaves the title no room) yields the silhouette WITHOUT the title tab. Callers that know the frame IS
  * the tab shape (`tabWidth !== null`) draw nothing meanwhile rather than a rectangle. It measures in a
  * layout effect so the first paint already has the silhouette. It re-measures on resize and when the document style changes (a
  * theme preview rewrites the frame tokens there).
@@ -45,7 +46,7 @@ export function useTabFrameGeometry(
     useLayoutEffect(() => {
         const element = ref.current;
 
-        if (tabWidth === null || tabWidth <= 0 || !element) {
+        if (tabWidth === null || tabWidth === 0 || !element) {
             return undefined;
         }
 
@@ -66,7 +67,7 @@ export function useTabFrameGeometry(
             const next: TabFramePathGeometry = {
                 width,
                 height,
-                tabWidth,
+                tabWidth: tabWidth === TAB_FRAME_TITLE_HIDDEN ? 0 : tabWidth,
                 tabHeight: tabHeight ?? token('--tab-frame-height'),
                 tabCut: tabHeight === undefined
                     ? token('--tab-frame-tab-cut')
@@ -97,6 +98,6 @@ export function useTabFrameGeometry(
         };
     }, [ref, tabWidth, tabHeight]);
 
-    // Without a tab there is no silhouette, whatever was measured before.
-    return tabWidth === null || tabWidth <= 0 ? null : geometry;
+    // Without the tab shape (or before its tab is measured) there is no silhouette, whatever was measured before.
+    return tabWidth === null || tabWidth === 0 ? null : geometry;
 }

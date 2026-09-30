@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildTabFramePath } from '../../utils/tabFramePath';
+import { TAB_FRAME_TITLE_HIDDEN, buildTabFramePath } from '../../utils/tabFramePath';
 import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
 
 // Viewer entrance overlays (flash + traced outline) follow the tab + chamfered body silhouette in
@@ -85,6 +85,17 @@ describe('ViewerEntranceFrameOverlays', () => {
                 .toBe(`path('${buildTabFramePath(geometry)}')`);
             expect(screen.getByTestId('dashboard-viewer-entrance-outline-w').querySelector('path')?.getAttribute('d'))
                 .toBe(buildTabFramePath(geometry));
+        });
+
+        it('clips the flash and traces the outline without the title tab when the frame reports it hidden', () => {
+            render(<ViewerEntranceFrameOverlays widgetId="w" inset="0px" tabWidth={TAB_FRAME_TITLE_HIDDEN} />);
+
+            const geometry = { ...GEOMETRY, tabWidth: 0 };
+            expect(screen.getByTestId('dashboard-viewer-entrance-flash-w').style.clipPath)
+                .toBe(`path('${buildTabFramePath(geometry)}')`);
+            const outline = screen.getByTestId('dashboard-viewer-entrance-outline-w');
+            expect(outline.querySelector('rect')).toBeNull();
+            expect(outline.querySelector('path')?.getAttribute('d')).toBe(buildTabFramePath(geometry));
         });
 
         it('never draws a rectangle while the tab width is pending (frame is the tab shape, width not measured yet)', () => {

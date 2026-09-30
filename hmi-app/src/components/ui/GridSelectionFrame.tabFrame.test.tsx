@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildTabFramePath } from '../../utils/tabFramePath';
+import { TAB_FRAME_TITLE_HIDDEN, buildTabFramePath } from '../../utils/tabFramePath';
 import GridSelectionFrame from './GridSelectionFrame';
 
 // Builder selection ring in the tab frame shape: it traces the tab + chamfered body silhouette
@@ -98,6 +98,16 @@ describe('GridSelectionFrame in the tab frame shape', () => {
         const hover = container.querySelector('path[data-ring="hover"]') as SVGPathElement;
         expect(hover.getAttribute('fill')).toContain('var(--color-admin-accent)');
         expect(hover.getAttribute('stroke-opacity')).toBe('0.18');
+    });
+
+    it('traces a silhouette without the title tab when the frame reports it hidden (a chart with no room for the title)', () => {
+        const { container } = render(<GridSelectionFrame isSelected tabWidth={TAB_FRAME_TITLE_HIDDEN} />);
+
+        expect(container.querySelectorAll('rect')).toHaveLength(0);
+        expect(container.querySelector('path[data-ring="hover"]')?.getAttribute('d'))
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabWidth: 0 }, 0.5));
+        expect(container.querySelector('path[data-ring="focus"]')?.getAttribute('d'))
+            .toBe(buildTabFramePath({ ...GEOMETRY, tabWidth: 0 }, 1));
     });
 
     it('draws no rectangle for a tab-shape widget until its silhouette is measured (box or tab width pending)', () => {

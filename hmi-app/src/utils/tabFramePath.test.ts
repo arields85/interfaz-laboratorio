@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTabFrameGlowClipPath, buildTabFramePath, parseCssLengthPx, type TabFramePathGeometry } from './tabFramePath';
+import { TAB_FRAME_TITLE_HIDDEN, buildTabFrameGlowClipPath, buildTabFramePath, parseCssLengthPx, type TabFramePathGeometry } from './tabFramePath';
 
 const GEOMETRY: TabFramePathGeometry = {
     width: 300,
@@ -172,6 +172,44 @@ describe('buildTabFramePath with a tab taller than the frame can give', () => {
 
     it('leaves a tab that fits untouched', () => {
         expect(buildTabFramePath({ ...GEOMETRY, tabHeight: 25 })).toBe(buildTabFramePath(GEOMETRY));
+    });
+});
+
+describe('buildTabFramePath without a title tab', () => {
+    // A chart whose selector leaves no room for the title hides the tab: the silhouette starts at the
+    // body's top line and its top-left corner stays a convex rounded corner.
+    const NO_TAB: TabFramePathGeometry = { ...GEOMETRY, tabWidth: 0, bodyCut: 0 };
+
+    it('starts the body at the tab height with a convex top-left corner (no spike at the top)', () => {
+        expect(buildTabFramePath(NO_TAB)).toBe(
+            'M 4 25 L 296 25 A 4 4 0 0 1 300 29 L 300 196 A 4 4 0 0 1 296 200 L 4 200 A 4 4 0 0 1 0 196 L 0 29 A 4 4 0 0 1 4 25 Z',
+        );
+    });
+
+    it('never goes above the body line: every vertex is at or below the tab height', () => {
+        const path = buildTabFramePath(NO_TAB);
+        const endpoints = [...path.matchAll(/(?:[ML]|A [\d.]+ [\d.]+ 0 0 [01]) (-?[\d.]+) (-?[\d.]+)/g)];
+
+        expect(path).not.toContain('NaN');
+        expect(endpoints.length).toBeGreaterThan(6);
+        expect(Math.min(...endpoints.map((match) => Number(match[2])))).toBeGreaterThanOrEqual(25);
+    });
+
+    it('keeps the body chamfer when there is no tab', () => {
+        const path = buildTabFramePath({ ...NO_TAB, bodyCut: 50 });
+
+        expect(path).not.toContain('NaN');
+        expect(path).toContain('L 298.828 73.828');
+    });
+
+    it('stays valid for the inset and outset outlines', () => {
+        for (const inset of [1, -2]) {
+            expect(buildTabFramePath(NO_TAB, inset)).not.toContain('NaN');
+        }
+    });
+
+    it('reserves a negative reported width for "title tab hidden" (0 stays "not measured yet")', () => {
+        expect(TAB_FRAME_TITLE_HIDDEN).toBeLessThan(0);
     });
 });
 

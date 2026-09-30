@@ -14,11 +14,22 @@
 // its base.
 // =============================================================================
 
+/**
+ * Tab width REPORTED by a frame (`TabFrameReporter`) that is the tab shape but has hidden its title
+ * tab because its strip content (a chart's selector and icon) leaves the title no room. `0` keeps
+ * meaning "tab shape, not measured yet"; a positive width is the measured tab. The silhouette of a
+ * hidden tab is `TabFramePathGeometry.tabWidth = 0`.
+ */
+export const TAB_FRAME_TITLE_HIDDEN = -1;
+
 export interface TabFramePathGeometry {
     /** Frame box size. */
     width: number;
     height: number;
-    /** Tab width measured at its base (the cut side included). */
+    /**
+     * Tab width measured at its base (the cut side included). `0` = no title tab: the silhouette
+     * starts at the body's top line (its top-left corner stays a convex rounded corner).
+     */
     tabWidth: number;
     tabHeight: number;
     /** Horizontal size of the tab's right-side cut. */
@@ -153,10 +164,12 @@ export function buildTabFramePath(geometry: TabFramePathGeometry, inset = 0): st
     const tabWidth = Math.max(0, Math.min(geometry.tabWidth, width - bodyCut));
     const tabCut = Math.max(0, Math.min(geometry.tabCut, tabWidth));
 
+    // Without a title tab the outline starts at the body's top-left corner instead of running up to the top edge.
+    const tabPoints: Point[] = tabWidth > 0
+        ? [{ x: 0, y: 0 }, { x: tabWidth - tabCut, y: 0 }, { x: tabWidth, y: tabHeight }]
+        : [{ x: 0, y: tabHeight }];
     const raw: Point[] = [
-        { x: 0, y: 0 },
-        { x: tabWidth - tabCut, y: 0 },
-        { x: tabWidth, y: tabHeight },
+        ...tabPoints,
         { x: width - bodyCut, y: tabHeight },
         { x: width, y: tabHeight + bodyCut },
         { x: width, y: height },
