@@ -152,8 +152,17 @@ export default function WidgetFrame({
     // Until the content is measured it goes to the strip (as it always did); too wide for the frame, it falls back to the body row.
     const trailingPlacement = stripCapable ? (strip?.placement ?? 'strip') : 'body';
     const tabContext = useMemo(
-        () => ({ titleHost, iconHost, trailingHost, trailingPlacement, reportTrailingWidth: setTrailingWidth, alertState, titleFontSize }),
-        [titleHost, iconHost, trailingHost, trailingPlacement, alertState, titleFontSize],
+        () => ({
+            titleHost,
+            iconHost,
+            trailingHost,
+            trailingPlacement,
+            trailingBelowStrip: stripCapable && trailingPlacement === 'body',
+            reportTrailingWidth: setTrailingWidth,
+            alertState,
+            titleFontSize,
+        }),
+        [titleHost, iconHost, trailingHost, trailingPlacement, stripCapable, alertState, titleFontSize],
     );
     const titleHidden = strip?.titleHidden ?? false;
     const geometry = useTabFrameGeometry(shellRef, tabActive ? (titleHidden ? TAB_FRAME_TITLE_HIDDEN : tabWidth) : null, tabHeight);
@@ -175,6 +184,10 @@ export default function WidgetFrame({
     if (strip && strip.reserve !== null) {
         shellStyle['--tab-frame-tab-reserve'] = `${strip.reserve}px`;
         shellStyle['--tab-frame-icon-strip-extent'] = `${strip.iconExtent}px`;
+    }
+
+    // The header starts under the strip whenever the trailing content is a chart's: collapsed in the strip, or its body row.
+    if (strip && strip.clearance !== null) {
         shellStyle['--tab-frame-header-clearance'] = `${strip.clearance}px`;
     }
 

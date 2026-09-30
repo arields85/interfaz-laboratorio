@@ -308,7 +308,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             expect(screen.getByTestId('chart-selector')).toBeInTheDocument();
         });
 
-        it('renders the selector right-aligned in the header row of the body, like the standard frame, with the row height', () => {
+        it('renders the selector right-aligned in the header row of the body, below the strip, like the lab alternative A', () => {
             previewFrameShape('tab');
             mockLayout({ frameWidth: 150, slotWidth: SLOT_WIDTH });
 
@@ -318,10 +318,12 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             const header = content.firstElementChild as HTMLElement;
             const row = header.querySelector('.row-start-1') as HTMLElement;
             expect(row).toContainElement(screen.getByTestId('chart-selector'));
-            // The row keeps what the tab widgets have: the invisible title spacer and the icon's slot.
-            expect(row.querySelector('.invisible')).not.toBeNull();
-            expect(row.querySelector('[data-tab-frame-slot="icon-placeholder"]')).not.toBeNull();
+            // The icon lives in the strip above the row, so the row has no slot for it.
+            expect(row.querySelector('[data-tab-frame-slot="icon-placeholder"]')).toBeNull();
+            // The row starts under the strip (the same clearance the strip layout uses, with its gap), never on the body's top line.
+            expect(header.style.marginTop).toBe('var(--tab-frame-header-clearance, 0px)');
             expect(header.querySelector('.hmi-tab-frame-header-clearance')).toBeNull();
+            expect(header.className).not.toContain('invisible');
             // The title and the icon stay in the tab strip.
             expect(within(screen.getByTestId('tab-frame-tab')).getByText('Temperatura')).toBeInTheDocument();
             expect(within(screen.getByTestId('tab-frame-icon-host')).getByTestId('chart-icon')).toBeInTheDocument();
@@ -337,6 +339,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
             const slot = screen.getByTestId('chart-selector').closest('[data-tab-frame-slot="trailing"]') as HTMLElement;
             const scroller = slot.parentElement as HTMLElement;
+            expect(scroller.parentElement).toHaveClass('flex', 'min-w-0');
             expect(slot).toHaveClass('shrink-0', 'w-max');
             expect(scroller).toHaveClass('min-w-0', 'overflow-x-auto', 'hmi-scrollbar');
         });
@@ -353,7 +356,8 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             expect(shell).not.toHaveAttribute('data-tab-title-hidden');
             expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('');
             expect(shell.style.getPropertyValue('--tab-frame-icon-strip-extent')).toBe('');
-            expect(shell.style.getPropertyValue('--tab-frame-header-clearance')).toBe('');
+            // 25 - 20 - 1 + 12: the row under the strip, like the collapsed header's clearance.
+            expect(shell.style.getPropertyValue('--tab-frame-header-clearance')).toBe('16px');
             expect(screen.getByTestId('tab-frame-trailing-host')).toBeEmptyDOMElement();
             expect(onTabWidth).toHaveBeenLastCalledWith(90);
             expect(screen.getByTestId('tab-frame-surface').style.clipPath)

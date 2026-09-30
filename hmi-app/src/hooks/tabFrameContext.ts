@@ -26,6 +26,12 @@ export interface TabFrameContextValue {
      */
     trailingPlacement: 'strip' | 'body';
     /**
+     * True for a chart whose selector fell back to the header row because it does not fit in the strip:
+     * that row starts under the strip (`--tab-frame-header-clearance`) and has no slot for the icon.
+     * A widget that never opted in keeps its row exactly where it is.
+     */
+    trailingBelowStrip: boolean;
+    /**
      * The header reports the INTRINSIC width (px) of its trailing content (0 when it has none), measured
      * wherever it is rendered; `WidgetFrame` decides the placement from it.
      */

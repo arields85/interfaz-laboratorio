@@ -15,10 +15,10 @@ export interface TabFrameStripLayout {
     /** `strip` while the trailing content fits in the frame, `body` (the header row) when it does not. */
     placement: TabFrameTrailingPlacement;
     /**
-     * Height (px) the header keeps at the top of the content so it starts under the strip: the tab height
-     * minus the padding and border above the header.
+     * Height (px) the header keeps at the top of the content so it starts under the strip (plus the gap under
+     * it): the tab height minus the padding and border above the header. null = no trailing content.
      */
-    clearance: number;
+    clearance: number | null;
 }
 
 function isSameLayout(a: TabFrameStripLayout | null, b: TabFrameStripLayout): boolean {
@@ -100,8 +100,9 @@ export function useTabFrameStrip({
                 minTitle: token('--tab-frame-min-title'),
             });
             const inStrip = hasTrailing && trailing.placement === 'strip';
-            // Only a frame with strip content clears its header row under the strip.
-            const contentStyle = inStrip && content ? window.getComputedStyle(content) : null;
+            // Only a frame with trailing content clears its header under the strip: collapsed when the content
+            // is in the strip, or its body row when the content did not fit there.
+            const contentStyle = hasTrailing && content ? window.getComputedStyle(content) : null;
             const above = contentStyle
                 ? parseCssLengthPx(contentStyle.paddingTop, rootFontSize) + parseCssLengthPx(contentStyle.borderTopWidth, rootFontSize)
                 : 0;
@@ -111,7 +112,9 @@ export function useTabFrameStrip({
                 titleHidden: trailing.titleHidden,
                 placement: trailing.placement,
                 // Up to the strip bottom, plus the gap under it: the first content never sits on the body's top line.
-                clearance: Math.max(0, Math.round(((tabHeight ?? token('--tab-frame-height')) - above + token('--tab-frame-strip-gap')) * 100) / 100),
+                clearance: hasTrailing
+                    ? Math.max(0, Math.round(((tabHeight ?? token('--tab-frame-height')) - above + token('--tab-frame-strip-gap')) * 100) / 100)
+                    : null,
             };
 
             setLayout((current) => (isSameLayout(current, next) ? current : next));

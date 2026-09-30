@@ -233,6 +233,8 @@ export default function WidgetHeader({
     const inTab = tabFrame !== null && !centered;
     const trailingInStrip = inTab && Boolean(trailing) && tabFrame.trailingPlacement === 'strip';
     const reportTrailingWidth = tabFrame?.reportTrailingWidth;
+    // A chart whose selector does not fit in the strip: its body row starts under the strip, like the lab's alternative A.
+    const rowBelowStrip = inTab && Boolean(trailing) && tabFrame.trailingBelowStrip;
     const trailingSlot = inTab && trailing && reportTrailingWidth
         ? <TabFrameTrailingSlot onWidth={reportTrailingWidth}>{trailing}</TabFrameTrailingSlot>
         : null;
@@ -325,7 +327,10 @@ export default function WidgetHeader({
     }
 
     return (
-        <div className={`grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] gap-y-0 ${alignmentClassName} ${className}`}>
+        <div
+            className={`grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto] gap-y-0 ${alignmentClassName} ${className}`}
+            style={rowBelowStrip ? { marginTop: 'var(--tab-frame-header-clearance, 0px)' } : undefined}
+        >
             {tabPortals}
             {/* Fila 1: título + bloque derecho. El subtítulo no participa de esta alineación. */}
             <div className="row-start-1 flex items-center justify-between gap-2">
@@ -339,7 +344,7 @@ export default function WidgetHeader({
 
                         {(iconNode || trailingSlot) && (
                             <div className="flex min-w-0 items-center gap-2 leading-none">
-                                {iconNode && (
+                                {iconNode && !rowBelowStrip && (
                                     <span
                                         data-tab-frame-slot="icon-placeholder"
                                         aria-hidden="true"
