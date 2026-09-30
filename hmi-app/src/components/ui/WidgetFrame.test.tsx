@@ -600,6 +600,23 @@ describe('WidgetFrame', () => {
         });
 
         describe('on a widget too short for the requested tab', () => {
+            afterEach(() => {
+                vi.unstubAllGlobals();
+            });
+
+            it('caps the tab on the new shell when the shape switches to tab while mounted', () => {
+                mockOwnSizeLayout();
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+
+                const { container } = renderFramed({ tabTitleFontSize: 200 });
+                act(() => previewFrameShape('tab'));
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('52px');
+
+                act(() => previewFrameShape('standard'));
+                act(() => previewFrameShape('tab'));
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('52px');
+            });
+
             it('caps the tab at the shell height minus the minimum body (chamfer + 2 x radius)', () => {
                 previewFrameShape('tab');
                 mockOwnSizeLayout();
@@ -690,7 +707,6 @@ describe('WidgetFrame', () => {
                 act(() => observers.forEach((callback) => callback()));
 
                 expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('92px');
-                vi.unstubAllGlobals();
             });
 
             it('leaves the requested tab untouched on a normal-size widget (no cap, same 47 px)', () => {
