@@ -272,6 +272,28 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   Restarting the launcher fixed it. Rules from now on: never switch branches in this checkout (fast-forward `main` by
   ref, `git push . <branch>:main`); headless browser checks use an isolated `--user-data-dir` in the scratch directory.
 
+- [x] **G1** — Group title typography in the Estándar shape (user request 2026-09-30: "En el modo clásico el título [del
+  widget Grupo] adopta la tipografía de los widgets normales; debería adoptar la misma tipografía y controles en el
+  panel de propiedades que la que adopta cuando se elige modo pestaña, al igual que el color en reposo y hover").
+  Interpretation: with the Estándar frame shape (any preset) the `group` title looks as in Pestaña: `text-title`
+  typography at `displayOptions.titleFontSize` (normalized, default 30), as typed, white 70 % at rest -> 100 % on hover.
+  Route: delegated writer, strict TDD (Vitest). Commit `e1978f0` (`feat(theme): give the group title the
+  text-title typography and tab colors in the standard frame`, +70/-17, 6 files). RED: 3 failed / 21 passed in
+  `tabFrameRollout.test.tsx` (new standard-shape tests: typography + size + no uppercase + colors, default 30 and NaN
+  fallback, size outside a grid); GREEN: 53 files / 834 tests in `widgets/renderers`, `components/ui` and
+  `PropertyDock.test.tsx`. Mechanism: `GroupWidget` computes the normalized size once and gives it to `WidgetFrame`
+  (`tabTitleFontSize`, tab) and to `WidgetHeader` (new optional `titleFontSize`); in the standard frame `WidgetHeader`
+  renders that title with `buildDashboardTitleTypography` and the SAME `TAB_TITLE_COLOR_CLASSES` the tab title uses
+  (the `--tab-frame-text` tokens, decided in one place, no duplicated literal; semantically a tab token, reused
+  because the values must be identical). The title stays in the header row (inside the frame, top-left); the row
+  grows with the size; the outer size is unchanged. The "Tamaño" control in `PropertyDock` already showed for `group`
+  with no shape-specific copy, so it now takes effect in both shapes (only its code comment changed). Other widgets
+  and the group in Pestaña are unchanged (covered by tests). Header-slot / non-grid contexts: `group` is not
+  header-compatible (`HEADER_COMPATIBLE_WIDGET_TYPES` = status, connection-status), so there is no header-slot
+  rendering; outside a grid the group renders the standard frame and gets the same title (tested). Docs:
+  `docs/DESIGN_SYSTEM.md`, `WIDGET_AUTHORING.md`, `GroupDisplayOptions` JSDoc. Needs the browser: the real look of a
+  large title in the standard header row (row growth, truncation, hover color transition) and on the other presets.
+
 ## C4 — Review and live tuning (2026-09-30)
 
 - Review of `80366a5..f23ac5e` (lab fix + C3 + V1; 35 files / 1890 lines, medium, `review-reliability`; consent granted by

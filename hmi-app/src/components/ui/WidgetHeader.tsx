@@ -45,8 +45,8 @@ import { TAB_FRAME_ICON_SIZE_PX } from '../../utils/tabFrameIcon';
 // =============================================================================
 
 /**
- * Title colors of a title with its own typography (the tab title, and the same title in the standard
- * frame: one definition for both shapes). Tab title colors (tab frame shape, including the title with its own typography): the SAME
+ * Tab title colors (tab frame shape, including the title with its own typography, and the same title
+ * of the `group` widget in the standard frame: one definition for both shapes): the SAME
  * behavior as the standard title (muted, white while the widget is hovered, `transition-colors`)
  * but through the `--tab-frame-text` / `-hover` tokens so the tab color can be tuned in one place.
  * Full class names so Tailwind finds them.
