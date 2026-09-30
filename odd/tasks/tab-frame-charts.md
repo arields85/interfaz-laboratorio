@@ -198,6 +198,31 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   - Gap for the parent/user: none blocking. Visual tuning (overlap of the chart under the strip, selector height against
     other themes' `theme-button` fonts) waits for the live look.
 
+## Follow-ups requested by the user on 2026-09-30 (same branch)
+
+- [x] **V1** — Viewer entrance: a widget whose "Mostrar fondo y marco" option is off (`showFrame: false`; `status`,
+  `connection-status`) must not animate a background flash or an outline when the viewer moves between dashboards.
+  Cause: `DashboardViewer` only excluded `text-title`. Fix (route: parent inline, one file + its test + one doc line,
+  TDD): `drawsGridFrame(widget)` = not `text-title` AND `resolveWidgetFrameVisible(getWidgetFrameOption(widget), 'grid')`;
+  the staggered entrance of the widget itself is unchanged. RED 2 failed (status and connection-status frameless still
+  got both overlays) -> GREEN 29/29 (`DashboardViewer.entrance.test.tsx`). `npx tsc -b` clean, `npm run lint` clean,
+  `npm test` 258 files / 3381 tests passed, `npm run build` ok. Commit `6421d74`. Needs the browser: the live look.
+- [ ] **K1** — Style lab: alternatives for the finish of the body's top-right corner under the header icon (the user
+  likes the icon, not the rounded corner under it). Options on the sample widget, next to "Actual" (today's rounded
+  corner): (1) **Escalón** (the user's sketch): the cut is displaced to the left and a lower flat shelf runs from the
+  diagonal to the right edge, where the icon rests; two controls: depth (the existing "corte del cuerpo") and
+  displacement (shelf width; 0 = today's corner chamfer); the diagonal is parallel to the tab's slanted side; every
+  vertex rounded with the preset radius. (2) **Esquina abierta**: the top and right borders fade out before the corner
+  (adjustable fade length). (3) **Ícono sobre la línea**: the icon centered on the body's top line, the border
+  interrupted around it (adjustable gap). "Copiar elección" names the alternative and its values. Route: delegated
+  writer (the lab file is ~100 KB). No app change until the user picks.
+- [ ] **K2** — User picks; then the app implementation is planned.
+- Incident 2026-09-30 (no code change): the user saw black blocks on tab-frame widgets. Cause: the parent's
+  `git checkout main` for the merge rewrote the working tree to the pre-feature tree and back while the dev server ran,
+  leaving the page with new components and the old stylesheet (every black block was a default-size 300x150 `<svg>`).
+  Restarting the launcher fixed it. Rules from now on: never switch branches in this checkout (fast-forward `main` by
+  ref, `git push . <branch>:main`); headless browser checks use an isolated `--user-data-dir` in the scratch directory.
+
 ## Next step
 
 C3 done. Then C4: live look with the user, RDD per work-unit commit (consent is
