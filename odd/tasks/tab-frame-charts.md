@@ -243,6 +243,29 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   interrupted around it (adjustable gap). "Copiar elección" names the alternative and its values. Route: delegated
   writer (the lab file is ~100 KB). No app change until the user picks.
 - [ ] **K2** — User picks; then the app implementation is planned.
+- [x] **L1** — Style lab: "Calado del ícono" (user request 2026-09-30, K1 left as is). DONE, commit `a676b66`
+  (`feat(style-lab): add the icon cutout behind the header icon for the Clásico preset`, +171/-4 in
+  `tools/style-lab/style-lab.html` and `README.md`), republished to the same artifact URL (version 17). A circle of
+  transparent background behind the header icon; the icon is untouched. Applies only with the "Actual" (Clásico)
+  preset and the Estándar shape: in Pestaña the icon sits in the strip outside the body, so nothing is cut (decision:
+  Estándar only). Applies to the four main widgets with an icon, the alert card and the chart samples' standard
+  header. Implementation: the card's background, blur and 1/2 px border move to `::before` (card background made
+  transparent), which carries `mask-image: radial-gradient(...)` centered on the icon's measured center (+
+  `-webkit-mask-image`); the corner accent `::after` intersects its corner masks with the same hole
+  (`mask-composite: intersect`); the alert glow (box-shadow) stays on the card; the stage shows through; hover follows
+  the registered variables. Optional ring: `.cut-ring` radial stroke with the frame's border colour (`--w-border`; the
+  alert colour at 35 % / 55 % on the alert card). Controls: toggle, *margen* (radius = half the icon + margin, 0-24 px,
+  default 8), *suavizado* (0 = hard edge, up to 16 px, centered on the radius, default 6), *anillo en el borde*
+  (default off). State `co` + `preset` remembered and validated on load (whitelist preset, boolean, clamped numbers).
+  "Copiar elección" appends ` · Calado del ícono | apagado ...` or `encendido: ... | radio = mitad del lado del ícono
+  + margen N px | suavizado ... | anillo ... | aplica solo con el preset Actual (Clásico) y la forma Estándar` (plus a
+  note when it is not active). Verification: extracted script `node --check` OK; headless Chrome with an isolated
+  profile (`--user-data-dir` in the scratch directory) at window widths 1500 and 1000: Instrumento (expect none),
+  Actual rest/hover, ring on with a hard edge and margin 14, the Pestaña shape (expect none), reading classes, hole
+  gradients, computed `::before` masks and the ring layer; screenshots (feathered, and ring + hover with the alert
+  ring); stored-state persistence. Not verified: a real pointer hover, the critical alert kind, the other presets with
+  the flag forced on (by design they do not apply it), the light theme, phone width; the ring position is centered on
+  the hole radius, so with a large feather it sits at the mid-fade.
 - Incident 2026-09-30 (no code change): the user saw black blocks on tab-frame widgets. Cause: the parent's
   `git checkout main` for the merge rewrote the working tree to the pre-feature tree and back while the dev server ran,
   leaving the page with new components and the old stylesheet (every black block was a default-size 300x150 `<svg>`).
