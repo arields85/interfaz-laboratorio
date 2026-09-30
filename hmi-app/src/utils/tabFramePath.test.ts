@@ -118,6 +118,63 @@ describe('buildTabFramePath without a body chamfer (bodyCut 0)', () => {
     });
 });
 
+describe('buildTabFramePath with a tab taller than the frame can give', () => {
+    /** Every point the path visits (line ends and arc ends), as [x, y]. */
+    const points = (path: string) => [...path.matchAll(/[ML] (-?[\d.]+) (-?[\d.]+)|A [\d.]+ [\d.]+ 0 0 [01] (-?[\d.]+) (-?[\d.]+)/g)]
+        .map((match) => [Number(match[1] ?? match[3]), Number(match[2] ?? match[4])]);
+
+    it('caps the tab so the body chamfer still fits: no NaN, every point inside the box', () => {
+        const short: TabFramePathGeometry = { ...GEOMETRY, height: 60, tabHeight: 228 };
+        const path = buildTabFramePath(short);
+
+        expect(path).not.toContain('NaN');
+        expect(path).not.toContain('Infinity');
+        expect(points(path).length).toBeGreaterThan(0);
+
+        for (const [x, y] of points(path)) {
+            expect(x).toBeGreaterThanOrEqual(0);
+            expect(x).toBeLessThanOrEqual(short.width);
+            expect(y).toBeGreaterThanOrEqual(0);
+            expect(y).toBeLessThanOrEqual(short.height);
+        }
+    });
+
+    it('draws the same silhouette as a tab exactly as tall as the frame leaves free (height - bodyCut)', () => {
+        expect(buildTabFramePath({ ...GEOMETRY, height: 60, tabHeight: 228 }))
+            .toBe(buildTabFramePath({ ...GEOMETRY, height: 60, tabHeight: 10 }));
+    });
+
+    it('never lets the y coordinate run backwards along the right side (no inverted polygon)', () => {
+        const path = buildTabFramePath({ ...GEOMETRY, height: 60, tabHeight: 228, radius: 0 });
+        const rightSide = points(path).filter(([x]) => x === GEOMETRY.width).map(([, y]) => y);
+
+        expect(rightSide.length).toBeGreaterThan(0);
+        expect(rightSide).toEqual([...rightSide].sort((a, b) => a - b));
+    });
+
+    it('stays valid when the body chamfer alone is taller than the frame', () => {
+        const path = buildTabFramePath({ ...GEOMETRY, height: 30, tabHeight: 228, bodyCut: 50 });
+
+        expect(path).not.toContain('NaN');
+        for (const [x, y] of points(path)) {
+            expect(x).toBeGreaterThanOrEqual(0);
+            expect(y).toBeGreaterThanOrEqual(0);
+            expect(y).toBeLessThanOrEqual(30);
+        }
+    });
+
+    it('stays valid for the inset and outset outlines and for a non-finite tab height', () => {
+        for (const inset of [1, -2]) {
+            expect(buildTabFramePath({ ...GEOMETRY, height: 60, tabHeight: 228 }, inset)).not.toContain('NaN');
+        }
+        expect(buildTabFramePath({ ...GEOMETRY, tabHeight: Number.NaN })).not.toContain('NaN');
+    });
+
+    it('leaves a tab that fits untouched', () => {
+        expect(buildTabFramePath({ ...GEOMETRY, tabHeight: 25 })).toBe(buildTabFramePath(GEOMETRY));
+    });
+});
+
 describe('buildTabFrameGlowClipPath', () => {
     it('is an even-odd path: a margin rectangle around the frame with the silhouette punched out', () => {
         expect(buildTabFrameGlowClipPath(GEOMETRY, 60)).toBe(

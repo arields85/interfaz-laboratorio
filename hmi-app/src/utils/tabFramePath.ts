@@ -144,7 +144,11 @@ function roundedPolygonPath(points: Point[], radiusFor: (convex: boolean) => num
  * offset curve (`radius - inset`), the concave junction grows (`radius + inset`).
  */
 export function buildTabFramePath(geometry: TabFramePathGeometry, inset = 0): string {
-    const { width, height, tabHeight, bodyCut, radius } = geometry;
+    const { width, height, radius } = geometry;
+    // The chamfer fits the box, and the tab never takes the vertical room the chamfer needs: with a
+    // tab taller than `height - bodyCut` the polygon would fold over itself.
+    const bodyCut = Number.isFinite(geometry.bodyCut) ? Math.max(0, Math.min(geometry.bodyCut, width, height)) : 0;
+    const tabHeight = Number.isFinite(geometry.tabHeight) ? Math.max(0, Math.min(geometry.tabHeight, height - bodyCut)) : 0;
     // The tab can never run past the start of the body chamfer, and its cut never exceeds its width.
     const tabWidth = Math.max(0, Math.min(geometry.tabWidth, width - bodyCut));
     const tabCut = Math.max(0, Math.min(geometry.tabCut, tabWidth));
