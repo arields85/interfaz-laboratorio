@@ -659,7 +659,7 @@ describe('PropertyDock group', () => {
         expect(screen.queryByText('Fuente')).not.toBeInTheDocument();
     });
 
-    it('shows the text-title Tamaño control for the tab title, at the text-title default, without Alinear or Color', () => {
+    it('shows the text-title Tamaño control for the tab title, at the group default (30), without Alinear or Color', () => {
         renderPropertyDock({
             type: 'group',
             title: 'Área compresión',
@@ -667,9 +667,23 @@ describe('PropertyDock group', () => {
         });
 
         const section = getSection('General');
-        expect(getInputInSection('General', 'Tamaño')).toHaveValue('35');
+        expect(getInputInSection('General', 'Tamaño')).toHaveValue('30');
         expect(within(section).queryByText('Alinear')).not.toBeInTheDocument();
         expect(within(section).queryByText('Color')).not.toBeInTheDocument();
+    });
+
+    it.each([
+        { stored: Number.NaN, shown: '30' },
+        { stored: 500, shown: '200' },
+        { stored: 4, shown: '12' },
+    ])('shows the group tab title size the canvas renders for a stored $stored', ({ stored, shown }) => {
+        renderPropertyDock({
+            type: 'group',
+            title: 'Área compresión',
+            displayOptions: { icon: 'Group', titleFontSize: stored },
+        });
+
+        expect(getInputInSection('General', 'Tamaño')).toHaveValue(shown);
     });
 
     it('persists the tab title size in displayOptions.titleFontSize keeping the icon', async () => {

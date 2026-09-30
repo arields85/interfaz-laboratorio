@@ -21,7 +21,7 @@ import {
 import type { GroupWidgetConfig } from '../../domain/admin.types';
 import WidgetHeader from '../../components/ui/WidgetHeader';
 import WidgetFrame from '../../components/ui/WidgetFrame';
-import { normalizeTitleFontSize } from '../../utils/dashboardTitleTypography';
+import { DEFAULT_GROUP_TITLE_FONT_SIZE, normalizeTitleFontSize } from '../../utils/dashboardTitleTypography';
 
 // =============================================================================
 // GroupWidget
@@ -33,7 +33,7 @@ import { normalizeTitleFontSize } from '../../utils/dashboardTitleTypography';
 // este renderer no lee ni necesita esos campos.
 //
 // Con la forma de marco Pestaña el título va en la pestaña con la tipografía del widget
-// `text-title` (tamaño `displayOptions.titleFontSize`, por defecto el de `text-title`) y la
+// `text-title` (tamaño `displayOptions.titleFontSize`, por defecto `DEFAULT_GROUP_TITLE_FONT_SIZE`) y la
 // pestaña crece hacia abajo con ese tamaño (ver `WidgetFrame`). Con la forma Estándar nada cambia.
 // =============================================================================
 
@@ -94,7 +94,7 @@ export default function GroupWidget({ widget, className }: GroupWidgetProps) {
             frameClassName="glass-panel glass-panel-group"
             className="group flex h-full w-full flex-col p-4"
             outerClassName={className}
-            tabTitleFontSize={normalizeTitleFontSize(displayOptions?.titleFontSize)}
+            tabTitleFontSize={normalizeTitleFontSize(displayOptions?.titleFontSize, DEFAULT_GROUP_TITLE_FONT_SIZE)}
         >
             {hasHeaderContent && (
                 <WidgetHeader

@@ -14,7 +14,7 @@ import GroupWidget from './GroupWidget';
 import InfoCardWidget from './InfoCardWidget';
 import KpiWidget from './KpiWidget';
 import MetricWidget from './MetricWidget';
-import { DEFAULT_TEXT_TITLE_FONT_SIZE } from '../../utils/dashboardTitleTypography';
+import { DEFAULT_GROUP_TITLE_FONT_SIZE } from '../../utils/dashboardTitleTypography';
 
 // Tab frame shape rollout (F2): kpi, metric-card, info-card and titled group take the tab shape
 // inside a dashboard grid; the standard shape keeps today's single framed element.
@@ -230,7 +230,7 @@ describe('tab frame shape rollout', () => {
             expect(title.style.fontFamily).toBe('var(--font-dashboard-title)');
             expect(title.style.fontWeight).toBe('var(--font-weight-dashboard-title)');
             expect(title.style.letterSpacing).toBe('var(--tracking-dashboard-title)');
-            expect(title.style.fontSize).toBe(`${DEFAULT_TEXT_TITLE_FONT_SIZE}px`);
+            expect(title.style.fontSize).toBe('30px');
             expect(title.style.lineHeight).toBe('1.1');
             expect(title).not.toHaveClass('uppercase');
             expect(title).toHaveClass('text-(color:--tab-frame-text)', 'group-hover:text-(color:--tab-frame-text-hover)', 'transition-colors');
@@ -254,9 +254,9 @@ describe('tab frame shape rollout', () => {
             const { container } = renderInGrid(<GroupWidget widget={makeGroup({ displayOptions: stored })} />);
 
             const shell = container.querySelector('[data-widget-frame-shape="tab"]') as HTMLElement;
-            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Compresión 01').style.fontSize).toBe(`${DEFAULT_TEXT_TITLE_FONT_SIZE}px`);
-            // Tokens read as 0 in jsdom: 35 x 1.1.
-            expect(shell.style.getPropertyValue('--tab-frame-height')).toBe('38.5px');
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Compresión 01').style.fontSize).toBe(`${DEFAULT_GROUP_TITLE_FONT_SIZE}px`);
+            // Tokens read as 0 in jsdom: 30 x 1.1.
+            expect(shell.style.getPropertyValue('--tab-frame-height')).toBe('33px');
         });
 
         it('clamps a stored size outside the allowed range', () => {

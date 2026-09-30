@@ -55,6 +55,7 @@ import {
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import {
+    DEFAULT_GROUP_TITLE_FONT_SIZE,
     MAX_TEXT_TITLE_FONT_SIZE,
     MIN_TEXT_TITLE_FONT_SIZE,
     normalizeTitleFontSize,
@@ -1780,7 +1781,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                             {selectedWidget.type === 'group' && (
                                 <DockFieldRow label="Tamaño">
                                     <AdminNumberInput
-                                        value={normalizeTitleFontSize((selectedWidget.displayOptions as GroupDisplayOptions | undefined)?.titleFontSize)}
+                                        value={normalizeTitleFontSize((selectedWidget.displayOptions as GroupDisplayOptions | undefined)?.titleFontSize, DEFAULT_GROUP_TITLE_FONT_SIZE)}
                                         min={MIN_TEXT_TITLE_FONT_SIZE}
                                         max={MAX_TEXT_TITLE_FONT_SIZE}
                                         step={1}

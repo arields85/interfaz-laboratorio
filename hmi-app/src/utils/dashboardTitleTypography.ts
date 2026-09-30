@@ -1,18 +1,21 @@
 import type { CSSProperties } from 'react';
 
 export const DEFAULT_TEXT_TITLE_FONT_SIZE = 35;
+/** Default size (px) of the tab title of the `group` widget; the `text-title` widget keeps its own default. */
+export const DEFAULT_GROUP_TITLE_FONT_SIZE = 30;
 /** Allowed range (px) of a title size: the bounds of the property panel input, enforced when rendering. */
 export const MIN_TEXT_TITLE_FONT_SIZE = 12;
 export const MAX_TEXT_TITLE_FONT_SIZE = 200;
 
 /**
  * Title font size (px) to render from a stored value: anything that is not a finite number (a
- * hand-edited or corrupted persisted layout) becomes the default, a finite number is clamped into
- * the allowed range. Shared by the `text-title` widget and the tab title of the `group` widget.
+ * missing value, or a hand-edited or corrupted persisted layout) becomes `fallback` (the default of
+ * the caller: the `text-title` widget by default, `DEFAULT_GROUP_TITLE_FONT_SIZE` for the tab title
+ * of the `group` widget), a finite number is clamped into the allowed range.
  */
-export function normalizeTitleFontSize(stored: unknown): number {
+export function normalizeTitleFontSize(stored: unknown, fallback: number = DEFAULT_TEXT_TITLE_FONT_SIZE): number {
     if (typeof stored !== 'number' || !Number.isFinite(stored)) {
-        return DEFAULT_TEXT_TITLE_FONT_SIZE;
+        return fallback;
     }
 
     return Math.min(MAX_TEXT_TITLE_FONT_SIZE, Math.max(MIN_TEXT_TITLE_FONT_SIZE, stored));

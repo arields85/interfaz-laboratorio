@@ -662,7 +662,7 @@ export interface InfoCardDisplayOptions {
 /**
  * Opciones de visualización del widget contenedor (`group`): el ícono del header y el tamaño (px) del
  * título con la tipografía del widget `text-title`; el tamaño solo aplica con la forma de marco
- * Pestaña (por defecto `DEFAULT_TEXT_TITLE_FONT_SIZE`).
+ * Pestaña (por defecto `DEFAULT_GROUP_TITLE_FONT_SIZE`).
  */
 export interface GroupDisplayOptions {
     icon?: string | null;

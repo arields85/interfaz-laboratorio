@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     DASHBOARD_TITLE_LINE_HEIGHT,
+    DEFAULT_GROUP_TITLE_FONT_SIZE,
     DEFAULT_TEXT_TITLE_FONT_SIZE,
     MAX_TEXT_TITLE_FONT_SIZE,
     MIN_TEXT_TITLE_FONT_SIZE,
@@ -57,5 +58,24 @@ describe('normalizeTitleFontSize', () => {
         expect(normalizeTitleFontSize(11.9)).toBe(MIN_TEXT_TITLE_FONT_SIZE);
         expect(normalizeTitleFontSize(201)).toBe(MAX_TEXT_TITLE_FONT_SIZE);
         expect(normalizeTitleFontSize(5000)).toBe(MAX_TEXT_TITLE_FONT_SIZE);
+    });
+
+    it('takes the fallback of the caller for anything that is not a finite number', () => {
+        for (const stored of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, '48', {}]) {
+            expect(normalizeTitleFontSize(stored, DEFAULT_GROUP_TITLE_FONT_SIZE)).toBe(DEFAULT_GROUP_TITLE_FONT_SIZE);
+        }
+    });
+
+    it('never lets the fallback override a valid stored size, which is still clamped', () => {
+        expect(normalizeTitleFontSize(50, DEFAULT_GROUP_TITLE_FONT_SIZE)).toBe(50);
+        expect(normalizeTitleFontSize(5000, DEFAULT_GROUP_TITLE_FONT_SIZE)).toBe(MAX_TEXT_TITLE_FONT_SIZE);
+        expect(normalizeTitleFontSize(1, DEFAULT_GROUP_TITLE_FONT_SIZE)).toBe(MIN_TEXT_TITLE_FONT_SIZE);
+    });
+});
+
+describe('default title sizes', () => {
+    it('the group tab title defaults to 30 while the text-title widget keeps 35', () => {
+        expect(DEFAULT_GROUP_TITLE_FONT_SIZE).toBe(30);
+        expect(DEFAULT_TEXT_TITLE_FONT_SIZE).toBe(35);
     });
 });
