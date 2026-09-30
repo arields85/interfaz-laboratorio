@@ -39,8 +39,10 @@ Lab controls: A/B/C switch on a sample chart widget, plus spacing, selector heig
 
 ## Tasks
 
-- [ ] **C1** — Style lab: sample chart widget (title, icon, scale selector, chart area) with the A/B/C switch and the
-  adjustments; "Copiar elección" includes the chosen alternative and its values; README updated; republish.
+- [x] **C1** — Style lab: sample chart widget (title, icon, scale selector, chart area) with the A/B/C switch and the
+  adjustments; "Copiar elección" includes the chosen alternative and its values; README updated; republish. Done
+  2026-09-30, commit `07cc7a3` (`feat(style-lab): ...`, +477/-17 in `tools/style-lab/style-lab.html` and
+  `README.md`); republished to the same artifact URL (version 14). Route: delegated writer (preparation trigger).
 - [ ] **C2** — User compares in the lab and picks one (with values).
 - [ ] **C3** — Implement the chosen alternative in the app for the five chart widgets (scope and tasks refined after C2).
 - [ ] **C4** — Live look, native review (RDD per work-unit commit), merge on the user's OK.
@@ -67,6 +69,29 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   underline variants). Route for C1: delegated writer (preparation trigger: the lab file is ~92 KB and must be read
   before writing).
 
+- 2026-09-30 C1 done (`07cc7a3`). Controls added (section "Gráfico con selector", remembered in the viewer's storage
+  with the rest of the lab): alternative A/B/C, "Mostrar las tres juntas" (compare view, default on), selector style
+  (píldora / subrayado), gap between strip elements (0-24 px, default 8), selector scale (70-110 %), sample width
+  (220-720 px, shortcuts Angosto 280 / Ancho 560), title text, and "Restablecer la pestaña a los valores aceptados".
+  Sample: title + dot, TrendingUp icon (24 px at 90 %, pinned top-right, right 0, top 0), selector with the real
+  options 1h 24h 7d 30d 12m (uppercase, like `WidgetHeaderTemporalControls`), Y scale 0-100, dashed grid, line and
+  area drawn in inline SVG from the measured plot box. It reuses the lab's layers, `shapePath` and tokens; alternative
+  C adds `twoTabPath` (mirrored right tab, same slope and radius). B and C ignore the body cut (0); A honors it. With
+  the Estándar shape the sample shows today's header (title, selector, icon in one row).
+  Lab changes beyond the sample: `TF_DEFAULT` now holds the accepted app tokens (tab cut 19, body cut 0; was 15 / 37)
+  and the tab cut scales with the tab height (constant slope, like `scaleTabFrameCut`) for ALL lab widgets; a viewer's
+  stored tuning still wins (the reset button loads the accepted values).
+  "Copiar elección" appends ` · Gráfico con selector | alternativa elegida: <rule of A, B or C in prose> | separación
+  entre elementos de la franja: N px | selector: estilo píldora o subrayado, escala N % (alto ≈ H px, opciones ...) |
+  ancho de la muestra: N px | título de la muestra: "..." | pestaña usada: alto, corte (definido a alto 25, pendiente
+  constante), corte de cuerpo, ícono 24 px al 90 % pegado arriba a la derecha`, plus a note when Estándar is active.
+  Verification: page script extracted and `node --check` OK; loaded in headless Chrome (real render, no script errors)
+  with a scripted pass over A/B/C at 460 / 280 / 560 px, pill and underline, gap 8 / 16, Estándar shape, single view and
+  the Contorno preset, checking selector, icon and tab rectangles, title truncation and path output; visual check by
+  screenshots (rest, hover text, narrow, underline). Not verified: light theme (the lab is single dark by design), hover
+  by a real pointer, alert states on the sample (none), phone width.
+  Republish: succeeded, https://claude.ai/artifact/F3aAjXDvvsCMFKYZxoT6A8 (version 14).
+
 ## Next step
 
-C1 in progress (delegated writer), then republish the lab and hand it to the user (C2).
+C2: the user compares A/B/C in the lab (narrow and wide, rest and hover) and picks one with values; then C3 is refined.
