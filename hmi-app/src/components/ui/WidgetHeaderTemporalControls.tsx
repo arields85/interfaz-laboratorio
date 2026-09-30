@@ -17,8 +17,8 @@ export interface WidgetHeaderTemporalControlGroup<TValue extends string = string
 
 export interface WidgetHeaderTemporalControlsProps {
     /**
-     * Look of the options. Inside the top strip of the tab frame shape (`TabFrameStripContext`, where
-     * `WidgetHeader` places its trailing content) every widget gets `underline`, whatever it asks for:
+     * Look of the options. For a chart in the tab frame shape (`TabFrameStripContext`: its trailing content
+     * in the top strip or in the body-row fallback) every widget gets `underline`, whatever it asks for:
      * that decision lives here, not in each chart.
      */
     variant: 'pill' | 'underline';

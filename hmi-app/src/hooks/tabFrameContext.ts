@@ -48,9 +48,10 @@ export interface TabFrameContextValue {
 export type TabFrameAlertState = 'warning' | 'critical';
 
 /**
- * True inside the trailing host of a tab frame (the top strip). Controls that have a strip look
- * (the period selector's `underline` variant) read it to pick it in ONE place instead of each
- * widget repeating the condition.
+ * True for the trailing content of a chart that opts in to the tab strip, in the strip AND in its
+ * body-row fallback (the same look keeps its measured width independent of the placement). Controls
+ * that have a strip look (the period selector's `underline` variant) read it to pick it in ONE place
+ * instead of each widget repeating the condition.
  */
 export const TabFrameStripContext = createContext(false);
 

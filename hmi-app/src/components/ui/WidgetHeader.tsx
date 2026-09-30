@@ -235,8 +235,15 @@ export default function WidgetHeader({
     const reportTrailingWidth = tabFrame?.reportTrailingWidth;
     // A chart whose selector does not fit in the strip: its body row starts under the strip, like the lab's alternative A.
     const rowBelowStrip = inTab && Boolean(trailing) && tabFrame.trailingBelowStrip;
+    // A chart that opts in keeps the strip look (underline) in BOTH placements: its measured width then does
+    // not depend on where it is drawn, so the fit decision can neither oscillate nor depend on history.
+    const stripLook = trailingInStrip || rowBelowStrip;
     const trailingSlot = inTab && trailing && reportTrailingWidth
-        ? <TabFrameTrailingSlot onWidth={reportTrailingWidth}>{trailing}</TabFrameTrailingSlot>
+        ? (
+            <TabFrameStripContext.Provider value={stripLook}>
+                <TabFrameTrailingSlot onWidth={reportTrailingWidth}>{trailing}</TabFrameTrailingSlot>
+            </TabFrameStripContext.Provider>
+        )
         : null;
     const dataModeNode = dataMode ? (
         <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId={dataModeTestId} onTab={inTab} />
@@ -283,12 +290,7 @@ export default function WidgetHeader({
                 tabFrame.iconHost,
             )}
 
-            {trailingInStrip && tabFrame.trailingHost && createPortal(
-                <TabFrameStripContext.Provider value>
-                    {trailingSlot}
-                </TabFrameStripContext.Provider>,
-                tabFrame.trailingHost,
-            )}
+            {trailingInStrip && tabFrame.trailingHost && createPortal(trailingSlot, tabFrame.trailingHost)}
         </>
     ) : null;
 

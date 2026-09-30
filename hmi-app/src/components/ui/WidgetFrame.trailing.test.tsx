@@ -99,6 +99,7 @@ function renderChart(options: ChartOptions = {}) {
 describe('WidgetFrame with header trailing content (chart selector)', () => {
     afterEach(() => {
         vi.restoreAllMocks();
+        vi.unstubAllGlobals();
         resetFrameShapeOnDocument();
     });
 
@@ -258,7 +259,6 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             act(() => callbacks.forEach((callback) => callback()));
 
             expect(container.firstElementChild).not.toHaveAttribute('data-tab-title-hidden');
-            vi.unstubAllGlobals();
         });
 
         it('keeps the selector clickable and focusable inside the strip host (keyboard order: selector before the chart)', async () => {
@@ -327,8 +327,9 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             // The title and the icon stay in the tab strip.
             expect(within(screen.getByTestId('tab-frame-tab')).getByText('Temperatura')).toBeInTheDocument();
             expect(within(screen.getByTestId('tab-frame-icon-host')).getByTestId('chart-icon')).toBeInTheDocument();
-            // The selector looks as in the standard frame (pill), not as in the strip.
-            expect(within(screen.getByTestId('chart-selector')).getByRole('button', { name: '1h' }).className).toContain('theme-button');
+            // Same look as in the strip (underline): its width does not depend on the placement, so the fit
+            // decision cannot oscillate or depend on history between the two placements.
+            expect(within(screen.getByTestId('chart-selector')).getByRole('button', { name: '1h' }).className).not.toContain('theme-button');
         });
 
         it('never lets the body row push the selector outside the frame: it shrinks and scrolls inside the row', () => {
@@ -419,7 +420,6 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             expect(inStrip()).toBe(false);
             resizeTo(172);
             expect(inStrip()).toBe(true);
-            vi.unstubAllGlobals();
         });
 
         it.each([
