@@ -36,6 +36,7 @@ Todo widget nuevo debe:
 - Los títulos largos se truncan automáticamente con puntos suspensivos gracias a `grid-cols-[minmax(0,1fr)]` en el grid del header.
 - El comportamiento hover está integrado en `WidgetHeader`: el ícono transiciona `opacity-70 → opacity-100`, el título transiciona `text-industrial-muted → text-white`. Requiere la clase `group` en el `glass-panel` ancestro.
 - `WidgetHeaderTemporalControls` soporta variantes `pill` y `underline`, un grupo simple o dos grupos separados por divisor vertical, labels/values arbitrarios y disabled con `cursor-default`.
+- Forma de marco Pestaña: un gráfico con selector en `WidgetHeader.trailing` se enmarca con `WidgetFrame` (`widgetType`, `title`, `frameClassName="glass-panel"`, el resto de las clases en `className`, las heredadas en `outerClassName`; los `data-*`, el `ref` y el `data-testid` de la raíz van a `WidgetFrame`, que los aplica al elemento de contenido). Con Pestaña el header lleva el título a la pestaña, el ícono arriba a la derecha (aunque use `iconPosition="left"`) y el `trailing` a la franja superior, a la izquierda del ícono; su fila del body ya no ocupa altura. El selector pasa solo a la variante `underline` en la franja (lo decide `WidgetHeaderTemporalControls`): el renderer sigue pidiendo `pill` y no repite condiciones. Con Estándar todo queda como siempre. Los estados de carga sin header (esqueletos) siguen sin `WidgetFrame`. Detalle: `docs/DESIGN_SYSTEM.md` ("Forma del marco").
 
 ### Layout (elegir patrón explícito)
 - **Patrón A — flujo natural (`header + body + footer`)**:
