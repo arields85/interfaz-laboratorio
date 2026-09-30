@@ -158,6 +158,8 @@ describe('index.css tab frame shape', () => {
         expect(body).toContain('padding-left: var(--tab-frame-pad-start);');
         expect(body).toContain('padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));');
         expect(body).toContain('color: var(--tab-frame-text);');
+        // A capped tab on a short widget clips its title instead of letting it spill over the body.
+        expect(body).toContain('overflow: hidden;');
         expect(body).not.toContain('background');
         expect(body).not.toContain('clip-path');
     });

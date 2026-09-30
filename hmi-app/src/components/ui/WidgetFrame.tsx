@@ -33,7 +33,7 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, buildTabFrameGlowClipPath, buildTabFrame
 // measured, the CSS polygon of `index.css` is the fallback.
 //
 // A title with its own size (`tabTitleFontSize`, the `group` widget) makes the tab as tall as that
-// title needs (`useTabFrameHeight`): the shell publishes the effective height as its own
+// title needs, but never more than the shell can give while keeping a minimal body (`useTabFrameHeight`): the shell publishes the effective height as its own
 // `--tab-frame-height` (so the fill, the border clip, the tab and the icon host follow), the
 // silhouette and the icon placement use it, and it is reported next to the tab width for the layers
 // outside the shell. The tab grows downward into the widget; the outer size never changes.
@@ -101,8 +101,8 @@ export default function WidgetFrame({
         [titleHost, iconHost, alertState, titleFontSize],
     );
     const reportTabWidth = useContext(TabFrameReporterContext);
-    // Effective tab height of a title with its own size; null keeps the `--tab-frame-height` token.
-    const ownTabHeight = useTabFrameHeight(titleFontSize);
+    // Effective tab height of a title with its own size, capped so the body keeps room; null keeps the `--tab-frame-height` token.
+    const ownTabHeight = useTabFrameHeight(titleFontSize, shellRef);
     const tabHeight = ownTabHeight ?? undefined;
     const geometry = useTabFrameGeometry(shellRef, tabActive ? tabWidth : null, tabHeight);
     const silhouette = geometry ? buildTabFramePath(geometry) : null;

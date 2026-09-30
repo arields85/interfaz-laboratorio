@@ -1910,6 +1910,8 @@ h1, h2, h3, h4, h5, h6 {
     padding-left: var(--tab-frame-pad-start);
     padding-right: calc(var(--tab-frame-tab-cut) + var(--tab-frame-pad-end));
     color: var(--tab-frame-text);
+    /* Un título alto en un widget corto: la pestaña se recorta a lo que el widget puede dar y el título se recorta con ella. */
+    overflow: hidden;
   }
 
   /* El ícono del header se dibuja en este anfitrión del envoltorio (el header conserva un hueco

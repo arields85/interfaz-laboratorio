@@ -27,3 +27,28 @@ export function resolveTabFrameHeight({ baseHeight, titleFontSize, padY }: TabFr
 
     return Math.round(height * 100) / 100;
 }
+
+export interface TabFrameHeightCapInput {
+    /** Tab height (px) the title asks for. */
+    tabHeight: number;
+    /** Height (px) of the frame's box. */
+    frameHeight: number;
+    /** Size (px) of the body's top-right chamfer (`--tab-frame-body-cut`). */
+    bodyCut: number;
+    /** Corner radius (px) of the frame. */
+    radius: number;
+}
+
+/**
+ * Caps the tab so the widget keeps a minimal body: the tab never takes more than the frame height
+ * minus the body chamfer minus room for the rounded bottom corners (2 x radius). Without the cap a
+ * tall title on a short widget would invert the silhouette. Never NaN: a non-finite frame measure
+ * leaves the requested height as it was; the result is never negative.
+ */
+export function capTabFrameHeight({ tabHeight, frameHeight, bodyCut, radius }: TabFrameHeightCapInput): number {
+    const requested = Number.isFinite(tabHeight) ? Math.max(0, tabHeight) : 0;
+    const available = frameHeight - bodyCut - 2 * radius;
+    const capped = Number.isFinite(available) ? Math.max(0, Math.min(requested, available)) : requested;
+
+    return Math.round(capped * 100) / 100;
+}

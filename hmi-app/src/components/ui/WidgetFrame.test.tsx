@@ -599,6 +599,110 @@ describe('WidgetFrame', () => {
             expect(onTabWidth).toHaveBeenLastCalledWith(180, 47);
         });
 
+        describe('on a widget too short for the requested tab', () => {
+            it('caps the tab at the shell height minus the minimum body (chamfer + 2 x radius)', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout();
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+
+                const { container } = renderFramed({ tabTitleFontSize: 200 });
+
+                // 60 - (0 + 2 x 4) instead of 200 x 1.1 + 2 x 4.25 = 228.5
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('52px');
+            });
+
+            it('uses the body chamfer token in the minimum body', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout({ '--tab-frame-body-cut': '10px' });
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+
+                const { container } = renderFramed({ tabTitleFontSize: 200 });
+
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('42px');
+            });
+
+            it('draws the silhouette, the border and the glow with the capped height, never inverted', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout();
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+                const geometry = { width: 300, height: 60, tabWidth: 180, tabHeight: 52, tabCut: 19, bodyCut: 0, radius: 4, glowSpread: 2 };
+
+                renderFramed({ tabTitleFontSize: 200, frameClassName: 'widget-state-warning' });
+
+                expect(screen.getByTestId('tab-frame-surface').style.clipPath).toBe(`path('${buildTabFramePath(geometry)}')`);
+                expect(screen.getByTestId('tab-frame-border').querySelector('path')?.getAttribute('d')).toBe(buildTabFramePath(geometry));
+                expect(screen.getByTestId('tab-frame-glow').style.clipPath).toBe(
+                    `path(evenodd, '${buildTabFrameGlowClipPath(geometry, TAB_FRAME_GLOW_CLIP_MARGIN_PX)}')`,
+                );
+            });
+
+            it('reports the SAME capped, finite height to the layers outside the shell', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout();
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+                const onTabWidth = vi.fn();
+
+                const { container } = render(
+                    <GridFrameScope onTabWidth={onTabWidth}>
+                        <WidgetFrame widgetType="group" title="Grupo" frameClassName="glass-panel" className="p-5" tabTitleFontSize={200}>
+                            <WidgetHeader title="Grupo" icon={Activity} />
+                        </WidgetFrame>
+                    </GridFrameScope>,
+                );
+
+                const shellHeight = Number.parseFloat(shellOf(container).style.getPropertyValue('--tab-frame-height'));
+                expect(Number.isFinite(shellHeight)).toBe(true);
+                expect(shellHeight).toBe(52);
+                expect(onTabWidth).toHaveBeenLastCalledWith(180, shellHeight);
+            });
+
+            it('places the icon with the capped height', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout({ '--tab-frame-body-cut': '10px' });
+                vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+
+                const { container } = renderFramed({ tabTitleFontSize: 200 });
+
+                // The preferred top is the capped tab (42) + gap (4); the uncapped tab would put it at 232.5.
+                const top = Number.parseFloat(shellOf(container).style.getPropertyValue('--tab-frame-icon-top'));
+                expect(Number.isFinite(top)).toBe(true);
+                expect(top).toBeLessThanOrEqual(42 + 4);
+            });
+
+            it('re-caps live when the widget is resized', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout();
+                const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(300);
+                const observers: Array<() => void> = [];
+                vi.stubGlobal('ResizeObserver', class {
+                    constructor(callback: () => void) {
+                        observers.push(callback);
+                    }
+                    observe() {}
+                    disconnect() {}
+                    unobserve() {}
+                });
+
+                const { container } = renderFramed({ tabTitleFontSize: 200 });
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('228.5px');
+
+                clientHeight.mockReturnValue(100);
+                act(() => observers.forEach((callback) => callback()));
+
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('92px');
+                vi.unstubAllGlobals();
+            });
+
+            it('leaves the requested tab untouched on a normal-size widget (no cap, same 47 px)', () => {
+                previewFrameShape('tab');
+                mockOwnSizeLayout();
+
+                const { container } = renderFramed({ tabTitleFontSize: 35 });
+
+                expect(shellOf(container).style.getPropertyValue('--tab-frame-height')).toBe('47px');
+            });
+        });
+
         it('gives the tab title the typography of the text-title widget, without uppercase', () => {
             previewFrameShape('tab');
             mockOwnSizeLayout();
