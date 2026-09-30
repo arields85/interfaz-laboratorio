@@ -321,5 +321,8 @@ F1–F6 done and accepted live; F7 pending. Order agreed with the user:
    --untracked-scope=exclude --expected-untracked-inventory=<from status>`; relay each consent; acknowledge each
    approval; delete the worktrees afterwards (a CodeGraph daemon may lock `.codegraph/` files — see
    `backlog/leftover-worktree-cleanup` for the Restart Manager technique).
+   User authorization (2026-09-29, new session): steps 1 and 2 run autonomously; the user GRANTED in advance the
+   consent of every RDD review of this feature (native review slices included) and approves the sliced review.
+   Steps 3 and 4 wait for the user's visual review.
 3. Fast-forward merge `feat/tab-frame-shape` into local `main` (only on the user's OK).
 4. Push `main` to `origin` only when the user decides.
