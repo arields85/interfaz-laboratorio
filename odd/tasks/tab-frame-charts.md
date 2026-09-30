@@ -92,6 +92,29 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   by a real pointer, alert states on the sample (none), phone width.
   Republish: succeeded, https://claude.ai/artifact/F3aAjXDvvsCMFKYZxoT6A8 (version 14).
 
+- 2026-09-30 Native review of C1 (slice `9f01d25..80366a5`, 5 files / 599 lines, tier medium, lens review-reliability,
+  consent granted by the user on 2026-09-30): APPROVED and acknowledged, lineage `review-877de77ca63001ea`. Three
+  advisory findings:
+  - `R3-narrow-width-two-tab-degenerate`: fixed in `b066440`. The width slider minimum is now 280 (matches "Angosto")
+    and the sample width never drops below what the strip needs for the selector, the icon and the gaps (computed from
+    the measured selector width; worst case alternative C: cut + end padding + selector + icon + 2 gaps, 286 px at gap 24
+    and scale 110; the readout shows "(mínimo)"). A title tab with less than 12 px of room is hidden (label
+    `visibility: hidden`, silhouette without the title tab, body top-left corner stays convex) instead of being drawn
+    under the selector or the second tab.
+  - `R3-stored-cw-unvalidated`: fixed in `b066440`. `sanitizeCw` whitelists `alt` and `selStyle`, requires a boolean
+    `compare`, clamps `gap` / `selScale` / `width` to the control ranges (numbers only) and falls back per field to
+    `CW_DEFAULT` (a non-string title too).
+  - `R3-stored-tuning-masks-accepted-defaults`: not changed on purpose. Stored tab tuning is the viewer's own; the
+    reset button ("Restablecer la pestaña a los valores aceptados") stays the way to get the accepted values.
+- 2026-09-30 Fix `b066440` (`fix(style-lab): keep the chart sample valid at narrow widths and validate its stored
+  state`, +55/-12, `tools/style-lab/style-lab.html` only). Verification: extracted script `node --check` OK; headless
+  Chrome with a scripted pass at slider 280, gap 24, scale 110 for A, B and C (width raised to 286, selector inside the
+  card in all three, title tab hidden in B and C and visible in A, correct rounded silhouette) and at 280 with defaults
+  (A and B show the title, C hides it); screenshot check of the minimum case; stored-state cases (invalid enums, string
+  numbers, out-of-range numbers, non-string title, `cw: null`, a stored width of 220) all load clamped or defaulted with
+  no script errors. Not verified: phone width (the card is capped at 100 % of the stage, so below the floor the title
+  tab still degrades but the selector can overflow the card). Republished to the same URL, version 15.
+
 ## Next step
 
 C2: the user compares A/B/C in the lab (narrow and wide, rest and hover) and picks one with values; then C3 is refined.
