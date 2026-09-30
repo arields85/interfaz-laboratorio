@@ -555,6 +555,21 @@ describe('PropertyDock text-title', () => {
         expect(updates.at(-1)?.displayOptions).toMatchObject({ fontSize: 72 });
     });
 
+    it.each([
+        { stored: Number.NaN, shown: '35' },
+        { stored: 500, shown: '200' },
+        { stored: 4, shown: '12' },
+    ])('shows the size the canvas renders for a stored $stored', ({ stored, shown }) => {
+        renderPropertyDock({
+            type: 'text-title',
+            title: 'Título de texto',
+            binding: { mode: 'simulated_value', simulatedValue: 0 },
+            displayOptions: { fontSize: stored },
+        });
+
+        expect(getInputInSection('General', 'Tamaño')).toHaveValue(shown);
+    });
+
     it('shows all other dashboards, disables unpublished targets, and persists only published navigation targets', async () => {
         const availableDashboards: Dashboard[] = [
             {

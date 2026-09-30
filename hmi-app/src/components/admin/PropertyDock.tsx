@@ -55,7 +55,6 @@ import {
 } from './adminSidebarStyles';
 import { supportsCatalogVariable, supportsHierarchy } from '../../utils/widgetCapabilities';
 import {
-    DEFAULT_TEXT_TITLE_FONT_SIZE,
     MAX_TEXT_TITLE_FONT_SIZE,
     MIN_TEXT_TITLE_FONT_SIZE,
     normalizeTitleFontSize,
@@ -2045,7 +2044,7 @@ export default function PropertyDock(props: PropertyDockProps) {
                                     <>
                                         <DockFieldRow label="Tamaño">
                                             <AdminNumberInput
-                                                value={(selectedWidget.displayOptions as TextTitleDisplayOptions | undefined)?.fontSize ?? DEFAULT_TEXT_TITLE_FONT_SIZE}
+                                                value={normalizeTitleFontSize((selectedWidget.displayOptions as TextTitleDisplayOptions | undefined)?.fontSize)}
                                                 min={MIN_TEXT_TITLE_FONT_SIZE}
                                                 max={MAX_TEXT_TITLE_FONT_SIZE}
                                                 step={1}
