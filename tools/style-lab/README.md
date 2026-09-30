@@ -37,7 +37,26 @@ between them.
   start padding, optional border around the tab, and an alert preview (warning/critical) with
   tab fill and text taken from the alert color, plus the border and glow along the silhouette.
   "Reproducir entrada" replays the outline draw-in. "Copiar elección" lists every value with its
-  `--tab-frame-*` token name. The charts widget keeps the standard frame, as in the app.
+  `--tab-frame-*` token name. The "Producción" chart in the grid keeps the standard frame, as in
+  the app today. The tab cut is defined for a 25 px tab and scales with the tab height (constant
+  slope, like `scaleTabFrameCut`); the lab defaults are the accepted app tokens (height 25, cut 19,
+  body cut 0, fill white 15 %, text white 70 % -> 100 %). A viewer's stored tuning still wins.
+- **"Gráfico con selector" (tab frame for charts with a scale/period selector):** at the end of the
+  preview, a sample chart (title, header icon, selector with the real options 1h 24h 7d 30d 12m, Y
+  scale, grid and line, drawn in inline SVG from the measured plot box) in the tab shape, with three
+  placements of the selector: **A** in the body's first row, right-aligned; **B** in the tab strip,
+  right side, between the tab and the icon (the body row disappears, the chart gains that height, the
+  tab and its truncating title stop before the selector); **C** in a second, mirrored tab flush with
+  the right edge (slanted side to the left, same slope and fill, one silhouette and border for both
+  tabs). The icon is 24 px at 90 %, pinned top-right. Controls: alternative (A/B/C), "Mostrar las
+  tres juntas" (compare view), selector style (píldora / subrayado, as `WidgetHeaderTemporalControls`),
+  gap between the strip elements, selector scale, sample width (with narrow 280 / wide 560 shortcuts,
+  to see the title truncate) and title text. Rest and hover are testable like the other widgets
+  (hover the sample, or use "Texto hover"). With the Estándar shape the sample shows today's header.
+  "Restablecer la pestaña a los valores aceptados" resets the tab tokens above. "Copiar elección"
+  adds a "Gráfico con selector" part: the chosen alternative and its placement rule (so a later
+  session can port it exactly), gap, selector style and scale, sample width and title, and the tab
+  values used. Adjustments are remembered in the browser like the rest of the lab.
 - **Presets:** Instrumento (the app's `INSTRUMENT_THEME_STYLE`, and the lab's initial state), Actual
   (Clásico), Vidrio con remate, Industrial recto, Contorno (HMI). Switching preset keeps the shape
   and tab settings.
