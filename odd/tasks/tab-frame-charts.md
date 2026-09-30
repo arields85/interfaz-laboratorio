@@ -47,16 +47,16 @@ Lab controls: A/B/C switch on a sample chart widget, plus spacing, selector heig
   the tab strip, between the tab and the icon). The user first wrote "elijo la c" with a screenshot showing B selected;
   asked, the user confirmed "la B, me equivoqué". Values from the screenshot: selector style **Subrayado** (underline),
   gap **15 px**, selector scale **100 %** (23.5 px tall in the 25 px strip). The 480 px width is only the lab sample size.
-- [ ] **C3** — Implement alternative B in the app for the five chart widgets (`trend-chart`, `trend-chart-v2`,
+- [x] **C3** — Implement alternative B in the app for the five chart widgets (`trend-chart`, `trend-chart-v2`,
   `prod-trend`, `prod-history`, `activity-analytics`). Route: delegated writer (writer trigger: 2+ non-trivial files).
-  - [ ] **C3a** — Frame infrastructure: the header's `trailing` content (the scale selector) is placed in the top strip,
+  - [x] **C3a** — Frame infrastructure: the header's `trailing` content (the scale selector) is placed in the top strip,
     right side, left of the icon, with the chosen gap as a token; the title tab (and its truncating title) stops before
     it and is hidden cleanly when it cannot fit (lab rule: under 12 px of room); the body's header row no longer takes
     height when title, icon and trailing all live in the strip (the chart gains that row). Builder rings/ghosts and the
     viewer entrance keep following the silhouette.
-  - [ ] **C3b** — Roll out: `supportsTabFrame` covers the five chart widgets; each renderer uses `WidgetFrame`; with
+  - [x] **C3b** — Roll out: `supportsTabFrame` covers the five chart widgets; each renderer uses `WidgetFrame`; with
     Pestaña the selector uses the `underline` variant (today `pill`; Estándar keeps `pill`).
-  - [ ] **C3c** — Docs (`docs/DESIGN_SYSTEM.md`, `WIDGET_AUTHORING.md` if it documents the header) and this document.
+  - [x] **C3c** — Docs (`docs/DESIGN_SYSTEM.md`, `WIDGET_AUTHORING.md` if it documents the header) and this document.
 - [ ] **C4** — Live look, native review (RDD per work-unit commit), merge on the user's OK.
 
 ## Acceptance criteria
@@ -127,7 +127,78 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   no script errors. Not verified: phone width (the card is capped at 100 % of the stage, so below the floor the title
   tab still degrades but the selector can overflow the card). Republished to the same URL, version 15.
 
+- 2026-09-30 C3 done (delegated writer, strict TDD, Vitest; RED observed before each GREEN). Route: delegated writer
+  (writer trigger: 2+ non-trivial files). TDD source: global user config; runner `npx vitest run <file>` in `hmi-app/`.
+  Commits (work units, Conventional Commits, no attribution; GGA passed every one):
+  - `2b5c22d` feat(theme): draw the tab frame silhouette without the title tab (87+/14-). RED: `tabFramePath` 3 failed / 25
+    passed (no-tab path, vertices, `TAB_FRAME_TITLE_HIDDEN`), `GridSelectionFrame.tabFrame` 1 and
+    `ViewerEntranceFrameOverlays.tabFrame` 1 failed (hidden title tab) -> GREEN 28/28 and 18/18.
+  - `afc1a20` feat(theme): host the header trailing content in the tab strip (818+/42-; over the ~400 heuristic only through
+    tests, ~470 of the lines; hook, pure util, frame, header, CSS and their tests share one behavior). RED:
+    `tabFrameTrailing` module missing, `tabFrame.css.test` 6 failed / 18 passed, `WidgetFrame.trailing.test` 10 failed / 2
+    passed, `WidgetHeaderTemporalControls` 1 failed / 7 passed -> GREEN (98 files / 967 tests in ui, hooks, utils, css).
+  - `fa20c33` feat(widgets): trend-chart and trend-chart-v2 take the tab frame shape (300+/26-). RED: capabilities 5 failed
+    (`supportsTabFrame`), `TrendChartWidget` 4 failed / 2 guards passed, `TrendChartV2Widget` 4 failed / 61 passed -> GREEN
+    28/28 and 65/65.
+  - `3e3099b` feat(widgets): prod-trend, prod-history and activity-analytics take the tab frame shape (334+/15-). RED:
+    `ProdTrendWidget` 3 failed / 29 passed, `ProduccionHistoricaWidget` 2 failed / 23 passed, `ActivityAnalyticsWidget` 3 failed /
+    152 passed -> GREEN 32/32, 25/25 and 155/155.
+  - `2353d55` docs(theme): document the chart selector in the tab strip (5+/1-, `docs/DESIGN_SYSTEM.md`, `WIDGET_AUTHORING.md`).
+  - Final commands (in `hmi-app/`, after the last code commit `3e3099b`): `npx tsc -b` exit 0; `npm run lint` exit 0; `npm test`
+    258 files / 3377 tests passed (an earlier full run, before the docs commit, had only the known flaky `Topbar.test.tsx`
+    "continues admin navigation immediately when runtime short is disabled" failing; it passed in this run);
+    `npm run build` ok.
+  - Tokens added (`index.css` `:root`): `--tab-frame-trailing-gap: 15px`, `--tab-frame-min-title: 12px`. No scaling token: the
+    selector is at 100 %. In a real browser (headless Chrome, scratch page with the real components and `index.css`, not
+    committed) the underline selector measured 22.5 px tall, centered in the 25 px strip (y 1.3 to 23.8).
+  - Mechanism:
+    - Trailing host: `WidgetFrame` renders `.hmi-tab-frame-trailing-host` as the FIRST child of the shell (keyboard reaches the
+      selector before the chart; `surface + content` adjacency for the border reserve is untouched). `WidgetHeader` portals
+      `trailing` into it (`TabFrameContext.trailingHost`); the host is absolute, `top: 0`, `right: --tab-frame-icon-right`, strip
+      height, `align-items: center`, `pointer-events: none` with `pointer-events: auto` on its children, `display: none` while
+      empty. When the icon occupies the strip the host keeps `padding-right: --tab-frame-icon-strip-extent` (scaled icon +
+      `--tab-frame-trailing-gap`), so the gap selector-to-icon is the token and the icon is never covered.
+    - Reserve: `hooks/useTabFrameStrip.ts` (layout effect + `ResizeObserver` on shell and host + style `MutationObserver`)
+      measures the shell width and the host `offsetWidth` and calls the pure `utils/tabFrameTrailing.ts`
+      (`resolveTabFrameTrailing`: reserve = max(icon reserve, right + host width + gap); `resolveTabFrameStripExtent`). The shell
+      publishes `--tab-frame-tab-reserve` (overrides the CSS `:has` rule inline), `--tab-frame-icon-strip-extent` and
+      `--tab-frame-header-clearance`, only when there is trailing content, so every other tab widget is exactly as before.
+    - Hidden title: room = frame width - reserve - tab cut - pad start - pad end; under `--tab-frame-min-title` (only with
+      trailing content and a measured frame) the shell sets `data-tab-title-hidden` (`visibility: hidden` on the tab) and the
+      frame reports `TAB_FRAME_TITLE_HIDDEN` (-1; 0 stays "not measured yet"). `useTabFrameGeometry` maps it to
+      `tabWidth: 0`, and `buildTabFramePath` with `tabWidth <= 0` starts at the body top line with a convex top-left corner, so
+      the surface clip, border, glow, builder rings and ghosts and the viewer flash and outline agree (each has a test). A
+      browser check at 460 / 300 / 220 px: tab 184 / 83 px wide and ~15 px before the selector, hidden at 220.
+    - Header row: with `trailing` in the tab shape `WidgetHeader` renders only a `.hmi-tab-frame-header-clearance` spacer
+      (height `--tab-frame-header-clearance` = tab height - content padding-top - border, measured on the content element,
+      4 px for `p-5`) plus the subtitle row if any; title, icon and trailing live in the strip. `iconPosition="left"` now also
+      takes the tab (icon at the top right) in the tab shape; the standard shape is untouched. Widgets without `trailing` keep
+      the invisible spacer and icon placeholder ("content does not move").
+    - Variant, ONE place: `WidgetHeader` wraps the portaled trailing in `TabFrameStripContext.Provider`;
+      `WidgetHeaderTemporalControls` reads it and renders `underline` there whatever `variant` it was given. The five renderers
+      still pass `variant="pill"` (Estándar unchanged, pill).
+    - Roll out: `supportsTabFrame` includes the five types; each renderer is rooted in `WidgetFrame` (`glass-panel` as
+      `frameClassName`, the rest of the class list as `className`, the parent's as `outerClassName`, so Estándar renders the same
+      single element with the same classes; `data-*`, `ref` and `data-testid` pass through to the content element). Runtime-state
+      roots of `prod-trend` and `activity-analytics` (`renderRuntimeState`) and both loading roots of `trend-chart` use it too.
+  - Decisions/assumptions (adjustable in the live look): (1) `prod-history`'s loading root (no header) stays the standard frame
+    in both shapes (a tab with no title would be empty), like KPI's skeleton. (2) The chart container keeps its own `-mt-1`, so
+    with the 4 px clearance the chart container starts 4 px inside the strip (its own 8 px top margin keeps the drawn plot below
+    the strip); not adjusted without seeing a real chart. (3) The strip elements use `--tab-frame-icon-right` as the shared
+    right offset; `--tab-frame-body-cut` is NOT overridden for charts (the lab ignores it for B); the default 0 gives the lab
+    layout, and a larger value moves the icon out of the strip and the selector then sits at the right edge. (4) The
+    `Back to preset` button of trend-chart-v2 travels with the selector into the strip (its `rounded-md` accent look is
+    unchanged). (5) `trend-chart-v2` always has a title (`||` fallback), so it is always eligible.
+  - Needs the browser (live look, C4): real charts in Pestaña (the unit label and top adornments against the strip and the
+    tab with the 4 px overlap of the container, the `prod-history` legend row right under the strip, `prod-trend` and
+    `activity-analytics` with two selector groups (the widest strip, hides the title sooner), the runtime-state layouts
+    with the collapsed header), hover and focus look of the underline selector on the strip, the builder (hover actions on
+    the top edge over the selector, the hidden-title silhouette in selection rings and ghosts), the viewer entrance outline
+    with a hidden title tab, and phone-width viewports.
+  - Gap for the parent/user: none blocking. Visual tuning (overlap of the chart under the strip, selector height against
+    other themes' `theme-button` fonts) waits for the live look.
+
 ## Next step
 
-C3 in progress (delegated writer, strict TDD). Then C4: live look with the user, RDD per work-unit commit (consent is
+C3 done. Then C4: live look with the user, RDD per work-unit commit (consent is
 relayed per candidate for this feature), merge on the user's OK. Separate pending user decision: push of `main`.
