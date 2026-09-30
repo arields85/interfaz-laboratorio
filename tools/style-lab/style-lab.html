@@ -1081,7 +1081,7 @@
       </div>
       <div class="range-row wide">
         <label for="cw-width">Ancho</label>
-        <input class="range" id="cw-width" type="range" min="220" max="720" step="10" aria-label="Ancho del gráfico de muestra">
+        <input class="range" id="cw-width" type="range" min="280" max="720" step="10" aria-label="Ancho del gráfico de muestra">
         <span class="range-val" id="cw-width-val"></span>
       </div>
       <div class="seg" id="cw-width-quick">
@@ -1092,7 +1092,7 @@
         <label for="cw-title">Título</label>
         <input class="text-in" id="cw-title" type="text" maxlength="80" spellcheck="false" aria-label="Título del gráfico de muestra">
       </div>
-      <p class="hint">Separación: entre la pestaña, el selector y el ícono en B; entre las dos pestañas y entre el selector y el ícono en C; entre el ícono y el final de la pestaña en A. Escala: tamaño del selector (con más del 110 % ya no entra en la franja de 25 px). Un ancho angosto muestra cómo se trunca el título.</p>
+      <p class="hint">Separación: entre la pestaña, el selector y el ícono en B; entre las dos pestañas y entre el selector y el ícono en C; entre el ícono y el final de la pestaña en A. Escala: tamaño del selector (con más del 110 % ya no entra en la franja de 25 px). Un ancho angosto muestra cómo se trunca el título: si ni siquiera entran el punto y unas letras, la pestaña del título se oculta. El ancho nunca baja de lo que ocupan el selector, el ícono y las separaciones; en ese caso el valor mostrado sube al mínimo.</p>
       <button type="button" class="copy-state" id="cw-reset">Restablecer la pestaña a los valores aceptados</button>
       <p class="hint">Alto 25 px, corte 19 px, corte de cuerpo 0 px, relleno y texto como en la app. No cambia el radio ni el preset.</p>
     </div>
@@ -1497,6 +1497,28 @@
     };
     // Chart sample (selector placement A / B / C). Selector: 'pill' | 'underline'; scale in %; sizes in px.
     const CW_DEFAULT = { alt: 'B', compare: true, gap: 8, selScale: 100, selStyle: 'pill', width: 460, title: 'Tendencia de producción' };
+    // Control ranges (same as the inputs) and the smallest room the title tab needs to be drawn at all
+    // (dot + a couple of letters); below it the title tab is hidden instead of drawn under the selector.
+    const CW_LIMITS = { gap: [0, 24], selScale: [70, 110], width: [280, 720] };
+    const CW_MIN_TITLE = 12;
+    // Stored chart-sample state is untrusted: whitelist enums, coerce the boolean, clamp numbers, fall back per field.
+    function sanitizeCw(raw) {
+      const d = clone(CW_DEFAULT);
+      if (!raw || typeof raw !== 'object') return d;
+      const num = function (key) {
+        const v = Number(raw[key]);
+        return typeof raw[key] === 'number' && isFinite(v) ? Math.min(CW_LIMITS[key][1], Math.max(CW_LIMITS[key][0], v)) : d[key];
+      };
+      return {
+        alt: ['A', 'B', 'C'].indexOf(raw.alt) >= 0 ? raw.alt : d.alt,
+        compare: typeof raw.compare === 'boolean' ? raw.compare : d.compare,
+        gap: num('gap'),
+        selScale: num('selScale'),
+        selStyle: ['pill', 'underline'].indexOf(raw.selStyle) >= 0 ? raw.selStyle : d.selStyle,
+        width: num('width'),
+        title: typeof raw.title === 'string' ? raw.title.slice(0, 80) : d.title,
+      };
+    }
     const CW_ALT_LABELS = {
       A: 'selector en el cuerpo',
       B: 'selector en la franja de la pestaña',
@@ -1576,7 +1598,7 @@
       if (saved && saved.state && saved.state.w && saved.state.tf) {
         const tf = Object.assign(clone(TF_DEFAULT), saved.state.tf);
         tf.text = Object.assign(clone(TF_DEFAULT.text), saved.state.tf.text);
-        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf, cw: Object.assign(clone(CW_DEFAULT), saved.state.cw) });
+        state = Object.assign(clone(PRESETS.instrument), saved.state, { tf: tf, cw: sanitizeCw(saved.state.cw) });
       }
     } catch (err) { /* storage unavailable: start from the defaults */ }
     const editing = { w: 'rest', b: 'rest', i: 'rest', g: 'rest' };
@@ -2072,6 +2094,13 @@
       const base = Math.max(0, radius);
       return roundedPolygonPath(poly, function (convex) { return Math.max(0, convex ? base - inset : base + inset); });
     }
+    // Start of the silhouette: the title tab, or (chart samples that dropped their title tab, width 0) just the
+    // body's top-left corner so it stays a convex, rounded corner.
+    function leftTabPoints(tabW, tabCut, tabHeight) {
+      return tabW > 0
+        ? [{ x: 0, y: 0 }, { x: tabW - tabCut, y: 0 }, { x: tabW, y: tabHeight }]
+        : [{ x: 0, y: tabHeight }];
+    }
     // Silhouette with a second, mirrored tab flush with the right edge (chart alternative C): same slope, same
     // radius, same vertex rules as the single-tab path, so the border and the fill follow both tabs.
     function twoTabPath(g, inset) {
@@ -2079,21 +2108,19 @@
       const tabW = Math.max(0, Math.min(g.tabWidth, g.width - rightW));
       const tabCut = Math.max(0, Math.min(g.tabCut, tabW));
       const rightCut = Math.max(0, Math.min(g.tabCut, rightW));
-      return shapePath([
-        { x: 0, y: 0 }, { x: tabW - tabCut, y: 0 }, { x: tabW, y: g.tabHeight },
+      return shapePath(leftTabPoints(tabW, tabCut, g.tabHeight).concat([
         { x: g.width - rightW, y: g.tabHeight }, { x: g.width - rightW + rightCut, y: 0 },
         { x: g.width, y: 0 }, { x: g.width, y: g.height }, { x: 0, y: g.height },
-      ], g.radius, inset || 0);
+      ]), g.radius, inset || 0);
     }
     function tabPath(g, inset) {
       if (g.rightTab) return twoTabPath(g, inset);
       const tabW = Math.max(0, Math.min(g.tabWidth, g.width - g.bodyCut));
       const tabCut = Math.max(0, Math.min(g.tabCut, tabW));
-      return shapePath([
-        { x: 0, y: 0 }, { x: tabW - tabCut, y: 0 }, { x: tabW, y: g.tabHeight },
+      return shapePath(leftTabPoints(tabW, tabCut, g.tabHeight).concat([
         { x: g.width - g.bodyCut, y: g.tabHeight }, { x: g.width, y: g.tabHeight + g.bodyCut },
         { x: g.width, y: g.height }, { x: 0, y: g.height },
-      ], g.radius, inset || 0);
+      ]), g.radius, inset || 0);
     }
     function rectPath(w, h, radius, inset) {
       return shapePath([{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }], radius, inset);
@@ -2151,11 +2178,16 @@
       // selector and/or the second tab, whichever the alternative puts in the strip.
       const chart = card.classList.contains('cw-card') ? chartMetrics(card) : null;
       const reserve = chart ? chart.reserve : tf.bodyCut;
-      label.style.maxWidth = Math.max(0, W - reserve - cut - tf.padStart - tf.padEnd) + 'px';
+      const room = W - reserve - cut - tf.padStart - tf.padEnd;
+      label.style.maxWidth = Math.max(0, room) + 'px';
+      // A chart sample whose title cannot even show the dot and a couple of letters drops the title tab
+      // (hidden label, no silhouette) instead of drawing it under the selector or the second tab.
+      const noTitle = !!chart && room < CW_MIN_TITLE;
+      if (chart) card.querySelector('.tf-tab').style.visibility = noTitle ? 'hidden' : '';
       return {
         width: W, height: H, tabHeight: tf.height, tabCut: cut, bodyCut: chart ? chart.bodyCut : tf.bodyCut,
         rightTab: chart ? chart.rightTab : 0,
-        tabWidth: tf.padStart + label.offsetWidth + tf.padEnd + cut, radius: state.w.rest.radius,
+        tabWidth: noTitle ? 0 : tf.padStart + label.offsetWidth + tf.padEnd + cut, radius: state.w.rest.radius,
       };
     }
     // Chart sample strip metrics per alternative (px, border box). The selector and the icon sit at fixed
@@ -2281,7 +2313,18 @@
       icon.style.top = (top - 1) + 'px';
       icon.style.right = (ICON_RIGHT - 1) + 'px';
     }
-    function layoutAll() { cards.forEach(layoutCard); }
+    // The sample never gets narrower than what the strip needs for the selector, the icon and the gaps
+    // (worst case: alternative C, whose second tab is the widest); the title tab then degrades on its own.
+    function applyChartWidth() {
+      const cw = state.cw;
+      const sel = document.querySelector('.cw-item:not([hidden]) .cw-sel');
+      const selW = sel ? sel.offsetWidth : 0;
+      const floor = selW ? Math.ceil(effectiveTabCut() + state.tf.padEnd + selW + CW_ICON_WIDTH + 2 * cw.gap) : 0;
+      const width = Math.max(cw.width, floor);
+      setVar('--cw-w', width + 'px');
+      $('cw-width-val').textContent = width + ' px' + (width > cw.width ? ' (mínimo)' : '');
+    }
+    function layoutAll() { applyChartWidth(); cards.forEach(layoutCard); }
     if (window.ResizeObserver) {
       const ro = new ResizeObserver(function (entries) {
         entries.forEach(function (en) { layoutCard(en.target); });
