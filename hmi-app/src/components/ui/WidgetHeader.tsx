@@ -1,4 +1,4 @@
-import { useContext } from 'react';
+import { useContext, useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
@@ -167,6 +167,44 @@ export function WidgetHeaderDataMode({
         : dot;
 }
 
+/**
+ * The header's trailing content in a tab frame, in the strip or in the body row. It reports its
+ * INTRINSIC width (`w-max`, `shrink-0`: the same wherever it is rendered, never the room it is given) to
+ * the frame, which decides the placement from it; 0 when it goes away.
+ */
+function TabFrameTrailingSlot({ onWidth, children }: { onWidth: (widthPx: number) => void; children: ReactNode }) {
+    const ref = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        const element = ref.current;
+
+        if (!element) {
+            return undefined;
+        }
+
+        const measure = () => onWidth(element.offsetWidth);
+        measure();
+
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+        resizeObserver?.observe(element);
+
+        return () => {
+            resizeObserver?.disconnect();
+            onWidth(0);
+        };
+    }, [onWidth]);
+
+    return (
+        <div
+            ref={ref}
+            data-tab-frame-slot="trailing"
+            className="flex w-max shrink-0 items-center gap-2 whitespace-nowrap leading-none"
+        >
+            {children}
+        </div>
+    );
+}
+
 export default function WidgetHeader({
     title,
     titleLeading,
@@ -189,9 +227,15 @@ export default function WidgetHeader({
     // Tab frame shape: the title (and its data-mode dot) live in the tab and the icon in the top-right
     // corner (whatever its position in the standard header). Without trailing content the title row
     // keeps its height so the subtitle and the content below never move; WITH trailing content (a chart's
-    // selector) everything lives in the strip and the row only keeps the clearance under it.
+    // selector) everything lives in the strip and the row only keeps the clearance under it. That is only
+    // for the chart types that opt in, while their content fits in the frame (`trailingPlacement`, decided
+    // by `WidgetFrame`); otherwise the trailing content stays in the row, right-aligned like the standard frame.
     const inTab = tabFrame !== null && !centered;
-    const trailingInStrip = inTab && Boolean(trailing);
+    const trailingInStrip = inTab && Boolean(trailing) && tabFrame.trailingPlacement === 'strip';
+    const reportTrailingWidth = tabFrame?.reportTrailingWidth;
+    const trailingSlot = inTab && trailing && reportTrailingWidth
+        ? <TabFrameTrailingSlot onWidth={reportTrailingWidth}>{trailing}</TabFrameTrailingSlot>
+        : null;
     const dataModeNode = dataMode ? (
         <WidgetHeaderDataMode dataMode={dataMode} dataModeTestId={dataModeTestId} onTab={inTab} />
     ) : null;
@@ -239,9 +283,7 @@ export default function WidgetHeader({
 
             {trailingInStrip && tabFrame.trailingHost && createPortal(
                 <TabFrameStripContext.Provider value>
-                    <div data-tab-frame-slot="trailing" className="flex items-center gap-2 leading-none">
-                        {trailing}
-                    </div>
+                    {trailingSlot}
                 </TabFrameStripContext.Provider>,
                 tabFrame.trailingHost,
             )}
@@ -295,14 +337,22 @@ export default function WidgetHeader({
                             <span aria-hidden="true" className="invisible min-w-0 flex-1 truncate uppercase">{'\u00A0'}</span>
                         </div>
 
-                        {iconNode && (
-                            <div className="flex items-center gap-2 shrink-0 leading-none">
-                                <span
-                                    data-tab-frame-slot="icon-placeholder"
-                                    aria-hidden="true"
-                                    className="invisible shrink-0"
-                                    style={{ width: TAB_FRAME_ICON_SIZE_PX, height: TAB_FRAME_ICON_SIZE_PX }}
-                                />
+                        {(iconNode || trailingSlot) && (
+                            <div className="flex min-w-0 items-center gap-2 leading-none">
+                                {iconNode && (
+                                    <span
+                                        data-tab-frame-slot="icon-placeholder"
+                                        aria-hidden="true"
+                                        className="invisible shrink-0"
+                                        style={{ width: TAB_FRAME_ICON_SIZE_PX, height: TAB_FRAME_ICON_SIZE_PX }}
+                                    />
+                                )}
+                                {/* Trailing in the body row: it never pushes out of the frame, it scrolls inside the row. */}
+                                {trailingSlot && (
+                                    <div className="min-w-0 overflow-x-auto overflow-y-hidden hmi-scrollbar">
+                                        {trailingSlot}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </>

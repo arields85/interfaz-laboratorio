@@ -18,6 +18,18 @@ export interface TabFrameContextValue {
      * content (a chart's period selector; null until it is mounted).
      */
     trailingHost: HTMLElement | null;
+    /**
+     * Where the header's `trailing` content lives: `strip` (the top strip, `trailingHost`) only for the
+     * chart widgets that opt in (`supportsTabFrameTrailingStrip`) while it fits in the frame; `body`
+     * (the header row of the body, like the standard frame) for every other widget and for a chart
+     * whose selector is wider than the frame.
+     */
+    trailingPlacement: 'strip' | 'body';
+    /**
+     * The header reports the INTRINSIC width (px) of its trailing content (0 when it has none), measured
+     * wherever it is rendered; `WidgetFrame` decides the placement from it.
+     */
+    reportTrailingWidth: (widthPx: number) => void;
     /** Alert state of the widget frame (`widget-state-*`): the tab title takes its color. */
     alertState: TabFrameAlertState | null;
     /**

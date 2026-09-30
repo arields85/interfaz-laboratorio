@@ -6,6 +6,7 @@ import { useTabFrameHeight } from '../../hooks/useTabFrameHeight';
 import { useTabFrameIconPlacement } from '../../hooks/useTabFrameIconPlacement';
 import { useTabFrameStrip } from '../../hooks/useTabFrameStrip';
 import { TabFrameContext, TabFrameReporterContext, type TabFrameAlertState } from '../../hooks/tabFrameContext';
+import { supportsTabFrameTrailingStrip } from '../../utils/widgetCapabilities';
 import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, TAB_FRAME_TITLE_HIDDEN, buildTabFrameGlowClipPath, buildTabFramePath } from '../../utils/tabFramePath';
 
 // =============================================================================
@@ -45,6 +46,11 @@ import { TAB_FRAME_GLOW_CLIP_MARGIN_PX, TAB_FRAME_TITLE_HIDDEN, buildTabFrameGlo
 // (`--tab-frame-trailing-gap`), and a tab whose label would have less than `--tab-frame-min-title` of room
 // is hidden (`data-tab-title-hidden`, reported as `TAB_FRAME_TITLE_HIDDEN`, silhouette without the tab).
 // The header then keeps only the clearance under the strip (`--tab-frame-header-clearance`).
+// That is an opt-in of the five chart types (`supportsTabFrameTrailingStrip`, decided HERE and carried to
+// the header as `trailingPlacement`), and only while the content fits in the frame: the header reports
+// the content's intrinsic width (measured wherever it renders, so the decision never flips back and
+// forth) and a selector too wide for the frame falls back to the body header row, the title tab back to
+// normal. Every other widget keeps its trailing content in its header row.
 // =============================================================================
 
 /** Inline style of the tab shell: the radius plus the custom properties computed from the tokens. */
@@ -117,12 +123,10 @@ export default function WidgetFrame({
     const [trailingHost, setTrailingHost] = useState<HTMLElement | null>(null);
     const [content, setContent] = useState<HTMLElement | null>(null);
     const [tabWidth, setTabWidth] = useState(0);
+    // Intrinsic width of the header's trailing content, reported by `WidgetHeader` (0 = none).
+    const [trailingWidth, setTrailingWidth] = useState(0);
     const alertState = resolveAlertState(frameClassName);
     const titleFontSize = tabActive ? (tabTitleFontSize ?? null) : null;
-    const tabContext = useMemo(
-        () => ({ titleHost, iconHost, trailingHost, alertState, titleFontSize }),
-        [titleHost, iconHost, trailingHost, alertState, titleFontSize],
-    );
     // The content element is measured by the strip (its padding) and still handed to the widget's own ref.
     const setContentRef = useCallback((node: HTMLElement | null) => {
         setContent(node);
@@ -134,7 +138,23 @@ export default function WidgetFrame({
     const ownTabSize = useTabFrameHeight(titleFontSize, shellRef);
     const tabHeight = ownTabSize?.height;
     const iconPlacement = useTabFrameIconPlacement(shellRef, tabActive, tabHeight);
-    const strip = useTabFrameStrip({ shellRef, trailingHost, content, active: tabActive, tabHeight, iconPlacement });
+    // Only the chart types that opt in host their trailing content in the strip; every other widget keeps
+    // it in its header row and the frame publishes nothing for the strip.
+    const stripCapable = supportsTabFrameTrailingStrip(widgetType);
+    const strip = useTabFrameStrip({
+        shellRef,
+        trailingWidth: stripCapable ? trailingWidth : 0,
+        content,
+        active: tabActive,
+        tabHeight,
+        iconPlacement,
+    });
+    // Until the content is measured it goes to the strip (as it always did); too wide for the frame, it falls back to the body row.
+    const trailingPlacement = stripCapable ? (strip?.placement ?? 'strip') : 'body';
+    const tabContext = useMemo(
+        () => ({ titleHost, iconHost, trailingHost, trailingPlacement, reportTrailingWidth: setTrailingWidth, alertState, titleFontSize }),
+        [titleHost, iconHost, trailingHost, trailingPlacement, alertState, titleFontSize],
+    );
     const titleHidden = strip?.titleHidden ?? false;
     const geometry = useTabFrameGeometry(shellRef, tabActive ? (titleHidden ? TAB_FRAME_TITLE_HIDDEN : tabWidth) : null, tabHeight);
     const silhouette = geometry ? buildTabFramePath(geometry) : null;

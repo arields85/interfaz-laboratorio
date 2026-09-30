@@ -12,8 +12,10 @@ import WidgetHeaderTemporalControls from './WidgetHeaderTemporalControls';
 
 // Chart widgets (scale selector in `WidgetHeader.trailing`) in the tab frame shape: the selector moves
 // up into the top strip, left of the icon; the title tab stops before it and is hidden when it cannot
-// keep a minimal label; the header row no longer takes height. jsdom has no layout, so the box, the
-// host and the tokens are injected.
+// keep a minimal label; the header row no longer takes height. Only the five chart types opt in
+// (`supportsTabFrameTrailingStrip`), and a selector wider than the frame falls back to the body header
+// row. jsdom has no layout, so the box, the intrinsic width of the trailing content and the tokens are
+// injected.
 const TOKENS: Record<string, string> = {
     '--tab-frame-height': '25px',
     '--tab-frame-tab-cut': '19px',
@@ -32,7 +34,11 @@ const TOKENS: Record<string, string> = {
     '--tab-frame-strip-gap': '12px',
 };
 
-function mockLayout({ frameWidth, hostWidth, tabWidth = 90 }: { frameWidth: number; hostWidth: number; tabWidth?: number }) {
+// The trailing content's intrinsic width (the selector) is measured on its own slot, wherever it is
+// rendered: 120 px plus the icon extent (24 x 0.9 + 15 = 36.6 px) is a 156.6 px host in the strip.
+const SLOT_WIDTH = 120;
+
+function mockLayout({ frameWidth, slotWidth, tabWidth = 90 }: { frameWidth: number; slotWidth: number; tabWidth?: number }) {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(frameWidth);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(200);
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
@@ -40,7 +46,7 @@ function mockLayout({ frameWidth, hostWidth, tabWidth = 90 }: { frameWidth: numb
             return tabWidth;
         }
 
-        return this.dataset.testid === 'tab-frame-trailing-host' ? hostWidth : 0;
+        return this.dataset.tabFrameSlot === 'trailing' ? slotWidth : 0;
     });
     vi.spyOn(window, 'getComputedStyle').mockImplementation(() => ({
         getPropertyValue: (name: string) => TOKENS[name] ?? '',
@@ -59,7 +65,7 @@ interface ChartOptions {
     subtitle?: string;
 }
 
-function chart({ widgetType = 'machine-activity', withTrailing = true, onSelect = () => undefined, subtitle }: ChartOptions = {}) {
+function chart({ widgetType = 'trend-chart', withTrailing = true, onSelect = () => undefined, subtitle }: ChartOptions = {}) {
     return (
         <WidgetFrame widgetType={widgetType} title="Temperatura" frameClassName="glass-panel" className="p-5 group relative w-full h-full">
             <WidgetHeader
@@ -114,7 +120,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
     describe('tab shape', () => {
         it('portals the trailing content into a host of the shell, before the content in tab order', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             const { container } = renderChart();
 
@@ -132,7 +138,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('draws the title in the tab and the icon in the icon host, even though the header has the icon on the left', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             renderChart();
 
@@ -143,7 +149,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('takes no height in the body: the header keeps only the clearance under the strip', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             renderChart();
 
@@ -158,7 +164,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('keeps a header subtitle in the body, under the clearance (characterization: implemented with the collapsed header)', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             renderChart({ subtitle: 'ULTIMA HORA' });
 
@@ -171,7 +177,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('publishes the clearance: what is left to reach the strip bottom (25 - 20 - 1) plus the gap under the strip (12)', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             const { container } = renderChart();
 
@@ -180,19 +186,19 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--tab-frame-header-clearance')).toBe('16px');
         });
 
-        it('makes the tab stop before the selector: reserve = right offset + host width + one gap', () => {
+        it('makes the tab stop before the selector: reserve = right offset + selector + icon extent + one gap', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             const { container } = renderChart();
 
             const shell = container.firstElementChild as HTMLElement;
-            expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('172px');
+            expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('171.6px');
         });
 
         it('leaves the icon its scaled width plus one gap at the end of the host (the selector stops one gap before it)', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
 
             const { container } = renderChart();
 
@@ -202,7 +208,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('keeps the title tab and reports its measured width while there is room for the label', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157, tabWidth: 90 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH, tabWidth: 90 });
             const onTabWidth = vi.fn();
 
             const { container } = renderChart({ onTabWidth });
@@ -215,8 +221,8 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('hides the title tab cleanly when less than the minimum room is left, and every consumer gets the silhouette without it', () => {
             previewFrameShape('tab');
-            // 172 reserve + 19 cut + 10 + 4.8 paddings = 205.8; 210 leaves 4.2 px < 12 px.
-            mockLayout({ frameWidth: 210, hostWidth: 157, tabWidth: 90 });
+            // 171.6 reserve + 19 cut + 10 + 4.8 paddings = 205.4; 210 leaves 4.6 px < 12 px.
+            mockLayout({ frameWidth: 210, slotWidth: SLOT_WIDTH, tabWidth: 90 });
             const onTabWidth = vi.fn();
 
             const { container } = renderChart({ onTabWidth });
@@ -243,12 +249,12 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             }
             vi.stubGlobal('ResizeObserver', FakeResizeObserver);
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 210, hostWidth: 157 });
+            mockLayout({ frameWidth: 210, slotWidth: SLOT_WIDTH });
             const { container } = renderChart();
             expect(container.firstElementChild).toHaveAttribute('data-tab-title-hidden', 'true');
 
             vi.restoreAllMocks();
-            mockLayout({ frameWidth: 400, hostWidth: 157 });
+            mockLayout({ frameWidth: 400, slotWidth: SLOT_WIDTH });
             act(() => callbacks.forEach((callback) => callback()));
 
             expect(container.firstElementChild).not.toHaveAttribute('data-tab-title-hidden');
@@ -257,7 +263,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('keeps the selector clickable and focusable inside the strip host (keyboard order: selector before the chart)', async () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 460, hostWidth: 157 });
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
             const user = userEvent.setup();
             const onSelect = vi.fn();
 
@@ -273,7 +279,7 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
 
         it('leaves a frame without trailing content exactly as before: no reserve override, no hidden title, no clearance', () => {
             previewFrameShape('tab');
-            mockLayout({ frameWidth: 60, hostWidth: 0 });
+            mockLayout({ frameWidth: 60, slotWidth: 0 });
 
             const { container } = renderChart({ widgetType: 'kpi', withTrailing: false });
 
@@ -282,6 +288,192 @@ describe('WidgetFrame with header trailing content (chart selector)', () => {
             expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('');
             expect(shell.style.getPropertyValue('--tab-frame-icon-strip-extent')).toBe('');
             expect(screen.getByTestId('tab-frame-trailing-host')).toBeEmptyDOMElement();
+        });
+    });
+
+    describe('tab shape, selector wider than the frame (falls back to the body header row)', () => {
+        // Strip end = 0 right offset + (120 selector + 36.6 icon extent) + 15 gap = 171.6 px.
+        it('keeps the selector in the strip from the frame width that holds it (fits) and moves it to the body row below', () => {
+            previewFrameShape('tab');
+            mockLayout({ frameWidth: 172, slotWidth: SLOT_WIDTH });
+
+            const fits = renderChart();
+            expect(within(screen.getByTestId('tab-frame-trailing-host')).getByTestId('chart-selector')).toBeInTheDocument();
+            fits.unmount();
+            vi.restoreAllMocks();
+
+            mockLayout({ frameWidth: 171, slotWidth: SLOT_WIDTH });
+            renderChart();
+            expect(within(screen.getByTestId('tab-frame-trailing-host')).queryByTestId('chart-selector')).toBeNull();
+            expect(screen.getByTestId('chart-selector')).toBeInTheDocument();
+        });
+
+        it('renders the selector right-aligned in the header row of the body, like the standard frame, with the row height', () => {
+            previewFrameShape('tab');
+            mockLayout({ frameWidth: 150, slotWidth: SLOT_WIDTH });
+
+            renderChart();
+
+            const content = screen.getByText('Chart body').parentElement as HTMLElement;
+            const header = content.firstElementChild as HTMLElement;
+            const row = header.querySelector('.row-start-1') as HTMLElement;
+            expect(row).toContainElement(screen.getByTestId('chart-selector'));
+            // The row keeps what the tab widgets have: the invisible title spacer and the icon's slot.
+            expect(row.querySelector('.invisible')).not.toBeNull();
+            expect(row.querySelector('[data-tab-frame-slot="icon-placeholder"]')).not.toBeNull();
+            expect(header.querySelector('.hmi-tab-frame-header-clearance')).toBeNull();
+            // The title and the icon stay in the tab strip.
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Temperatura')).toBeInTheDocument();
+            expect(within(screen.getByTestId('tab-frame-icon-host')).getByTestId('chart-icon')).toBeInTheDocument();
+            // The selector looks as in the standard frame (pill), not as in the strip.
+            expect(within(screen.getByTestId('chart-selector')).getByRole('button', { name: '1h' }).className).toContain('theme-button');
+        });
+
+        it('never lets the body row push the selector outside the frame: it shrinks and scrolls inside the row', () => {
+            previewFrameShape('tab');
+            mockLayout({ frameWidth: 150, slotWidth: SLOT_WIDTH });
+
+            renderChart();
+
+            const slot = screen.getByTestId('chart-selector').closest('[data-tab-frame-slot="trailing"]') as HTMLElement;
+            const scroller = slot.parentElement as HTMLElement;
+            expect(slot).toHaveClass('shrink-0', 'w-max');
+            expect(scroller).toHaveClass('min-w-0', 'overflow-x-auto', 'hmi-scrollbar');
+        });
+
+        it('shows the title tab normally: no reserve, no hidden title, no strip tokens, the tab width is reported', () => {
+            previewFrameShape('tab');
+            // Narrower than reserve + cut + paddings: in the strip the title would be hidden.
+            mockLayout({ frameWidth: 150, slotWidth: SLOT_WIDTH, tabWidth: 90 });
+            const onTabWidth = vi.fn();
+
+            const { container } = renderChart({ onTabWidth });
+
+            const shell = container.firstElementChild as HTMLElement;
+            expect(shell).not.toHaveAttribute('data-tab-title-hidden');
+            expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('');
+            expect(shell.style.getPropertyValue('--tab-frame-icon-strip-extent')).toBe('');
+            expect(shell.style.getPropertyValue('--tab-frame-header-clearance')).toBe('');
+            expect(screen.getByTestId('tab-frame-trailing-host')).toBeEmptyDOMElement();
+            expect(onTabWidth).toHaveBeenLastCalledWith(90);
+            expect(screen.getByTestId('tab-frame-surface').style.clipPath)
+                .toBe(`path('${buildTabFramePath({ width: 150, height: 200, tabWidth: 90, tabHeight: 25, tabCut: 19, bodyCut: 0, radius: 4, glowSpread: 2 })}')`);
+        });
+
+        it('keeps the selector clickable in the body row', async () => {
+            previewFrameShape('tab');
+            mockLayout({ frameWidth: 150, slotWidth: SLOT_WIDTH });
+            const user = userEvent.setup();
+            const onSelect = vi.fn();
+
+            renderChart({ onSelect });
+
+            await user.click(screen.getByRole('button', { name: '24h' }));
+            expect(onSelect).toHaveBeenCalledWith('24h');
+        });
+
+        it('follows a live resize across the threshold in both directions, without flip-flopping', () => {
+            const callbacks: Array<() => void> = [];
+            class FakeResizeObserver {
+                constructor(callback: () => void) {
+                    callbacks.push(callback);
+                }
+
+                observe() {}
+
+                unobserve() {}
+
+                disconnect() {}
+            }
+            vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+            previewFrameShape('tab');
+            const resizeTo = (frameWidth: number) => {
+                vi.restoreAllMocks();
+                mockLayout({ frameWidth, slotWidth: SLOT_WIDTH });
+                // Observers fire repeatedly (the content moved, so its box changed): the placement must hold.
+                act(() => callbacks.slice().forEach((callback) => callback()));
+                act(() => callbacks.slice().forEach((callback) => callback()));
+            };
+            const inStrip = () => within(screen.getByTestId('tab-frame-trailing-host')).queryByTestId('chart-selector') !== null;
+
+            mockLayout({ frameWidth: 400, slotWidth: SLOT_WIDTH });
+            renderChart();
+            expect(inStrip()).toBe(true);
+
+            resizeTo(150);
+            expect(inStrip()).toBe(false);
+            expect(screen.getByTestId('chart-selector')).toBeInTheDocument();
+
+            resizeTo(400);
+            expect(inStrip()).toBe(true);
+
+            resizeTo(150);
+            expect(inStrip()).toBe(false);
+
+            // A width right at the edge of the strip never oscillates either.
+            resizeTo(171);
+            expect(inStrip()).toBe(false);
+            resizeTo(172);
+            expect(inStrip()).toBe(true);
+            vi.unstubAllGlobals();
+        });
+
+        it.each([
+            'trend-chart',
+            'trend-chart-v2',
+            'prod-trend',
+            'prod-history',
+            'activity-analytics',
+        ])('leaves %s exactly as before while its selector fits', (widgetType) => {
+            previewFrameShape('tab');
+            mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
+
+            const { container } = renderChart({ widgetType });
+
+            const shell = container.firstElementChild as HTMLElement;
+            expect(within(screen.getByTestId('tab-frame-trailing-host')).getByTestId('chart-selector')).toBeInTheDocument();
+            expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('171.6px');
+            expect(shell.style.getPropertyValue('--tab-frame-header-clearance')).toBe('16px');
+            expect(shell).not.toHaveAttribute('data-tab-title-hidden');
+        });
+    });
+
+    describe('tab shape, other widgets with trailing content (strip is a chart-only opt-in)', () => {
+        it.each(['kpi', 'metric-card', 'info-card', 'group', 'machine-activity'])(
+            'keeps the trailing content of %s in its header row, with the row height, even in a wide frame',
+            (widgetType) => {
+                previewFrameShape('tab');
+                mockLayout({ frameWidth: 460, slotWidth: SLOT_WIDTH });
+
+                const { container } = renderChart({ widgetType });
+
+                const shell = container.firstElementChild as HTMLElement;
+                const content = screen.getByText('Chart body').parentElement as HTMLElement;
+                const header = content.firstElementChild as HTMLElement;
+                const row = header.querySelector('.row-start-1') as HTMLElement;
+                expect(screen.getByTestId('tab-frame-trailing-host')).toBeEmptyDOMElement();
+                expect(row).toContainElement(screen.getByTestId('chart-selector'));
+                // The header row keeps its height: invisible title spacer and the icon's slot stay in it.
+                expect(row.querySelector('.invisible')).not.toBeNull();
+                expect(row.querySelector('[data-tab-frame-slot="icon-placeholder"]')).not.toBeNull();
+                expect(header.querySelector('.hmi-tab-frame-header-clearance')).toBeNull();
+                // No strip publishing at all: the frame is exactly the one of a widget without trailing.
+                expect(shell.style.getPropertyValue('--tab-frame-tab-reserve')).toBe('');
+                expect(shell.style.getPropertyValue('--tab-frame-icon-strip-extent')).toBe('');
+                expect(shell.style.getPropertyValue('--tab-frame-header-clearance')).toBe('');
+                // The selector keeps the requested look (pill), not the strip one.
+                expect(within(screen.getByTestId('chart-selector')).getByRole('button', { name: '1h' }).className).toContain('theme-button');
+            },
+        );
+
+        it('never hides the title of such a widget because of its trailing content', () => {
+            previewFrameShape('tab');
+            mockLayout({ frameWidth: 210, slotWidth: SLOT_WIDTH });
+
+            const { container } = renderChart({ widgetType: 'kpi' });
+
+            expect(container.firstElementChild).not.toHaveAttribute('data-tab-title-hidden');
+            expect(within(screen.getByTestId('tab-frame-tab')).getByText('Temperatura')).toBeInTheDocument();
         });
     });
 });

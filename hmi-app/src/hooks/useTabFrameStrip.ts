@@ -2,7 +2,7 @@ import { useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import { parseCssLengthPx } from '../utils/tabFramePath';
 import { TAB_FRAME_ICON_SIZE_PX, type TabFrameIconPlacement } from '../utils/tabFrameIcon';
-import { resolveTabFrameStripExtent, resolveTabFrameTrailing } from '../utils/tabFrameTrailing';
+import { resolveTabFrameStripExtent, resolveTabFrameTrailing, type TabFrameTrailingPlacement } from '../utils/tabFrameTrailing';
 
 /** What a frame with strip content (a chart's period selector) publishes on its shell. */
 export interface TabFrameStripLayout {
@@ -12,6 +12,8 @@ export interface TabFrameStripLayout {
     iconExtent: number;
     /** True when the title tab has no room for its label and must not be shown. */
     titleHidden: boolean;
+    /** `strip` while the trailing content fits in the frame, `body` (the header row) when it does not. */
+    placement: TabFrameTrailingPlacement;
     /**
      * Height (px) the header keeps at the top of the content so it starts under the strip: the tab height
      * minus the padding and border above the header.
@@ -24,14 +26,18 @@ function isSameLayout(a: TabFrameStripLayout | null, b: TabFrameStripLayout): bo
         && a.reserve === b.reserve
         && a.iconExtent === b.iconExtent
         && a.titleHidden === b.titleHidden
+        && a.placement === b.placement
         && a.clearance === b.clearance;
 }
 
 interface TabFrameStripOptions {
     /** The shell of the tab frame (its size and tokens are read here). */
     shellRef: RefObject<HTMLElement | null>;
-    /** The trailing host of the shell (null until mounted). */
-    trailingHost: HTMLElement | null;
+    /**
+     * Intrinsic width (px) of the header's trailing content, measured on the content itself wherever it is
+     * rendered (strip or body row), so the placement decision never depends on the placement. 0 = none.
+     */
+    trailingWidth: number;
     /** The content element (its padding and border are what the header clearance compensates). */
     content: HTMLElement | null;
     active: boolean;
@@ -44,15 +50,18 @@ interface TabFrameStripOptions {
 /**
  * Layout of the top strip of a tab frame that holds trailing header content: where the tab must stop
  * (`reserve`), how much room the selector leaves for the icon, whether the title tab has to be hidden
- * (`utils/tabFrameTrailing.ts`) and the clearance of the header row. Sizes come from the measured shell
- * and trailing host and from the `--tab-frame-*` tokens; it measures in a layout effect (the first
- * paint already has it) and re-measures when the shell or the host is resized (the selector grows
- * with its options) and when the document style changes (a theme preview rewrites the tokens).
+ * (`utils/tabFrameTrailing.ts`), the clearance of the header row and whether the content fits in the
+ * frame at all (`placement`: too wide, it goes to the body header row and the frame publishes nothing
+ * for the strip). Sizes come from the measured shell, the intrinsic width of the trailing content
+ * (`trailingWidth`, reported by the header wherever it renders) and the `--tab-frame-*` tokens; it
+ * measures in a layout effect (the first paint already has it) and re-measures when the shell is
+ * resized, when the content's width changes (the selector grows with its options) and when the
+ * document style changes (a theme preview rewrites the tokens).
  * `null` until measured and while the tab shape is inactive.
  */
 export function useTabFrameStrip({
     shellRef,
-    trailingHost,
+    trailingWidth,
     content,
     active,
     tabHeight,
@@ -76,27 +85,31 @@ export function useTabFrameStrip({
             const gap = token('--tab-frame-trailing-gap');
             const scale = Number.parseFloat(style.getPropertyValue('--tab-frame-icon-scale'));
             const iconSize = TAB_FRAME_ICON_SIZE_PX * (Number.isFinite(scale) && scale > 0 ? scale : 1);
+            const iconExtent = resolveTabFrameStripExtent({ inStrip: iconInStrip, iconSize, gap });
+            const hasTrailing = trailingWidth > 0;
             const trailing = resolveTabFrameTrailing({
                 frameWidth: shell.clientWidth,
                 baseReserve,
                 right: token('--tab-frame-icon-right'),
-                hostWidth: trailingHost?.offsetWidth ?? 0,
+                // The strip host is the content plus the room it keeps for the icon.
+                hostWidth: hasTrailing ? trailingWidth + iconExtent : 0,
                 gap,
                 tabCut: token('--tab-frame-tab-cut'),
                 padStart: token('--tab-frame-pad-start'),
                 padEnd: token('--tab-frame-pad-end'),
                 minTitle: token('--tab-frame-min-title'),
             });
-            const hasTrailing = (trailingHost?.offsetWidth ?? 0) > 0;
+            const inStrip = hasTrailing && trailing.placement === 'strip';
             // Only a frame with strip content clears its header row under the strip.
-            const contentStyle = hasTrailing && content ? window.getComputedStyle(content) : null;
+            const contentStyle = inStrip && content ? window.getComputedStyle(content) : null;
             const above = contentStyle
                 ? parseCssLengthPx(contentStyle.paddingTop, rootFontSize) + parseCssLengthPx(contentStyle.borderTopWidth, rootFontSize)
                 : 0;
             const next: TabFrameStripLayout = {
-                reserve: hasTrailing ? trailing.reserve : null,
-                iconExtent: hasTrailing ? resolveTabFrameStripExtent({ inStrip: iconInStrip, iconSize, gap }) : 0,
+                reserve: inStrip ? Math.round(trailing.reserve * 100) / 100 : null,
+                iconExtent: inStrip ? iconExtent : 0,
                 titleHidden: trailing.titleHidden,
+                placement: trailing.placement,
                 // Up to the strip bottom, plus the gap under it: the first content never sits on the body's top line.
                 clearance: Math.max(0, Math.round(((tabHeight ?? token('--tab-frame-height')) - above + token('--tab-frame-strip-gap')) * 100) / 100),
             };
@@ -109,10 +122,6 @@ export function useTabFrameStrip({
         const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
         resizeObserver?.observe(shell);
 
-        if (trailingHost) {
-            resizeObserver?.observe(trailingHost);
-        }
-
         const mutationObserver = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
         mutationObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
 
@@ -120,7 +129,7 @@ export function useTabFrameStrip({
             resizeObserver?.disconnect();
             mutationObserver?.disconnect();
         };
-    }, [shellRef, trailingHost, content, active, tabHeight, baseReserve, iconInStrip]);
+    }, [shellRef, trailingWidth, content, active, tabHeight, baseReserve, iconInStrip]);
 
     return active ? layout : null;
 }
