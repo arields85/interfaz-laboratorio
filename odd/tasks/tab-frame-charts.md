@@ -341,6 +341,8 @@ Forecast: C1 ~300–500 authored lines in one HTML file (tooling, not app). C3 f
   (strip at frame >= 298 px, body row at <= 281 px), always `underline`, nothing visible outside the frame (the last
   option is clipped by the row scroller). Fits and original width: strip, title tab visible, clearance 16.39 px.
 
+- 2026-09-30 live look of the five chart widgets in Pestaña after C4a/C4b/C4c: accepted by the user ("los gráficos quedaron bien"). Pending: corner finish choice in the lab (K2), merge on the user's OK, push when the user decides.
+
 ## Next step
 
 C3 and C4b done. Then C4: live look with the user (selector fallback in narrow widgets included), RDD per work-unit
