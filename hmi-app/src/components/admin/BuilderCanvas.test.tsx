@@ -2847,29 +2847,30 @@ describe('BuilderCanvas', () => {
             expect(frame.querySelector('path[data-ring="hover"]')).not.toBeNull();
         });
 
-        it('keeps the hover actions on the visible top edge: below the tab strip for a tab widget', async () => {
+        it('keeps the hover actions on the widget top edge, above the tab, for a tab widget', async () => {
             await renderInteractiveCanvas({
                 widgets: [makeWidget({ id: 'widget-1', title: 'Tab Widget' })],
             });
 
             const item = screen.getByTestId('builder-canvas-item-widget-1');
-            expect(within(item).getByTestId('widget-hover-actions').getAttribute('style'))
-                .toContain('top: calc(var(--widget-spacing) + var(--tab-frame-height));');
+            const style = within(item).getByTestId('widget-hover-actions').getAttribute('style') ?? '';
+            expect(style).toContain('top: var(--widget-spacing);');
+            expect(style).not.toContain('--tab-frame-height');
         });
 
         describe('a taller tab (title with its own size)', () => {
             // jsdom computes no tokens: token lengths read as 0 and the reported height (47) is the only source.
             const TALL_GEOMETRY = { width: 180, height: 120, tabWidth: 120, tabHeight: 47, tabCut: 0, bodyCut: 0, radius: 0, glowSpread: 0 };
 
-            it('moves the hover actions down by the reported tab height, not by the standard token', async () => {
+            it('keeps the hover actions on the widget top edge, whatever the tab height', async () => {
                 await renderInteractiveCanvas({
                     widgets: [makeWidget({ id: 'widget-1', title: 'Tall Tab Widget' })],
                 });
 
                 const item = screen.getByTestId('builder-canvas-item-widget-1');
                 const style = within(item).getByTestId('widget-hover-actions').getAttribute('style') ?? '';
-                expect(style).toContain('top: calc(var(--widget-spacing) + 47px);');
-                expect(style).not.toContain('--tab-frame-height');
+                expect(style).toContain('top: var(--widget-spacing);');
+                expect(style).not.toContain('47px');
             });
 
             it('traces the selection rings along the taller tab', async () => {

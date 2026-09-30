@@ -182,19 +182,6 @@ function resolvePointerGridCell(args: {
 
 // TextTitle no tiene frame (sin .glass-panel); el resto sigue el radio de tema activo
 // (--frame-radius-rest, ver services/themeStyle.service.ts) en vez de un valor fijo.
-/**
- * Top offset of the hover actions: the widget's surface inset, plus the tab height when its frame is
- * the tab shape (the visible top edge under the tab strip is the body's). A taller tab (title with
- * its own size) reports its own height; the others use the token.
- */
-function resolveHoverActionsTop(inset: string, tabWidth: number | undefined, tabHeight: number | undefined): string {
-    if (tabWidth === undefined) {
-        return inset;
-    }
-
-    return `calc(${inset} + ${tabHeight === undefined ? 'var(--tab-frame-height)' : `${tabHeight}px`})`;
-}
-
 function getWidgetCornerRadius(type: WidgetConfig['type']): string {
     return type === 'text-title' ? '0px' : 'var(--frame-radius-rest)';
 }
@@ -432,8 +419,8 @@ export default function BuilderCanvas({
     const rightEdgeUsesMajorLine = cols % GRID_MAJOR_INTERVAL_CELLS === 0;
     const bottomEdgeUsesMajorLine = rows % GRID_MAJOR_INTERVAL_CELLS === 0;
     const isGridVisible = useUIStore((state) => state.isGridVisible);
-    // Tab frame shape: each widget reports the width of its tab so the selection ring, the placement
-    // ghosts and the hover actions follow the tab + chamfered body silhouette (WYSIWYG with the viewer).
+    // Tab frame shape: each widget reports the width of its tab so the selection ring and the placement
+    // ghosts follow the tab + chamfered body silhouette (WYSIWYG with the viewer).
     const { widths: tabWidths, heights: tabHeights, reporterFor: tabWidthReporterFor } = useTabFrameWidths();
     const { containerRef, width, height, rowHeight, cellWidth, hasFirstValidMeasurement } = useCanvasReference({
         cols,
@@ -1151,9 +1138,9 @@ export default function BuilderCanvas({
                                     // visible top border — a group container's border now sits
                                     // at the grid line (no inset), so its actions must not use
                                     // the standard --widget-spacing offset either.
-                                    // Tab shape: the visible top edge under the tab strip is the body's; a
-                                    // taller tab (title with its own size) reports its own height.
-                                    top={resolveHoverActionsTop(resolveWidgetSurfaceInset(widget), tabWidths[widget.id], tabHeights[widget.id])}
+                                    // Tab shape: the actions stay on the widget's top edge, above the
+                                    // tab, whatever its height (same position as the standard frame).
+                                    top={resolveWidgetSurfaceInset(widget)}
                                     // D6: a member of a locked group NOT in edit mode acts as
                                     // part of the container — it gets no hover actions of its
                                     // own; the container's own actions (copy/delete/lock/pencil,
