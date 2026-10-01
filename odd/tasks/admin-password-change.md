@@ -34,7 +34,7 @@ Implement it before the first server deployment.
 
 - [x] P1 — Server route, service method and tests (Python unittest, RED first). Commit `ef6f9d2`.
 - [x] P2 — Client API, admin UI and tests (vitest, RED first); routing docs, including the stale-route fix. Commits `1c2388f`, plus the message fixup below.
-- [ ] P3 — Native review and a live check in the control Chrome.
+- [x] P3 — Native review and a live check in the control Chrome.
 
 ## TDD
 
@@ -68,3 +68,20 @@ Implement it before the first server deployment.
 - **UI placement.** A key icon in the `AdminLayout` topbar, next to the "Configuración general" gear and the "Cerrar sesion" button, because that is where the account actions live. It opens `AdminPasswordChangeDialog` (existing `AdminDialog`, `HmiButton`, sidebar input tokens, Lucide `KeyRound`). Fields are real `type="password"` inputs with `current-password` / `new-password` autofill hints, so the browser's password manager can update its entry. Passwords live only in component state and are cleared on success; unmount aborts an in-flight request.
 - **Session handling in the client.** `401 INVALID_CURRENT_PASSWORD` is a form error. Only other 401/403 go to `controller.handleProtectedRequestError`.
 - **Docs.** `LEDA_BROWSER_ROUTING.md` now lists exactly the 28 routes of `vite.ledaProxy.config.ts` (verified by script) and documents the password route; `ADMIN_CONVENTIONS.md` has the UI entry.
+- 2026-10-01 P3:
+  - Four-lens native reviews:
+    - `e2644f2..44afe70`: approved (`review-eeeb0df95f395425`). Its warnings were fixed as Q1–Q6.
+    - `44afe70..7694c49`: approved (`review-4972195c48ab39c0`). Reviewed boundary `7694c49`.
+  - Parent spot check: the full hmi-app suite passed, 291 files and 3815 tests, before the Q fixups.
+  - On the restarted dev runtime, the route answers 403 to a request with no session or CSRF (rejection, not 404).
+  - The live UI check needs the user's admin login (the parent holds no credentials) and is pending the user.
+  - Remaining non-blocking follow-ups:
+    - The dialog's close is blocked while a request is in flight, and there is no client timeout, so a hung request keeps it open until a reload.
+    - The overhead comment cites a literal.
+    - The backdrop-close assertion after settling is vacuous.
+    - There is no exact-limit test for MAX_PASSWORD_CHANGE_REQUEST_BYTES.
+
+## Status
+
+Complete, pending only the user's live check.
+
