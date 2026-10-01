@@ -121,6 +121,8 @@ registered accent custom properties.
 
 - 2026-09-30 review `766522c..e1a8cb7` (594 lines, medium, standing consent): APPROVED and acknowledged (`review-dc2112500e3f045b`). Suggestions recorded, not fixed: R3-radius-equal-auto-untested (no test for moving the radius slider exactly to the automatic value), R3-auto-radius-uses-selected-preset (the slider's automatic radius uses the SELECTED preset's radius while the accents only render with Clásico). Live check of the new semantics pending: the control Chrome was on `/admin/dashboards`.
 
+- 2026-09-30 user (settings rest 14, hover 5, distance 6, radius 19): "no se ve". Cause: with the length measured from the box corner, the arc middle sits at 0.2929 x 19 = 5.6 px on each axis, so a 5 px square never reached it. Fix (parent inline, TDD): the length is measured from the MIDDLE of the arc: `--link-accent-r` (accent radius, auto = frame radius + offset), `--link-accent-reach = r * 0.2929 + length`, mask-size = reach; 0 still shows nothing, any small value shows a piece of arc centred on the corner. Tema hint and docs updated. RED 2 + 1 -> GREEN; full suite 3621 passed, tsc/lint/build clean; served CSS checked. Live (parent drove the control Chrome to the viewer, user's settings): a centred arc piece shows on hover. The user authorized using the control Chrome freely (no need to ask).
+
 ## Next step
 
 Live check of the corner accents in the browser (parent), then close the feature.
