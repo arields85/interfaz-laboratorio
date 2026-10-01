@@ -97,8 +97,8 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 - [x] T8 — Single admin session. Added 2026-10-01 at the user's request, after the review's "two admins at once" finding.
   - When an admin logs in while another admin session is active, the HMI warns "Hay una sesión de administrador abierta en otro equipo. Si continúa, esa sesión se cerrará." and offers Continuar / Cancelar.
   - Continuar makes the server revoke every other session and keep only the new one.
-  - The displaced browser shows "Su sesión se cerró porque se inició sesión en otro equipo." on its next request, focus or poll, and returns to the viewer. Its unsaved work is lost, which is why the warning comes before confirming.
-  - Today the server allows several concurrent sessions (`admin_auth.py` inserts without revoking).
+  - The displaced browser shows "Su sesión se cerró porque se inició sesión en otro equipo." on its next focus or its next protected request (there is no session poll), and returns to the viewer. The server expires the displaced cookie with that first answer, so the notice appears once. Its unsaved work is lost, which is why the warning comes before confirming.
+  - Before T8 the server allowed several concurrent sessions (`admin_auth.py` inserted without revoking).
   - Route: delegated writer.
 
 ## Acceptance criteria
@@ -186,6 +186,14 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
   - UI: the confirmation (exact copy, Continuar / Cancelar) is rendered inside the `LoginOverlay` panel, not with `AdminDialog`: `AnchoredOverlay` closes on any click outside its own element and a portal dialog would be outside it. The credentials stay in the overlay's component state only; Cancelar clears the password. The displaced browser shows `SessionReplacedNotice` (alert strip with an `AlertTriangle` icon and 'Entendido', mounted in `AdminSessionLifecycle` above every route). The store `error` pattern was not used for it because that text is visible only while the login overlay is open, which a plain viewer (hidden access) rarely has. Plain expiry keeps its behaviour and shows no notice.
   - When the displaced browser notices: the controller validates the session on window focus and on its protected requests (credential panel, shared-config writes); there is no periodic session poll, and the viewer's revision poll is public and does not touch the session. So an idle displaced browser learns on its next focus or save. Accepted as the task allows; no polling was added.
   - Existing tests changed: the login-boundary assertion now includes `takeover=False`. Optional follow-up not done: a store action `dismissSessionReplaced` instead of calling `setState` from the notice.
+- 2026-10-01 T8 review fixups J1-J8 (`a2aa3f2` runtime, `c75a576` client, plus this doc commit).
+  - J1/J4/J5/J6 (runtime): `was_session_replaced` is now a pure read (`expires_at > now` filter, no `BEGIN IMMEDIATE`, no DDL, no purge; a missing table reads as not replaced) and any lookup failure falls back to the plain `401 AUTHENTICATION_REQUIRED`, never 503. Marker purging stays in the takeover write path. The table DDL is one constant (`REPLACED_SESSIONS_DDL`) used by schema init and re-asserted (IF NOT EXISTS) inside the takeover transaction, so databases provisioned before T8 still work without a version bump. One `_is_live_session` rule serves `read_session` and the 409 gate. `_unauthenticated` is a plain call.
+  - J2: a `401 ADMIN_SESSION_REPLACED` response expires the session cookie (same name, path and attributes as logout), so the displaced browser is told once.
+  - J3: could not reproduce the un-hydrated state: `handleSessionReplaced` calls `suspend(null, true)`, which sets `isHydrated` and clears `isAuthenticating` before `validateSession`'s `finally` is skipped. Tests for the bootstrap path, the focus path and the unstarted controller were added and passed before any production change, so no controller code changed.
+  - J7: `AdminAuthClient.login(username, password, { signal?, takeover? })`; the gateway type, controller and tests follow.
+  - J8: the T8 bullets now match the implementation.
+  - RED (backend, before the change): lock-free lookup test errored (write lock contention), purge/DDL test failed (`0 != 1`, marker purged by a lookup), replaced-cookie-expiry test errored (no `Set-Cookie`), failing-lookup test failed (`503 != 401`). The forged-cookie HTTP test, the schema-init-adds-table test and the idle-expired-no-409 test were already green (characterization, no RED). GREEN: whole backend discover 1836 OK; the existing Mock-based HTTP tests now set `was_session_replaced.return_value = False` (tolerance lives in tests only), and the takeover HTTP test replays the stale cookie from fresh clients because the first answer now expires it.
+  - Client: `tsc -b`, `eslint`, `npm test` 288 files / 3773 tests, `npm run build` all pass; offline gate (child-only supervisor) exit 0.
 - 2026-10-01 closing slice review:
   - Native review of `d448341..5129ef9` (H1–H7, the T7 docs and the live check record): approved and acknowledged (lineage `review-d0aa99676cc458e9`). Reviewed boundary `5129ef9`. The whole feature is now reviewed.
   - Advisories:
@@ -194,5 +202,5 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 
 ## Status
 
-T1–T8 are complete. T8 (single administrator session) was added on 2026-10-01 at the user's request and is not yet reviewed natively. Merging into main and pushing are the user's decisions. Next: the Prisma → Leda rename (a separate feature, branched from here).
+T1–T8 are complete. T8 (single administrator session) was added on 2026-10-01 at the user's request; its review fixups J1-J8 are applied and the fixup commits await a re-check. Merging into main and pushing are the user's decisions. Next: the Prisma → Leda rename (a separate feature, branched from here).
 
