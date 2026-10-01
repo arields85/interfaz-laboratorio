@@ -40,7 +40,7 @@ describe('link corner accents layer', () => {
         expect(body).toContain('pointer-events: none;');
         // Auto (frame radius + offset) unless the Tema radius slider writes `--link-accent-radius` on the root.
         expect(body).toContain(
-            'border-radius: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));',
+            '--link-accent-r: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));',
         );
     });
 
@@ -70,12 +70,17 @@ describe('link corner accents layer', () => {
         );
     });
 
-    it('sizes each visible corner square by the length, from the corner of the layer (0 = nothing visible)', () => {
+    it('sizes each visible corner square by the length measured from the middle of the arc (0 = nothing visible)', () => {
         const body = rule('.hmi-link-accents');
 
-        expect(body).toContain('-webkit-mask-size: var(--frame-accent-length) var(--frame-accent-length);');
-        expect(body).toContain('mask-size: var(--frame-accent-length) var(--frame-accent-length);');
-        expect(body).not.toContain('--link-accent-reach');
+        // Measured from the MIDDLE of the arc, not from the box corner: the arc's middle sits at r * (1 - 1/sqrt 2)
+        // ~= 0.2929 r from the corner on each axis, so 0 shows nothing and any small value already reveals a piece of
+        // arc whatever the radius (from the corner, a 5 px length showed nothing with a 19 px radius).
+        expect(body).toContain('--link-accent-r: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));');
+        expect(body).toContain('border-radius: var(--link-accent-r);');
+        expect(body).toContain('--link-accent-reach: calc(var(--link-accent-r) * 0.2929 + var(--frame-accent-length));');
+        expect(body).toContain('-webkit-mask-size: var(--link-accent-reach) var(--link-accent-reach);');
+        expect(body).toContain('mask-size: var(--link-accent-reach) var(--link-accent-reach);');
         expect(body).not.toContain('--link-accent-corner');
     });
 

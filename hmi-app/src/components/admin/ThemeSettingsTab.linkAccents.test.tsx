@@ -188,7 +188,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             expect(accentsSection().contains(hoverSlider())).toBe(true);
             expect(restSlider()).toHaveValue('30');
             expect(hoverSlider()).toHaveValue('22');
-            expect(accentsSection().textContent ?? '').toMatch(/cuánto de la esquina se ve, desde la punta; 0 = nada/i);
+            expect(accentsSection().textContent ?? '').toMatch(/cuánto de la esquina se ve, desde el centro del arco; 0 = nada/i);
             expect(accentsSection().textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
         });
 

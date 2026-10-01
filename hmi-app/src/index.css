@@ -459,7 +459,7 @@ h1, h2, h3, h4, h5, h6 {
  * Configuración general -> Tema -> "Esquinas en widgets con enlace" (solo con el tema Clásico,
  * solo en el visor; ver `ViewerLinkCornerAccents`). Dibuja las esquinas de acento del tema
  * Contorno en una capa hermana, unos píxeles POR FUERA del marco (el marco recorta su desborde).
- * El largo es el lado de cada cuadrado de esquina visible, medido desde la punta de la capa (0 = nada;
+ * El largo es cuánto de la esquina se ve, medido desde el CENTRO del arco (lado del cuadrado = radio x 0,2929 + largo; 0 = nada;
  * al crecer se revela el arco desde su centro hacia afuera y luego los tramos rectos).
  *   --link-accent-offset            separación entre el borde del marco y las esquinas (Tema: "Distancia al marco")
  *   --link-accent-radius            radio de las esquinas; sin definir = radio del marco + separación (Tema: "Radio de las esquinas")
@@ -1603,7 +1603,12 @@ h1, h2, h3, h4, h5, h6 {
    * animation is the frame accent's. */
   .hmi-link-accents {
     position: absolute;
-    border-radius: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));
+    /* Accent radius (auto: frame radius + offset). The length is measured from the MIDDLE of the arc, which sits at
+     * r * (1 - 1/sqrt 2) ~= 0.2929 r from the box corner on each axis: 0 shows nothing, any small value reveals a
+     * piece of arc centred on the corner whatever the radius, larger values add the straight tails. */
+    --link-accent-r: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));
+    --link-accent-reach: calc(var(--link-accent-r) * 0.2929 + var(--frame-accent-length));
+    border-radius: var(--link-accent-r);
     pointer-events: none;
     --frame-accent-length: var(--link-accent-length-rest);
     --frame-accent-thickness: var(--link-accent-thickness-rest);
@@ -1617,8 +1622,8 @@ h1, h2, h3, h4, h5, h6 {
       linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
     -webkit-mask-position: top left, top right, bottom left, bottom right;
     mask-position: top left, top right, bottom left, bottom right;
-    -webkit-mask-size: var(--frame-accent-length) var(--frame-accent-length);
-    mask-size: var(--frame-accent-length) var(--frame-accent-length);
+    -webkit-mask-size: var(--link-accent-reach) var(--link-accent-reach);
+    mask-size: var(--link-accent-reach) var(--link-accent-reach);
     -webkit-mask-repeat: no-repeat;
     mask-repeat: no-repeat;
     transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
