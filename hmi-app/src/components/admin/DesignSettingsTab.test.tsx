@@ -49,6 +49,16 @@ describe('DesignSettingsTab typography controls', () => {
         document.documentElement.removeAttribute('style');
     });
 
+    it('writes nothing to the shared configuration just by opening the tab', () => {
+        localStorage.setItem('hmi-theme-fonts', JSON.stringify({ '--font-size-system': '999' }));
+        const setItem = vi.spyOn(Storage.prototype, 'setItem');
+
+        render(<DesignSettingsTab />);
+
+        expect(setItem).not.toHaveBeenCalled();
+        setItem.mockRestore();
+    });
+
     afterEach(() => {
         vi.restoreAllMocks();
     });

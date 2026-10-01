@@ -8,6 +8,7 @@ import {
     resolveTemporalSettingsTimezone,
 } from '../config/temporalSettings.config';
 import type { TemporalSettingsConfig } from '../domain/admin.types';
+import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
 
 export interface UseTemporalSettingsResult {
     config: TemporalSettingsConfig;
@@ -24,20 +25,17 @@ export function useTemporalSettings(): UseTemporalSettingsResult {
             setConfig(detail ? normalizeTemporalSettingsConfig(detail) : readTemporalSettingsConfig());
         };
 
-        const handleStorage = (event: StorageEvent) => {
-            if (event.key !== null && event.key !== TEMPORAL_SETTINGS_STORAGE_KEY) {
-                return;
-            }
-
-            setConfig(readTemporalSettingsConfig());
-        };
-
         document.addEventListener(TEMPORAL_SETTINGS_CHANGED_EVENT, handleTemporalSettingsChanged);
-        window.addEventListener('storage', handleStorage);
+        // Another browser's change reaches this one through the shared configuration.
+        const unsubscribeRemote = sharedConfigStorage.subscribe(({ changedKeys }) => {
+            if (changedKeys.includes(TEMPORAL_SETTINGS_STORAGE_KEY)) {
+                setConfig(readTemporalSettingsConfig());
+            }
+        });
 
         return () => {
             document.removeEventListener(TEMPORAL_SETTINGS_CHANGED_EVENT, handleTemporalSettingsChanged);
-            window.removeEventListener('storage', handleStorage);
+            unsubscribeRemote();
         };
     }, []);
 

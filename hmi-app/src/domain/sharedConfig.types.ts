@@ -19,15 +19,36 @@ export const SHARED_CONFIG_PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set(
 ]);
 
 // The single list of localStorage keys that belong to the shared configuration: the five
-// content stores. Per-browser state (hierarchy expanded nodes, dialog tab, ui store, voice
-// prebuffer, auth keys, alert history, the adapter cache) must never be added here. Later
-// configuration modules extend this list when they move to the adapter.
+// content stores plus the HMI configuration (data connection, name, loader and temporal
+// options, Prisma orb, theme, design and shader). A pinning test ties it to the modules'
+// own key constants. Per-browser state must never be added here: hierarchy expanded nodes,
+// dialog tab, ui store, voice prebuffer, auth keys, alert history, the hidden-access flag,
+// the adapter cache and the device-level exporter and runtime-mode keys.
 export const SHARED_CONFIG_KEYS: readonly string[] = [
     'laboratorio_hmi_dashboards_v1',
     'laboratorio_hmi_templates_v1',
     'laboratorio_hmi_variable_catalog_v1',
     'laboratorio_hmi_hierarchy_v1',
     'laboratorio_hmi_node_types_v1',
+    'hmi:node-red-base-url',
+    'hmi:node-red-endpoint',
+    'hmi:data-history-endpoint',
+    'hmi:activity-series-endpoint',
+    'hmi:prisma-hmi-name',
+    'hmi:loader-options',
+    'hmi:temporal-settings',
+    'hmi:prisma-orb-visual-config',
+    'hmi-theme-style',
+    'hmi-theme-frame-radius',
+    'hmi-viewer-entrance',
+    'hmi-frame-shape',
+    'hmi-icon-cutout',
+    'hmi-link-corner-accents',
+    'hmi-link-corner-accent-lengths',
+    'hmi-link-corner-accent-geometry',
+    'hmi-theme-fonts',
+    'hmi-theme-colors',
+    'hmi-shader-params',
 ];
 
 export function isSharedConfigKey(key: string): boolean {

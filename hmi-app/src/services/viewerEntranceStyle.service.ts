@@ -1,11 +1,12 @@
 import type { ViewerEntranceSettings } from '../domain/viewerEntrance.types';
 import { normalizeStepValue } from '../utils/normalizeStepValue';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 /**
  * User-adjustable values of the viewer entrance animation (V9), edited from
  * Configuración general -> Tema. They are global (not per theme preset) and
  * follow the same rule as the rest of the visual configuration: code defaults
- * are the source of truth and only the overrides are stored in `localStorage`.
+ * are the source of truth and only the overrides are stored in the shared configuration.
  * Applied values reach the viewer as the `--viewer-entrance-*` custom
  * properties of the single `:root` block in `index.css`, which stays the only
  * CSS consumer.
@@ -53,7 +54,7 @@ function snapToLimits(key: keyof ViewerEntranceSettings, value: number): number 
 
 function readOverrides(): Partial<ViewerEntranceSettings> {
     try {
-        const raw = localStorage.getItem(VIEWER_ENTRANCE_STORAGE_KEY);
+        const raw = sharedConfigStorage.getItem(VIEWER_ENTRANCE_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : null;
         if (!parsed || typeof parsed !== 'object') {
             return {};
@@ -89,9 +90,9 @@ export function writeStoredViewerEntranceSettings(settings: ViewerEntranceSettin
 
     try {
         if (Object.keys(overrides).length === 0) {
-            localStorage.removeItem(VIEWER_ENTRANCE_STORAGE_KEY);
+            sharedConfigStorage.removeItem(VIEWER_ENTRANCE_STORAGE_KEY);
         } else {
-            localStorage.setItem(VIEWER_ENTRANCE_STORAGE_KEY, JSON.stringify(overrides));
+            sharedConfigStorage.setItem(VIEWER_ENTRANCE_STORAGE_KEY, JSON.stringify(overrides));
         }
     } catch { /* ignore unavailable storage */ }
 }

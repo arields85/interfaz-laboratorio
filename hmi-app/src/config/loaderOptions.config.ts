@@ -1,3 +1,5 @@
+import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
+
 export type LoaderProfileId = 'long' | 'short';
 
 export interface LoaderOption {
@@ -69,7 +71,7 @@ export function normalizeLoaderOptionsConfig(value: unknown): LoaderOptionsConfi
 
 export function readLoaderOptionsConfig(): LoaderOptionsConfig {
     try {
-        const stored = localStorage.getItem(LOADER_OPTIONS_STORAGE_KEY);
+        const stored = sharedConfigStorage.getItem(LOADER_OPTIONS_STORAGE_KEY);
 
         if (!stored) {
             return getDefaultLoaderOptionsConfig();
@@ -83,11 +85,11 @@ export function readLoaderOptionsConfig(): LoaderOptionsConfig {
 
 export function saveLoaderOptionsConfig(config: LoaderOptionsConfig): void {
     const normalized = normalizeLoaderOptionsConfig(config);
-    localStorage.setItem(LOADER_OPTIONS_STORAGE_KEY, JSON.stringify(normalized));
+    sharedConfigStorage.setItem(LOADER_OPTIONS_STORAGE_KEY, JSON.stringify(normalized));
 }
 
 export function clearLoaderOptionsConfig(): void {
-    localStorage.removeItem(LOADER_OPTIONS_STORAGE_KEY);
+    sharedConfigStorage.removeItem(LOADER_OPTIONS_STORAGE_KEY);
 }
 
 export function toLoaderDurationMs(durationSeconds: number): number {

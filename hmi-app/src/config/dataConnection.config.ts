@@ -1,3 +1,5 @@
+import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
+
 // =============================================================================
 // Config: Data Connection
 // Configuración de conexión con la capa de datos en tiempo real.
@@ -18,10 +20,10 @@ export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
 export const DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT = '/api/hmi-data/activity-series';
 export const DATA_CONNECTION_CONFIG_CHANGED_EVENT = 'hmi:data-connection-config-changed';
 
-const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
-const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
-const LS_KEY_HISTORY_ENDPOINT = 'hmi:data-history-endpoint';
-const LS_KEY_ACTIVITY_SERIES_ENDPOINT = 'hmi:activity-series-endpoint';
+export const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
+export const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
+export const LS_KEY_HISTORY_ENDPOINT = 'hmi:data-history-endpoint';
+export const LS_KEY_ACTIVITY_SERIES_ENDPOINT = 'hmi:activity-series-endpoint';
 
 function stripTrailingSlashes(raw: string): string {
     return raw.replace(/\/+$/, '');
@@ -58,7 +60,7 @@ function notifyDataConnectionConfigChanged(): void {
 
 export function getDataBaseUrl(): string | null {
     try {
-        const stored = localStorage.getItem(LS_KEY_BASE_URL);
+        const stored = sharedConfigStorage.getItem(LS_KEY_BASE_URL);
         const fromStorage = normalizeUrl(stored);
         if (fromStorage) return fromStorage;
     } catch {
@@ -76,19 +78,19 @@ export function isDataConnectionEnabled(): boolean {
 export function saveDataBaseUrl(url: string): void {
     const normalized = normalizeUrl(url);
     if (normalized) {
-        localStorage.setItem(LS_KEY_BASE_URL, normalized);
+        sharedConfigStorage.setItem(LS_KEY_BASE_URL, normalized);
         notifyDataConnectionConfigChanged();
     }
 }
 
 export function clearDataBaseUrl(): void {
-    localStorage.removeItem(LS_KEY_BASE_URL);
+    sharedConfigStorage.removeItem(LS_KEY_BASE_URL);
     notifyDataConnectionConfigChanged();
 }
 
 export function getSavedDataBaseUrl(): string {
     try {
-        return localStorage.getItem(LS_KEY_BASE_URL) ?? '';
+        return sharedConfigStorage.getItem(LS_KEY_BASE_URL) ?? '';
     } catch {
         return '';
     }
@@ -98,7 +100,7 @@ export function getSavedDataBaseUrl(): string {
 
 export function getDataEndpoint(): string {
     try {
-        const stored = localStorage.getItem(LS_KEY_ENDPOINT);
+        const stored = sharedConfigStorage.getItem(LS_KEY_ENDPOINT);
         if (stored && stored.trim() !== '') {
             return '/' + stripLeadingSlashes(stored.trim());
         }
@@ -111,17 +113,17 @@ export function getDataEndpoint(): string {
 export function saveDataEndpoint(endpoint: string): void {
     const trimmed = endpoint.trim();
     if (trimmed) {
-        localStorage.setItem(LS_KEY_ENDPOINT, trimmed);
+        sharedConfigStorage.setItem(LS_KEY_ENDPOINT, trimmed);
     }
 }
 
 export function clearDataEndpoint(): void {
-    localStorage.removeItem(LS_KEY_ENDPOINT);
+    sharedConfigStorage.removeItem(LS_KEY_ENDPOINT);
 }
 
 export function getSavedDataEndpoint(): string {
     try {
-        return localStorage.getItem(LS_KEY_ENDPOINT) ?? '';
+        return sharedConfigStorage.getItem(LS_KEY_ENDPOINT) ?? '';
     } catch {
         return '';
     }
@@ -131,7 +133,7 @@ export function getSavedDataEndpoint(): string {
 
 export function getDataHistoryEndpoint(): string | null {
     try {
-        const stored = localStorage.getItem(LS_KEY_HISTORY_ENDPOINT);
+        const stored = sharedConfigStorage.getItem(LS_KEY_HISTORY_ENDPOINT);
         if (stored && stored.trim() !== '') {
             return '/' + stripLeadingSlashes(stored.trim());
         }
@@ -144,17 +146,17 @@ export function getDataHistoryEndpoint(): string | null {
 export function saveDataHistoryEndpoint(endpoint: string): void {
     const trimmed = endpoint.trim();
     if (trimmed) {
-        localStorage.setItem(LS_KEY_HISTORY_ENDPOINT, trimmed);
+        sharedConfigStorage.setItem(LS_KEY_HISTORY_ENDPOINT, trimmed);
     }
 }
 
 export function clearDataHistoryEndpoint(): void {
-    localStorage.removeItem(LS_KEY_HISTORY_ENDPOINT);
+    sharedConfigStorage.removeItem(LS_KEY_HISTORY_ENDPOINT);
 }
 
 export function getSavedDataHistoryEndpoint(): string {
     try {
-        return localStorage.getItem(LS_KEY_HISTORY_ENDPOINT) ?? '';
+        return sharedConfigStorage.getItem(LS_KEY_HISTORY_ENDPOINT) ?? '';
     } catch {
         return '';
     }
@@ -166,7 +168,7 @@ export function isDataHistoryEnabled(): boolean {
 
 export function getDataActivitySeriesEndpoint(): string | null {
     try {
-        const stored = localStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+        const stored = sharedConfigStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
 
         if (stored !== null) {
             const trimmed = stored.trim();
@@ -180,16 +182,16 @@ export function getDataActivitySeriesEndpoint(): string | null {
 }
 
 export function saveDataActivitySeriesEndpoint(endpoint: string): void {
-    localStorage.setItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT, endpoint.trim());
+    sharedConfigStorage.setItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT, endpoint.trim());
 }
 
 export function clearDataActivitySeriesEndpoint(): void {
-    localStorage.removeItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+    sharedConfigStorage.removeItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
 }
 
 export function getSavedDataActivitySeriesEndpoint(): string | null {
     try {
-        return localStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+        return sharedConfigStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
     } catch {
         return null;
     }

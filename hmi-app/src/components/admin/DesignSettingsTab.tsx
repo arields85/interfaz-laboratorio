@@ -11,6 +11,14 @@ import {
     ADMIN_SIDEBAR_SECTION_CLS,
     ADMIN_SIDEBAR_SECTION_HEADER_CLS,
 } from './adminSidebarStyles';
+import {
+    clearDesignOverrides,
+    DESIGN_COLOR_STORAGE_KEY,
+    DESIGN_FONT_STORAGE_KEY,
+    readDesignOverrides,
+    readRawDesignOverrides,
+    writeDesignOverrides,
+} from '../../services/designSettingsStorage.service';
 import type { SaveStatus } from './saveStatus';
 import {
     ACTIVITY_ANALYTICS_PROD_TREND_VALUE_FONT_SIZE_RANGE,
@@ -60,8 +68,6 @@ import {
     WIDGET_VALUE_FONT_SIZE_RANGE,
 } from './designSettingsTypography';
 
-const FONT_STORAGE_KEY = 'hmi-theme-fonts';
-const COLOR_STORAGE_KEY = 'hmi-theme-colors';
 const COLOR_PALETTE_FILE_TYPE = 'hmi-color-palette';
 const COLOR_PALETTE_FILE_VERSION = 1;
 
@@ -388,20 +394,6 @@ function isRecord(value: unknown): value is Record<string, string> {
     return Object.values(value).every((entry) => typeof entry === 'string');
 }
 
-function readStoredOverrides(storageKey: string): Record<string, string> {
-    try {
-        const storedValue = localStorage.getItem(storageKey);
-        if (!storedValue) {
-            return {};
-        }
-
-        const parsedValue: unknown = JSON.parse(storedValue);
-        return isRecord(parsedValue) ? parsedValue : {};
-    } catch {
-        return {};
-    }
-}
-
 function isColorTokenKey(value: string): value is ColorTokenKey {
     return COLOR_TOKEN_KEY_SET.has(value);
 }
@@ -476,15 +468,6 @@ function getValidatedImportedColorValues(paletteFile: ColorPaletteFile): Partial
     }
 
     return importedColorValues;
-}
-
-function writeStoredOverrides(storageKey: string, overrides: Record<string, string>): void {
-    if (Object.keys(overrides).length === 0) {
-        localStorage.removeItem(storageKey);
-        return;
-    }
-
-    localStorage.setItem(storageKey, JSON.stringify(overrides));
 }
 
 function isFontSizeTokenKey(value: string): value is FontSizeTokenKey {
@@ -619,10 +602,31 @@ function applyThemeStateToDocument(themeState: ThemeState): void {
     applyColorStateToDocument(themeState.colorValues);
 }
 
+/** Removes every font and colour override from the document, restoring the CSS defaults. */
+// eslint-disable-next-line react-refresh/only-export-components -- App bootstrap imports this initializer.
+export function resetThemeOverridesOnDocument(): void {
+    const style = document.documentElement.style;
+    for (const fontToken of FONT_TOKENS) {
+        style.removeProperty(fontToken.key);
+        if (fontToken.weightKey) {
+            style.removeProperty(fontToken.weightKey);
+        }
+    }
+    for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
+        style.removeProperty(sizeKey);
+    }
+    for (const trackingKey of TRACKING_TOKEN_KEYS) {
+        style.removeProperty(trackingKey);
+    }
+    for (const colorKey of COLOR_TOKEN_KEYS) {
+        style.removeProperty(colorKey);
+    }
+}
+
 // eslint-disable-next-line react-refresh/only-export-components -- App bootstrap imports this initializer.
 export function applyThemeOverrides(): void {
     try {
-        const fonts = localStorage.getItem('hmi-theme-fonts');
+        const fonts = readRawDesignOverrides(DESIGN_FONT_STORAGE_KEY);
         if (fonts) {
             const parsed = normalizeStoredFontOverrides(JSON.parse(fonts) as Record<string, string>);
             const resolvedFontValues = { ...DEFAULT_FONT_VALUES };
@@ -664,7 +668,7 @@ export function applyThemeOverrides(): void {
                 resolvedFontSizeValues,
                 resolvedTrackingValues,
             );
-            writeStoredOverrides(FONT_STORAGE_KEY, normalizedOverrides);
+            // Applying never writes: a viewer has no session, so a write on read would stay pending.
 
             for (const [key, value] of Object.entries(normalizedOverrides)) {
                 if ((FONT_TOKENS as readonly { key: FontTokenKey }[]).some((fontToken) => fontToken.key === key)) {
@@ -685,7 +689,7 @@ export function applyThemeOverrides(): void {
                 document.documentElement.style.setProperty(key, value);
             }
         }
-        const colors = localStorage.getItem('hmi-theme-colors');
+        const colors = readRawDesignOverrides(DESIGN_COLOR_STORAGE_KEY);
         if (colors) {
             const parsed = JSON.parse(colors) as Record<string, string>;
             for (const [key, value] of Object.entries(parsed)) {
@@ -704,8 +708,8 @@ interface DesignSettingsTabProps {
 
 export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef, revertRef }: DesignSettingsTabProps) {
     const initialThemeState = useMemo(() => {
-        const storedFonts = normalizeStoredFontOverrides(readStoredOverrides(FONT_STORAGE_KEY));
-        const storedColors = readStoredOverrides(COLOR_STORAGE_KEY);
+        const storedFonts = normalizeStoredFontOverrides(readDesignOverrides(DESIGN_FONT_STORAGE_KEY));
+        const storedColors = readDesignOverrides(DESIGN_COLOR_STORAGE_KEY);
 
         const nextFontValues = { ...DEFAULT_FONT_VALUES };
         for (const fontToken of FONT_TOKENS) {
@@ -764,13 +768,8 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
     });
 
     useEffect(() => {
+        // Opening the tab only applies; nothing is written until the administrator saves.
         applyThemeOverrides();
-        writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(
-            initialThemeState.fontValues,
-            initialThemeState.weightValues,
-            initialThemeState.fontSizeValues,
-            initialThemeState.trackingValues,
-        ));
     }, [initialThemeState]);
 
     useEffect(() => {
@@ -1030,7 +1029,7 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
     };
 
     const handleResetFonts = () => {
-        localStorage.removeItem(FONT_STORAGE_KEY);
+        clearDesignOverrides(DESIGN_FONT_STORAGE_KEY);
         for (const fontToken of FONT_TOKENS) {
             document.documentElement.style.removeProperty(fontToken.key);
             if (fontToken.weightKey) {
@@ -1067,8 +1066,8 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
     };
 
     const handleReset = () => {
-        localStorage.removeItem(FONT_STORAGE_KEY);
-        localStorage.removeItem(COLOR_STORAGE_KEY);
+        clearDesignOverrides(DESIGN_FONT_STORAGE_KEY);
+        clearDesignOverrides(DESIGN_COLOR_STORAGE_KEY);
 
         for (const fontToken of FONT_TOKENS) {
             document.documentElement.style.removeProperty(fontToken.key);
@@ -1118,8 +1117,8 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
             // failure can leave the font write persisted while the colour
             // write did not happen.
             try {
-                writeStoredOverrides(FONT_STORAGE_KEY, buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues));
-                writeStoredOverrides(COLOR_STORAGE_KEY, colorStorageOverrides);
+                writeDesignOverrides(DESIGN_FONT_STORAGE_KEY, buildFontStorageOverrides(fontValues, weightValues, fontSizeValues, trackingValues));
+                writeDesignOverrides(DESIGN_COLOR_STORAGE_KEY, colorStorageOverrides);
                 snapshotRef.current = { fontValues, weightValues, fontSizeValues, trackingValues, colorValues };
                 setSaveStatus('saved');
                 onDirtyChange?.(false);
@@ -1403,13 +1402,13 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
                 </div>
             </section>
 
-            <section className="border-t border-white/5 pt-4 mt-4">
+            <section className="border-t border-industrial-border pt-4 mt-4">
                 <div>
                     <h4 className="uppercase text-industrial-muted">
                         Colores
                     </h4>
                     <p className={`mt-1 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                        Ajusta la paleta activa y guarda overrides locales en este navegador.
+                        Ajuste la paleta activa; los cambios guardados se aplican en todos los navegadores.
                     </p>
                 </div>
 
@@ -1427,15 +1426,15 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
                                     return (
                                         <div
                                             key={color.key}
-                                            className="flex items-center gap-3 rounded-md border border-white/5 bg-black/10 px-3 py-2"
+                                            className="flex items-center gap-3 rounded-md border border-industrial-border bg-industrial-surface px-3 py-2"
                                         >
                                             <div
-                                                className="w-4 h-4 rounded border border-white/20 shrink-0"
+                                                className="w-4 h-4 rounded border border-industrial-border shrink-0"
                                                 style={{ backgroundColor: currentColor }}
                                                 aria-hidden="true"
                                             />
                                             <div className="min-w-0 flex-1">
-                                                <p className="text-white">{color.label}</p>
+                                                <p className="text-industrial-text">{color.label}</p>
                                             </div>
                                             <input
                                                 type="color"
@@ -1470,7 +1469,7 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
                 </div>
             </section>
 
-            <div className="border-t border-white/5 pt-4 mt-4 flex justify-end">
+            <div className="border-t border-industrial-border pt-4 mt-4 flex justify-end">
                 <AdminActionButton variant="secondary" onClick={handleReset} disabled={Object.keys(fontStorageOverrides).length === 0 && Object.keys(colorStorageOverrides).length === 0}>
                     Restaurar paleta original
                 </AdminActionButton>

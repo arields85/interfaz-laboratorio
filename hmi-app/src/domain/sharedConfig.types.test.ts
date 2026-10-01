@@ -11,6 +11,21 @@ import {
     VARIABLE_CATALOG_STORAGE_KEY,
 } from '../utils/legacyStorageCleanup';
 
+import { LS_KEY_ACTIVITY_SERIES_ENDPOINT, LS_KEY_BASE_URL, LS_KEY_ENDPOINT, LS_KEY_HISTORY_ENDPOINT } from '../config/dataConnection.config';
+import { LOADER_OPTIONS_STORAGE_KEY } from '../config/loaderOptions.config';
+import { PRISMA_ORB_STORAGE_KEY } from '../config/prismaOrb.config';
+import { TEMPORAL_SETTINGS_STORAGE_KEY } from '../config/temporalSettings.config';
+import { DESIGN_COLOR_STORAGE_KEY, DESIGN_FONT_STORAGE_KEY } from '../services/designSettingsStorage.service';
+import { FRAME_SHAPE_STORAGE_KEY } from '../services/frameShape.service';
+import { HMI_NAME_STORAGE_KEY } from '../services/hmiName.service';
+import { ICON_CUTOUT_STORAGE_KEY } from '../services/iconCutout.service';
+import {
+    LINK_ACCENT_GEOMETRY_STORAGE_KEY,
+    LINK_ACCENT_LENGTHS_STORAGE_KEY,
+    LINK_CORNER_ACCENTS_STORAGE_KEY,
+} from '../services/linkCornerAccents.service';
+import { FRAME_RADIUS_STORAGE_KEY, THEME_STYLE_STORAGE_KEY } from '../services/themeStyle.service';
+import { VIEWER_ENTRANCE_STORAGE_KEY } from '../services/viewerEntranceStyle.service';
 import {
     MAX_SHARED_CONFIG_BATCH_OPERATIONS,
     MAX_SHARED_CONFIG_KEY_LENGTH,
@@ -86,21 +101,56 @@ describe('shared config domain', () => {
         expect(MAX_SHARED_CONFIG_VALUE_BYTES).toBe(4 * 1024 * 1024);
     });
 
-    it('lists exactly the content stores as shared keys, never per-browser state', () => {
+    it('lists exactly the shared keys: content stores and configuration, never per-browser state', () => {
         expect([...SHARED_CONFIG_KEYS].sort()).toEqual([
+            // content stores
             DASHBOARDS_STORAGE_KEY,
             HIERARCHY_STORAGE_KEY,
             NODE_TYPES_STORAGE_KEY,
             TEMPLATES_STORAGE_KEY,
             VARIABLE_CATALOG_STORAGE_KEY,
+            // data connection
+            LS_KEY_BASE_URL,
+            LS_KEY_ENDPOINT,
+            LS_KEY_HISTORY_ENDPOINT,
+            LS_KEY_ACTIVITY_SERIES_ENDPOINT,
+            // identity, options and presentation
+            HMI_NAME_STORAGE_KEY,
+            LOADER_OPTIONS_STORAGE_KEY,
+            TEMPORAL_SETTINGS_STORAGE_KEY,
+            PRISMA_ORB_STORAGE_KEY,
+            // theme, design and background
+            THEME_STYLE_STORAGE_KEY,
+            FRAME_RADIUS_STORAGE_KEY,
+            VIEWER_ENTRANCE_STORAGE_KEY,
+            FRAME_SHAPE_STORAGE_KEY,
+            ICON_CUTOUT_STORAGE_KEY,
+            LINK_CORNER_ACCENTS_STORAGE_KEY,
+            LINK_ACCENT_LENGTHS_STORAGE_KEY,
+            LINK_ACCENT_GEOMETRY_STORAGE_KEY,
+            DESIGN_FONT_STORAGE_KEY,
+            DESIGN_COLOR_STORAGE_KEY,
+            'hmi-shader-params',
         ].sort());
         for (const key of SHARED_CONFIG_KEYS) expect(isValidSharedConfigKey(key)).toBe(true);
+        expect(new Set(SHARED_CONFIG_KEYS).size).toBe(SHARED_CONFIG_KEYS.length);
+        // Device-level state stays in this browser: the exporter that publishes this screen to
+        // Prisma, the runtime mode and voice endpoints, the dialog tab, auth, history and caches.
         for (const local of [
             'hmi:shared-config-cache',
             'laboratorio_hmi_hierarchy_expanded_v1',
             'hmi-global-settings-tab',
             'hmi-auth-session',
+            'hmi-admin-exit-pending',
+            'hmi-admin-revoked',
             'hmi-prisma-voice-prebuffer-history',
+            'hmi:snapshot-export-enabled',
+            'hmi:snapshot-export-interval-ms',
+            'hmi:snapshot-export-endpoint',
+            'hmi:prisma-runtime-mode',
+            'hmi:prisma-voice-tts-service-url',
+            'interfaz-laboratorio-ui',
+            'hmi:hidden-access',
         ]) {
             expect(SHARED_CONFIG_KEYS).not.toContain(local);
         }

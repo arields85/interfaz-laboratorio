@@ -1,10 +1,11 @@
 import { useIconCutoutStore } from '../store/iconCutout.store';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 /**
  * Persistence side of the icon cutout setting ("Calado del ícono", Configuración general -> Tema).
  *
  * Same rule as the rest of the visual configuration: the code default (off, today's frames) is the
- * source of truth and only the override is stored in `localStorage`. The live value is the Zustand
+ * source of truth and only the override is stored in the shared configuration. The live value is the Zustand
  * `useIconCutoutStore`, so a preview from the Tema tab re-renders every framed widget at once.
  */
 export const ICON_CUTOUT_STORAGE_KEY = 'hmi-icon-cutout';
@@ -21,7 +22,7 @@ export function getActiveIconCutout(): boolean {
 /** Defaults plus the stored override (anything but the exact stored "on" value resolves to the default). */
 export function readStoredIconCutout(): boolean {
     try {
-        return localStorage.getItem(ICON_CUTOUT_STORAGE_KEY) === STORED_ON_VALUE ? true : DEFAULT_ICON_CUTOUT;
+        return sharedConfigStorage.getItem(ICON_CUTOUT_STORAGE_KEY) === STORED_ON_VALUE ? true : DEFAULT_ICON_CUTOUT;
     } catch {
         return DEFAULT_ICON_CUTOUT;
     }
@@ -31,9 +32,9 @@ export function readStoredIconCutout(): boolean {
 export function writeStoredIconCutout(enabled: boolean): void {
     try {
         if (enabled === DEFAULT_ICON_CUTOUT) {
-            localStorage.removeItem(ICON_CUTOUT_STORAGE_KEY);
+            sharedConfigStorage.removeItem(ICON_CUTOUT_STORAGE_KEY);
         } else {
-            localStorage.setItem(ICON_CUTOUT_STORAGE_KEY, STORED_ON_VALUE);
+            sharedConfigStorage.setItem(ICON_CUTOUT_STORAGE_KEY, STORED_ON_VALUE);
         }
     } catch { /* ignore unavailable storage */ }
 }

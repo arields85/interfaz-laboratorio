@@ -1,13 +1,14 @@
 import type { LinkAccentGeometry, LinkAccentLengths } from '../domain/linkCornerAccents.types';
 import { useLinkCornerAccentsStore } from '../store/linkCornerAccents.store';
 import { normalizeStepValue } from '../utils/normalizeStepValue';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 /**
  * Persistence side of the link corner accents setting ("Esquinas en widgets con enlace",
  * Configuración general -> Tema).
  *
  * Same rule as the rest of the visual configuration: the code default (off) is the source of truth
- * and only the override is stored in `localStorage`. The live value is the Zustand
+ * and only the override is stored in the shared configuration. The live value is the Zustand
  * `useLinkCornerAccentsStore`, so a preview from the Tema tab re-renders the viewer grid at once.
  */
 export const LINK_CORNER_ACCENTS_STORAGE_KEY = 'hmi-link-corner-accents';
@@ -24,7 +25,7 @@ export function getActiveLinkCornerAccents(): boolean {
 /** Defaults plus the stored override (anything but the exact stored "on" value resolves to the default). */
 export function readStoredLinkCornerAccents(): boolean {
     try {
-        return localStorage.getItem(LINK_CORNER_ACCENTS_STORAGE_KEY) === STORED_ON_VALUE ? true : DEFAULT_LINK_CORNER_ACCENTS;
+        return sharedConfigStorage.getItem(LINK_CORNER_ACCENTS_STORAGE_KEY) === STORED_ON_VALUE ? true : DEFAULT_LINK_CORNER_ACCENTS;
     } catch {
         return DEFAULT_LINK_CORNER_ACCENTS;
     }
@@ -34,9 +35,9 @@ export function readStoredLinkCornerAccents(): boolean {
 export function writeStoredLinkCornerAccents(enabled: boolean): void {
     try {
         if (enabled === DEFAULT_LINK_CORNER_ACCENTS) {
-            localStorage.removeItem(LINK_CORNER_ACCENTS_STORAGE_KEY);
+            sharedConfigStorage.removeItem(LINK_CORNER_ACCENTS_STORAGE_KEY);
         } else {
-            localStorage.setItem(LINK_CORNER_ACCENTS_STORAGE_KEY, STORED_ON_VALUE);
+            sharedConfigStorage.setItem(LINK_CORNER_ACCENTS_STORAGE_KEY, STORED_ON_VALUE);
         }
     } catch { /* ignore unavailable storage */ }
 }
@@ -82,7 +83,7 @@ const LENGTH_KEYS = Object.keys(LENGTH_PROPERTIES) as (keyof LinkAccentLengths)[
 export function readStoredLinkAccentLengths(): LinkAccentLengths {
     const lengths = { ...DEFAULT_LINK_ACCENT_LENGTHS };
     try {
-        const raw = localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY);
+        const raw = sharedConfigStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : null;
         if (!parsed || typeof parsed !== 'object') {
             return lengths;
@@ -111,9 +112,9 @@ export function writeStoredLinkAccentLengths(lengths: LinkAccentLengths): void {
 
     try {
         if (Object.keys(overrides).length === 0) {
-            localStorage.removeItem(LINK_ACCENT_LENGTHS_STORAGE_KEY);
+            sharedConfigStorage.removeItem(LINK_ACCENT_LENGTHS_STORAGE_KEY);
         } else {
-            localStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify(overrides));
+            sharedConfigStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify(overrides));
         }
     } catch { /* ignore unavailable storage */ }
 }
@@ -168,7 +169,7 @@ function snap(value: number, limits: { min: number; max: number; step: number })
 export function readStoredLinkAccentGeometry(): LinkAccentGeometry {
     const geometry: LinkAccentGeometry = { ...DEFAULT_LINK_ACCENT_GEOMETRY };
     try {
-        const raw = localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY);
+        const raw = sharedConfigStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : null;
         if (!parsed || typeof parsed !== 'object') {
             return geometry;
@@ -198,9 +199,9 @@ export function writeStoredLinkAccentGeometry(geometry: LinkAccentGeometry): voi
 
     try {
         if (Object.keys(overrides).length === 0) {
-            localStorage.removeItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY);
+            sharedConfigStorage.removeItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY);
         } else {
-            localStorage.setItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY, JSON.stringify(overrides));
+            sharedConfigStorage.setItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY, JSON.stringify(overrides));
         }
     } catch { /* ignore unavailable storage */ }
 }

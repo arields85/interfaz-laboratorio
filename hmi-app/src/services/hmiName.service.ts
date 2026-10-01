@@ -1,12 +1,13 @@
 import { normalizeHmiName } from '../domain/hmiName';
 import type { HmiNameReadResult, HmiNameSaveResult } from '../domain/hmiName';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
-const STORAGE_KEY = 'hmi:prisma-hmi-name';
+export const HMI_NAME_STORAGE_KEY = 'hmi:prisma-hmi-name';
 
 export function readHmiName(): HmiNameReadResult {
     let raw: string | null;
     try {
-        raw = localStorage.getItem(STORAGE_KEY);
+        raw = sharedConfigStorage.getItem(HMI_NAME_STORAGE_KEY);
     } catch {
         return { ok: false, name: null, error: 'unavailable' };
     }
@@ -32,7 +33,7 @@ export function saveHmiName(value: string): HmiNameSaveResult {
     const name = normalizeHmiName(value);
     if (name === null && value.trim() !== '') return { ok: false, error: 'invalid' };
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, name }));
+        sharedConfigStorage.setItem(HMI_NAME_STORAGE_KEY, JSON.stringify({ version: 1, name }));
     } catch {
         return { ok: false, error: 'unavailable' };
     }

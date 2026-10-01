@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
 
 // =============================================================================
 // STORE: Shader Params (Zustand)
 //
 // Contiene los parámetros runtime del fondo WebGL EventHorizon.
-// Persistido en localStorage para que los ajustes sobrevivan recargas.
+// Persistido en la configuración compartida del servidor: todos los navegadores
+// aplican el mismo fondo. Se rehidrata al cargar el documento y ante un cambio remoto.
 //
 // Los valores se consumen desde EventHorizonBackground (frame loop)
 // y se editan desde GlobalSettingsDialog > BackgroundSettingsTab.
@@ -578,7 +580,7 @@ export const useShaderParamsStore = create<ShaderParamsStore>()(
         }),
         {
             name: 'hmi-shader-params',
-            storage: createJSONStorage(() => localStorage),
+            storage: createJSONStorage(() => sharedConfigStorage),
             partialize: (state) => ({ params: state.params }),
             merge: mergeShaderPersistedState,
         },

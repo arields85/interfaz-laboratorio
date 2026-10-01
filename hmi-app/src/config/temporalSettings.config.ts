@@ -3,6 +3,7 @@ import {
     normalizeWeekdays,
     validateWeeklyShiftSchedule,
 } from '../utils/weeklyShiftSchedule';
+import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
 
 export const TEMPORAL_SETTINGS_STORAGE_KEY = 'hmi:temporal-settings';
 export const TEMPORAL_SETTINGS_CHANGED_EVENT = 'hmi:temporal-settings-changed';
@@ -34,7 +35,7 @@ export function normalizeTemporalSettingsConfig(value: unknown): TemporalSetting
 
 export function readTemporalSettingsConfig(): TemporalSettingsConfig {
     try {
-        const stored = localStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY);
+        const stored = sharedConfigStorage.getItem(TEMPORAL_SETTINGS_STORAGE_KEY);
 
         if (!stored) {
             return getDefaultTemporalSettingsConfig();
@@ -55,7 +56,7 @@ export function saveTemporalSettingsConfig(config: TemporalSettingsConfig): Temp
     }
 
     try {
-        localStorage.setItem(TEMPORAL_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+        sharedConfigStorage.setItem(TEMPORAL_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
         document.dispatchEvent(new CustomEvent<TemporalSettingsConfig>(TEMPORAL_SETTINGS_CHANGED_EVENT, {
             detail: normalized,
         }));
@@ -71,7 +72,7 @@ export function saveTemporalSettingsConfig(config: TemporalSettingsConfig): Temp
 }
 
 export function clearTemporalSettingsConfig(): void {
-    localStorage.removeItem(TEMPORAL_SETTINGS_STORAGE_KEY);
+    sharedConfigStorage.removeItem(TEMPORAL_SETTINGS_STORAGE_KEY);
     document.dispatchEvent(new CustomEvent<TemporalSettingsConfig>(TEMPORAL_SETTINGS_CHANGED_EVENT, {
         detail: getDefaultTemporalSettingsConfig(),
     }));

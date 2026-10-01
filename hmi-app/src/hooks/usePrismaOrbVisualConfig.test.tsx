@@ -6,6 +6,7 @@ import {
     PRISMA_ORB_VISUAL_DEFAULTS,
     savePrismaOrbVisualConfig,
 } from '../config/prismaOrb.config';
+import { localStorageSharedConfig } from '../test/localStorageSharedConfig';
 import { usePrismaOrbVisualConfig } from './usePrismaOrbVisualConfig';
 
 describe('usePrismaOrbVisualConfig', () => {
@@ -29,52 +30,25 @@ describe('usePrismaOrbVisualConfig', () => {
         expect(result.current.speed).toBe(1.5);
     });
 
-    it('reacts only to the stable storage key across tabs', () => {
+    it('reacts only to the orb key when another browser changes the shared configuration', () => {
         const { result } = renderHook(() => usePrismaOrbVisualConfig());
-        const crossTabConfig = { ...PRISMA_ORB_VISUAL_DEFAULTS, rays: 0.72, size: 760 };
+        const remoteConfig = { ...PRISMA_ORB_VISUAL_DEFAULTS, rays: 0.72, size: 760 };
 
         act(() => {
-            window.dispatchEvent(new StorageEvent('storage', {
-                key: 'unrelated',
-                newValue: JSON.stringify(crossTabConfig),
-            }));
+            localStorage.setItem(PRISMA_ORB_STORAGE_KEY, JSON.stringify(remoteConfig));
+            localStorageSharedConfig.emitChange(['unrelated']);
         });
         expect(result.current).toEqual(PRISMA_ORB_VISUAL_DEFAULTS);
 
         act(() => {
-            window.dispatchEvent(new StorageEvent('storage', {
-                key: PRISMA_ORB_STORAGE_KEY,
-                newValue: JSON.stringify(crossTabConfig),
-            }));
+            localStorageSharedConfig.emitChange([PRISMA_ORB_STORAGE_KEY]);
         });
-        expect(result.current).toEqual(crossTabConfig);
+        expect(result.current).toEqual(remoteConfig);
 
         act(() => {
-            window.dispatchEvent(new StorageEvent('storage', {
-                key: PRISMA_ORB_STORAGE_KEY,
-                newValue: null,
-            }));
+            localStorage.removeItem(PRISMA_ORB_STORAGE_KEY);
+            localStorageSharedConfig.emitChange([PRISMA_ORB_STORAGE_KEY]);
         });
-        expect(result.current).toEqual(PRISMA_ORB_VISUAL_DEFAULTS);
-    });
-
-    it('restores defaults when another tab clears local storage', () => {
-        localStorage.setItem(PRISMA_ORB_STORAGE_KEY, JSON.stringify({
-            ...PRISMA_ORB_VISUAL_DEFAULTS,
-            intensity: 1.6,
-        }));
-        const { result } = renderHook(() => usePrismaOrbVisualConfig());
-
-        expect(result.current.intensity).toBe(1.6);
-
-        act(() => {
-            localStorage.clear();
-            window.dispatchEvent(new StorageEvent('storage', {
-                key: null,
-                newValue: null,
-            }));
-        });
-
         expect(result.current).toEqual(PRISMA_ORB_VISUAL_DEFAULTS);
     });
 });

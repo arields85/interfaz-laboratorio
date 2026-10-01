@@ -1,6 +1,7 @@
 import { DEFAULT_FRAME_SHAPE, isFrameShape } from '../domain/frameShape.types';
 import type { FrameShape } from '../domain/frameShape.types';
 import { useFrameShapeStore } from '../store/frameShape.store';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 /**
  * Persistence and document side of the active widget frame shape ("Forma del marco",
@@ -8,7 +9,7 @@ import { useFrameShapeStore } from '../store/frameShape.store';
  *
  * It follows the rule of the rest of the visual configuration: the code default
  * (`standard`, today's frames) is the source of truth and only the override is
- * stored in `localStorage`. The live value is the Zustand `useFrameShapeStore`
+ * stored in the shared configuration. The live value is the Zustand `useFrameShapeStore`
  * (components read it with `useFrameShape`), so a preview from the Tema tab
  * re-renders every framed widget immediately. It is also mirrored on the document
  * element as `data-frame-shape` (set only for non-default shapes) so CSS and tests
@@ -34,7 +35,7 @@ function setActiveFrameShape(shape: FrameShape, target: HTMLElement): void {
 /** Defaults plus the stored override (anything unknown resolves to the default). */
 export function readStoredFrameShape(): FrameShape {
     try {
-        const raw = localStorage.getItem(FRAME_SHAPE_STORAGE_KEY);
+        const raw = sharedConfigStorage.getItem(FRAME_SHAPE_STORAGE_KEY);
 
         return isFrameShape(raw) ? raw : DEFAULT_FRAME_SHAPE;
     } catch {
@@ -46,9 +47,9 @@ export function readStoredFrameShape(): FrameShape {
 export function writeStoredFrameShape(shape: FrameShape): void {
     try {
         if (shape === DEFAULT_FRAME_SHAPE) {
-            localStorage.removeItem(FRAME_SHAPE_STORAGE_KEY);
+            sharedConfigStorage.removeItem(FRAME_SHAPE_STORAGE_KEY);
         } else {
-            localStorage.setItem(FRAME_SHAPE_STORAGE_KEY, shape);
+            sharedConfigStorage.setItem(FRAME_SHAPE_STORAGE_KEY, shape);
         }
     } catch { /* ignore unavailable storage */ }
 }

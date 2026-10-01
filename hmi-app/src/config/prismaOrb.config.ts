@@ -1,4 +1,5 @@
 import type { PrismaOrbVisualConfig } from '../domain/voice.types';
+import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
 
 export const PRISMA_ORB_STORAGE_KEY = 'hmi:prisma-orb-visual-config';
 export const PRISMA_ORB_CONFIG_CHANGED_EVENT = 'hmi:prisma-orb-config-changed';
@@ -74,7 +75,7 @@ export function normalizePrismaOrbVisualConfig(value: unknown): PrismaOrbVisualC
 
 export function readPrismaOrbVisualConfig(): PrismaOrbVisualConfig {
     try {
-        const stored = localStorage.getItem(PRISMA_ORB_STORAGE_KEY);
+        const stored = sharedConfigStorage.getItem(PRISMA_ORB_STORAGE_KEY);
         return stored === null
             ? getDefaultPrismaOrbVisualConfig()
             : normalizePrismaOrbVisualConfig(JSON.parse(stored));
@@ -85,7 +86,7 @@ export function readPrismaOrbVisualConfig(): PrismaOrbVisualConfig {
 
 export function savePrismaOrbVisualConfig(config: PrismaOrbVisualConfig): PrismaOrbVisualConfig {
     const normalized = normalizePrismaOrbVisualConfig(config);
-    localStorage.setItem(PRISMA_ORB_STORAGE_KEY, JSON.stringify(normalized));
+    sharedConfigStorage.setItem(PRISMA_ORB_STORAGE_KEY, JSON.stringify(normalized));
     document.dispatchEvent(new CustomEvent<PrismaOrbVisualConfig>(PRISMA_ORB_CONFIG_CHANGED_EVENT, {
         detail: normalized,
     }));

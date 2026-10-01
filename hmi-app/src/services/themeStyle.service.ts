@@ -9,6 +9,7 @@ import type {
 } from '../domain/themeStyle.types';
 import { useThemeStylePresetStore } from '../store/themeStylePreset.store';
 import { normalizeStepValue } from '../utils/normalizeStepValue';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 export const THEME_STYLE_STORAGE_KEY = 'hmi-theme-style';
 
@@ -387,7 +388,7 @@ export function resetThemeStyleOnDocument(target: HTMLElement = document.documen
 
 export function readStoredThemeStylePresetId(): string | null {
     try {
-        return localStorage.getItem(THEME_STYLE_STORAGE_KEY);
+        return sharedConfigStorage.getItem(THEME_STYLE_STORAGE_KEY);
     } catch {
         return null;
     }
@@ -395,7 +396,7 @@ export function readStoredThemeStylePresetId(): string | null {
 
 export function writeStoredThemeStylePresetId(id: string): void {
     try {
-        localStorage.setItem(THEME_STYLE_STORAGE_KEY, id);
+        sharedConfigStorage.setItem(THEME_STYLE_STORAGE_KEY, id);
     } catch { /* ignore unavailable storage */ }
 }
 
@@ -421,7 +422,7 @@ function snapRadiusToLimits(value: number): number {
  */
 export function readStoredFrameRadiusOverrides(): Record<string, number> {
     try {
-        const raw = localStorage.getItem(FRAME_RADIUS_STORAGE_KEY);
+        const raw = sharedConfigStorage.getItem(FRAME_RADIUS_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : null;
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
             return {};
@@ -457,9 +458,9 @@ export function writeStoredFrameRadiusOverrides(overrides: Readonly<Record<strin
 
     try {
         if (Object.keys(stored).length === 0) {
-            localStorage.removeItem(FRAME_RADIUS_STORAGE_KEY);
+            sharedConfigStorage.removeItem(FRAME_RADIUS_STORAGE_KEY);
         } else {
-            localStorage.setItem(FRAME_RADIUS_STORAGE_KEY, JSON.stringify(stored));
+            sharedConfigStorage.setItem(FRAME_RADIUS_STORAGE_KEY, JSON.stringify(stored));
         }
     } catch { /* ignore unavailable storage */ }
 }
