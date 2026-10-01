@@ -8,6 +8,7 @@ with recording stubs, following the harness style of ``test_operations.py``.
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,8 +19,11 @@ REPOSITORY_ROOT = RUNTIME_ROOT.parents[1]
 OPERATIONS_ROOT = RUNTIME_ROOT / "operations"
 ENVIRONMENT_LIBRARY = OPERATIONS_ROOT / "runtime-environment.ps1"
 PREFLIGHT_LIBRARY = OPERATIONS_ROOT / "startup-preflight.ps1"
-POWERSHELL = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+POWERSHELL = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
 LEGACY_INTERPRETER = "C:\\hmi_tts\\.venv\\Scripts\\python.exe"
+
+# These tests drive Windows PowerShell 5.1; discovery on Linux (the Docker deployment) must skip them.
+WINDOWS_ONLY = unittest.skipUnless(sys.platform == "win32", "requires native Windows PowerShell 5.1")
 
 
 # ``Emit`` writes straight to the process stdout. PowerShell wraps formatted
@@ -58,6 +62,7 @@ def canonical(directory: str) -> Path:
     return Path(directory).resolve()
 
 
+@WINDOWS_ONLY
 class InterpreterResolutionTests(unittest.TestCase):
     def test_resolution_returns_the_repository_owned_virtual_environment_path(self) -> None:
         body = (
@@ -110,6 +115,7 @@ class InterpreterResolutionTests(unittest.TestCase):
                 self.assertIn("Resolve-LedaPython", source)
 
 
+@WINDOWS_ONLY
 class WorkingDirectoryPortabilityTests(unittest.TestCase):
     def test_runtime_root_is_independent_of_the_current_working_directory(self) -> None:
         body = (
@@ -135,6 +141,7 @@ class WorkingDirectoryPortabilityTests(unittest.TestCase):
                 self.assertIn("%~dp0", source)
 
 
+@WINDOWS_ONLY
 class VirtualEnvironmentBootstrapTests(unittest.TestCase):
     @staticmethod
     def _preamble(runtime_root: Path) -> str:
@@ -201,6 +208,7 @@ class VirtualEnvironmentBootstrapTests(unittest.TestCase):
         self.assertIn("3.14.7", result.stdout)
 
 
+@WINDOWS_ONLY
 class RuntimeStateBootstrapTests(unittest.TestCase):
     def _template(self, directory: Path) -> Path:
         template = directory / "leda_voice_config.example.json"
@@ -239,6 +247,7 @@ class RuntimeStateBootstrapTests(unittest.TestCase):
             self.assertEqual((state_root / "leda_voice_config.json").read_text(encoding="utf-8"), '{"source": "template"}')
 
 
+@WINDOWS_ONLY
 class OwnedInterpreterPreflightTests(unittest.TestCase):
     def test_preflight_rejects_a_foreign_interpreter_without_executing_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -293,6 +302,7 @@ class OwnedInterpreterPreflightTests(unittest.TestCase):
         self.assertLess(source.index("Assert-LedaOwnedInterpreter"), source.index("Start-Process"))
 
 
+@WINDOWS_ONLY
 class RuntimeDependencyPreflightTests(unittest.TestCase):
     def test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference(self) -> None:
         interpreter = RUNTIME_ROOT / ".venv" / "Scripts" / "python.exe"
@@ -381,6 +391,7 @@ class DependencyDeclarationTests(unittest.TestCase):
                 self.assertNotIn(forbidden, source)
 
 
+@WINDOWS_ONLY
 class InterpreterProbeTests(unittest.TestCase):
     """The probes actually run an interpreter, so they must survive PowerShell
     native-argument quoting. Unit seams stub them out and cannot catch that."""

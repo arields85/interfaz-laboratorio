@@ -7,6 +7,7 @@ harness style as ``test_python_environment.py``.
 
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +16,10 @@ from pathlib import Path
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 OPERATIONS_ROOT = RUNTIME_ROOT / "operations"
 ENVIRONMENT_LIBRARY = OPERATIONS_ROOT / "runtime-environment.ps1"
-POWERSHELL = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+POWERSHELL = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+
+# These tests drive Windows PowerShell 5.1; discovery on Linux (the Docker deployment) must skip them.
+WINDOWS_ONLY = unittest.skipUnless(sys.platform == "win32", "requires native Windows PowerShell 5.1")
 
 PREAMBLE = (
     "Set-StrictMode -Version Latest\n"
@@ -39,6 +43,7 @@ def run_powershell(body: str, env_overrides: dict[str, str | None] | None = None
     )
 
 
+@WINDOWS_ONLY
 class LegacyMigrationTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
