@@ -30,7 +30,7 @@ Update `docs/DEPLOYMENT.md` (nginx block and limitations) and `docs/leda/LEDA_BR
 
 - [x] R1 — Runtime: trusted client-source resolution plus rate limiter wiring, with tests (RED first).
 - [x] R2 — Docs: `DEPLOYMENT.md` (nginx header, remove the limitation, verification step) and the routing doc.
-- [ ] R3 — Native review.
+- [x] R3 — Native review.
 
 ## TDD
 
@@ -44,3 +44,9 @@ Strict mode, ON. Runtime: Python unittest, plus the offline gate per the runtime
   - Account-budget decision: there is no account-only budget. The limits are per (account, source) = 5 and per source = 20 in a 15 minute window, so one source cannot lock the admin out of another source; no change needed (test added). Residual, documented in DEPLOYMENT.md: the global storage cap of 100 live failure rows can be exhausted by an attacker rotating many addresses (e.g. an IPv6 block), which temporarily blocks all logins; not mitigated in the app (nginx/firewall per-IP limiting suggested).
 - 2026-10-01 R2 (8ff40ce): `docs/DEPLOYMENT.md` (rule 4, nginx snippet `proxy_set_header X-Real-IP $remote_addr;` with overwrite/no X-Forwarded-For note, limitation rewritten, verification step 7) and `docs/leda/LEDA_BROWSER_ROUTING.md` (production contract; that doc is in English, so the addition is too).
 - Offline gate (child-only supervisor): 1899 tests OK, exit 0.
+- 2026-10-01 R3: native review `52af522..f9bc4be` (medium, one lens): approved and acknowledged (`review-38354d482c1defe6`). Reviewed boundary `f9bc4be`. Remaining follow-up: the invalid-header fallback test uses a subset assertion and does not check each response status.
+
+## Status
+
+Complete. `docs/DEPLOYMENT.md` is final for the IT handoff.
+
