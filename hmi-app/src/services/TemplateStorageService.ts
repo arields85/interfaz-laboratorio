@@ -1,13 +1,15 @@
 import type { Dashboard, Template, WidgetConfig, WidgetLayout } from '../domain/admin.types';
 import { mockTemplates } from '../mocks/template.mock';
 import { TEMPLATES_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import type { ConfigStoragePort } from '../domain/sharedConfig.types';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 import { dashboardStorage } from './DashboardStorageService';
 
 // =============================================================================
 // TemplateStorageService
-// Persistencia asíncrona de templates usando localStorage.
-// Auto-inicializa con una colección vacía si el storage está vacío (instalación
-// nueva sin datos de ejemplo). mockTemplates se conserva solo para inferir el
+// Persistencia asíncrona de templates sobre la configuración compartida del
+// servidor (sharedConfigStorage). Una lectura nunca escribe: sin datos devuelve
+// una colección vacía (instalación nueva sin datos de ejemplo). mockTemplates se conserva solo para inferir el
 // dashboardType de templates guardados por instalaciones existentes que aún no
 // lo tengan persistido.
 //
@@ -15,14 +17,23 @@ import { dashboardStorage } from './DashboardStorageService';
 // Especificación Funcional Modo Admin §13
 // =============================================================================
 
-class TemplateStorageService {
+export class TemplateStorageService {
+    private readonly storage: ConfigStoragePort;
+    private readonly dashboards: Pick<typeof dashboardStorage, 'getDashboard'>;
+
+    constructor(
+        storage: ConfigStoragePort = sharedConfigStorage,
+        dashboards: Pick<typeof dashboardStorage, 'getDashboard'> = dashboardStorage,
+    ) {
+        this.storage = storage;
+        this.dashboards = dashboards;
+    }
+
     private getMockDashboardType(template: Template) {
         return mockTemplates.find((mockTemplate) => mockTemplate.id === template.id)?.dashboardType;
     }
 
     private async ensureDashboardType(templates: Template[]): Promise<Template[]> {
-        let didChange = false;
-
         const migratedTemplates = await Promise.all(
             templates.map(async (template) => {
                 if (template.dashboardType) {
@@ -32,7 +43,7 @@ class TemplateStorageService {
                 let inferredDashboardType: Template['dashboardType'];
 
                 if (template.sourceDashboardId) {
-                    const sourceDashboard = await dashboardStorage.getDashboard(template.sourceDashboardId);
+                    const sourceDashboard = await this.dashboards.getDashboard(template.sourceDashboardId);
                     inferredDashboardType = sourceDashboard?.dashboardType;
                 }
 
@@ -44,7 +55,6 @@ class TemplateStorageService {
                     return template;
                 }
 
-                didChange = true;
                 return {
                     ...template,
                     dashboardType: inferredDashboardType,
@@ -52,23 +62,12 @@ class TemplateStorageService {
             }),
         );
 
-        if (didChange) {
-            localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(migratedTemplates));
-        }
-
+        // Pure read: the inferred type is persisted by the next real save, never by a read.
         return migratedTemplates;
     }
 
-    private async initStorage(): Promise<void> {
-        const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY);
-        if (!stored) {
-            localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify([]));
-        }
-    }
-
     private async readStorage(): Promise<Template[]> {
-        await this.initStorage();
-        const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY);
+        const stored = this.storage.getItem(TEMPLATES_STORAGE_KEY);
         const templates: Template[] = stored ? JSON.parse(stored) : [];
         return this.ensureDashboardType(templates);
     }
@@ -97,14 +96,14 @@ class TemplateStorageService {
             templates.push(template);
         }
 
-        localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+        this.storage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
     }
 
     /** Elimina un template por ID */
     async deleteTemplate(id: string): Promise<void> {
         const templates = await this.readStorage();
         const filtered = templates.filter((template) => template.id !== id);
-        localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(filtered));
+        this.storage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(filtered));
     }
 
     /**

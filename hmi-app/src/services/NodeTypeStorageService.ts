@@ -1,4 +1,6 @@
 import { NODE_TYPES_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import type { ConfigStoragePort } from '../domain/sharedConfig.types';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 export interface NodeTypeDefinition {
     key: string;
@@ -21,17 +23,16 @@ export const DEFAULT_NODE_TYPES: NodeTypeDefinition[] = [
     { key: 'group', label: 'Grupo', icon: 'users', color: 'text-accent-pink' },
 ];
 
-class NodeTypeStorageService {
-    private async initStorage(): Promise<void> {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_NODE_TYPES));
-        }
+export class NodeTypeStorageService {
+    private readonly storage: ConfigStoragePort;
+
+    constructor(storage: ConfigStoragePort = sharedConfigStorage) {
+        this.storage = storage;
     }
 
+    // Reads never write: until an administrator saves, the defaults are served as they are.
     private async readStorage(): Promise<NodeTypeDefinition[]> {
-        await this.initStorage();
-        const stored = localStorage.getItem(STORAGE_KEY);
+        const stored = this.storage.getItem(STORAGE_KEY);
         return stored ? JSON.parse(stored) as NodeTypeDefinition[] : [...DEFAULT_NODE_TYPES];
     }
 
@@ -40,7 +41,7 @@ class NodeTypeStorageService {
     }
 
     async save(types: NodeTypeDefinition[]): Promise<void> {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(types));
+        this.storage.setItem(STORAGE_KEY, JSON.stringify(types));
     }
 }
 

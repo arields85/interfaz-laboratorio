@@ -69,8 +69,7 @@ function toSaveError(error: unknown): SharedConfigSaveError {
 }
 
 const encoder = new TextEncoder();
-// `{"set":{},"delete":[]}`
-const EMPTY_WIRE_BYTES = 23;
+const EMPTY_WIRE_BYTES = encoder.encode(JSON.stringify({ set: {}, delete: [] } satisfies SharedConfigBatch)).length;
 
 function jsonBytes(text: string): number {
     return encoder.encode(JSON.stringify(text)).length;

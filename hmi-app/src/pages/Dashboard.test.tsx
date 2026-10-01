@@ -8,6 +8,8 @@ import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.t
 import type { DashboardView } from '../domain/admin.types';
 import { useUIStore } from '../store/ui.store';
 import { useDashboardPresentationFrame } from '../services/dashboardPresentationFrame.service';
+import { localStorageSharedConfig } from '../test/localStorageSharedConfig';
+import { DASHBOARDS_STORAGE_KEY, TEMPLATES_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 
 const CONTENT_READY_ATTRIBUTE = 'data-hmi-content-ready';
 
@@ -313,6 +315,33 @@ describe('Dashboard page layout', () => {
                 }),
             );
         });
+    });
+
+    it('reloads the published dashboards in place when another browser changes the shared configuration', async () => {
+        renderDashboard();
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();
+        });
+        const viewerRoot = screen.getByTestId('dashboard-viewer-root');
+        const loadsBefore = dashboardStorageMock.getDashboards.mock.calls.length;
+
+        act(() => {
+            localStorageSharedConfig.emitChange([TEMPLATES_STORAGE_KEY]);
+        });
+        expect(dashboardStorageMock.getDashboards).toHaveBeenCalledTimes(loadsBefore);
+
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({ id: 'dashboard-remote', name: 'Remote', status: 'published', widgets: [], layout: [] }),
+        ]);
+        act(() => {
+            localStorageSharedConfig.emitChange([DASHBOARDS_STORAGE_KEY]);
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('dashboard-header-dashboard-id')).toHaveTextContent('dashboard-remote');
+        });
+        expect(screen.getByTestId('dashboard-viewer-root')).toBe(viewerRoot);
     });
 
     it('passes contract machines to the viewer pipeline', async () => {

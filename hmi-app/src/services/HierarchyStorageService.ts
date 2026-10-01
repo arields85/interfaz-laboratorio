@@ -1,29 +1,29 @@
 import type { HierarchyNode } from '../domain/admin.types';
 import { HIERARCHY_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import type { ConfigStoragePort } from '../domain/sharedConfig.types';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 const STORAGE_KEY = HIERARCHY_STORAGE_KEY;
 
 // =============================================================================
 // HierarchyStorageService
-// Persistencia asíncrona de la jerarquía de planta usando localStorage.
-// Auto-inicializa con una colección vacía si el storage está vacío (instalación
-// nueva sin datos de ejemplo).
+// Persistencia asíncrona de la jerarquía de planta sobre la configuración
+// compartida del servidor (sharedConfigStorage). Una lectura nunca escribe: sin
+// datos devuelve una colección vacía (instalación nueva sin datos de ejemplo).
 //
 // Patrón análogo a DashboardStorageService (Fase 6).
 // =============================================================================
 
-class HierarchyStorageService {
+export class HierarchyStorageService {
+    private readonly storage: ConfigStoragePort;
 
-    private async initStorage(): Promise<void> {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-        }
+    constructor(storage: ConfigStoragePort = sharedConfigStorage) {
+        this.storage = storage;
     }
 
+
     private async readStorage(): Promise<HierarchyNode[]> {
-        await this.initStorage();
-        const stored = localStorage.getItem(STORAGE_KEY);
+        const stored = this.storage.getItem(STORAGE_KEY);
         return stored ? JSON.parse(stored) : [];
     }
 
@@ -45,7 +45,7 @@ class HierarchyStorageService {
             nodes.push(node);
         }
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nodes));
+        this.storage.setItem(STORAGE_KEY, JSON.stringify(nodes));
     }
 
     /** Elimina un nodo por ID solo si no tiene hijos */
@@ -58,7 +58,7 @@ class HierarchyStorageService {
         }
 
         const filtered = nodes.filter(n => n.id !== id);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+        this.storage.setItem(STORAGE_KEY, JSON.stringify(filtered));
         return true;
     }
 
@@ -93,7 +93,7 @@ class HierarchyStorageService {
         if (idx === -1) return null;
 
         nodes[idx] = { ...nodes[idx], ...partial };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nodes));
+        this.storage.setItem(STORAGE_KEY, JSON.stringify(nodes));
         return nodes[idx];
     }
 
@@ -120,7 +120,7 @@ class HierarchyStorageService {
         const idx = nodes.findIndex(n => n.id === nodeId);
 
         nodes[idx].parentId = newParentId;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nodes));
+        this.storage.setItem(STORAGE_KEY, JSON.stringify(nodes));
         return true;
     }
 }

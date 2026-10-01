@@ -1,5 +1,7 @@
 import type { CatalogVariable, Dashboard } from '../domain';
 import { DASHBOARDS_STORAGE_KEY, VARIABLE_CATALOG_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import type { ConfigStoragePort } from '../domain/sharedConfig.types';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 const STORAGE_KEY = VARIABLE_CATALOG_STORAGE_KEY;
 
@@ -8,23 +10,22 @@ interface AffectedDashboard {
     name: string;
 }
 
-class VariableCatalogStorageService {
+export class VariableCatalogStorageService {
+    private readonly storage: ConfigStoragePort;
 
-    private async initStorage(): Promise<void> {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-        }
+    constructor(storage: ConfigStoragePort = sharedConfigStorage) {
+        this.storage = storage;
     }
 
+
+    // Reads never write: a viewer has no session to save with, so nothing is seeded.
     private async readStorage(): Promise<CatalogVariable[]> {
-        await this.initStorage();
-        const stored = localStorage.getItem(STORAGE_KEY);
+        const stored = this.storage.getItem(STORAGE_KEY);
         return stored ? JSON.parse(stored) : [];
     }
 
     private async writeStorage(variables: CatalogVariable[]): Promise<void> {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(variables));
+        this.storage.setItem(STORAGE_KEY, JSON.stringify(variables));
     }
 
     /** Retorna todas las variables del catálogo. */
@@ -128,7 +129,7 @@ class VariableCatalogStorageService {
      * Lee el storage de dashboards en forma directa para evitar acople circular.
      */
     async getAffectedDashboards(variableId: string): Promise<AffectedDashboard[]> {
-        const storedDashboards = localStorage.getItem(DASHBOARDS_STORAGE_KEY);
+        const storedDashboards = this.storage.getItem(DASHBOARDS_STORAGE_KEY);
 
         if (!storedDashboards) {
             return [];

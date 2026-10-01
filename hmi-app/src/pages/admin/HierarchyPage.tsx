@@ -33,7 +33,13 @@ import AdminActionButton from '../../components/admin/AdminActionButton';
 import AdminSelect from '../../components/admin/AdminSelect';
 import AdminTag from '../../components/admin/AdminTag';
 import NodeTypeConfigDialog from '../../components/admin/NodeTypeConfigDialog';
-import { HIERARCHY_EXPANDED_STORAGE_KEY } from '../../utils/legacyStorageCleanup';
+import {
+    DASHBOARDS_STORAGE_KEY,
+    HIERARCHY_EXPANDED_STORAGE_KEY,
+    HIERARCHY_STORAGE_KEY,
+    NODE_TYPES_STORAGE_KEY,
+} from '../../utils/legacyStorageCleanup';
+import { useSharedConfigVersion } from '../../hooks/useSharedConfigVersion';
 
 // =============================================================================
 // HierarchyPage
@@ -235,6 +241,8 @@ function NodeDetailPanel({
 }
 
 // ---- Página principal ----
+const HIERARCHY_SHARED_CONFIG_KEYS = [HIERARCHY_STORAGE_KEY, DASHBOARDS_STORAGE_KEY, NODE_TYPES_STORAGE_KEY] as const;
+
 export default function HierarchyPage() {
     const navigate = useNavigate();
     const [allNodes, setAllNodes] = useState<HierarchyNode[]>([]);
@@ -296,9 +304,11 @@ export default function HierarchyPage() {
         }
     };
 
+    // The first run is the initial load; later runs re-read after another browser's change.
+    const sharedConfigVersion = useSharedConfigVersion(HIERARCHY_SHARED_CONFIG_KEYS);
     useEffect(() => {
         load();
-    }, []);
+    }, [sharedConfigVersion]);
 
     const tree = useMemo(() => buildTree(allNodes), [allNodes]);
     const filteredTree = useMemo(() => filterTreeByName(tree, searchTerm), [tree, searchTerm]);

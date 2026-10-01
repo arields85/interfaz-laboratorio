@@ -1,6 +1,8 @@
 import type { ActivityAnalyticsPersistedDisplayPatch, ActivityAnalyticsWidgetConfig, Dashboard, Template, ViewerPersistedWidgetDisplayPatch, WidgetConfig, WidgetLayout } from '../domain/admin.types';
 import { clampWidgetBounds, DEFAULT_COLS, DEFAULT_ROWS, isTemplateApplicable } from '../utils/gridConfig';
 import { DASHBOARDS_STORAGE_KEY } from '../utils/legacyStorageCleanup';
+import type { ConfigStoragePort } from '../domain/sharedConfig.types';
+import { sharedConfigStorage } from './sharedConfigStorage.service';
 import { TemplateAspectMismatchError } from '../utils/templateAspectMismatch';
 import {
     cloneDashboardViewsWithRemappedIds,
@@ -15,11 +17,18 @@ const DEFAULT_DASHBOARD_ROWS = DEFAULT_ROWS;
 // =============================================================================
 // DashboardStorageService
 // Servicio de persistencia para el Modo Administrador. Simula una BD asíncrona
-// usando localStorage. Auto-inicializa con una colección vacía si está vacío
-// (instalación nueva sin datos de ejemplo).
+// sobre la configuración compartida del servidor (sharedConfigStorage). Una
+// lectura nunca escribe: sin datos devuelve una colección vacía (instalación
+// nueva sin datos de ejemplo).
 // =============================================================================
 
-class DashboardStorageService {
+export class DashboardStorageService {
+    private readonly storage: ConfigStoragePort;
+
+    constructor(storage: ConfigStoragePort = sharedConfigStorage) {
+        this.storage = storage;
+    }
+
     private async writeDashboard(dashboard: Dashboard, delayMs = 400): Promise<Dashboard> {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         const dashboards = await this.readStorage();
@@ -36,44 +45,32 @@ class DashboardStorageService {
             dashboards.push(normalizedDashboard);
         }
 
-        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
+        this.storage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
         return normalizedDashboard;
     }
 
-    // Inicializa el Storage con una colección vacía si es la primera vez (instalación
-    // nueva sin datos de ejemplo). Si ya existen datos, corrige dashboards publicados
-    // sin snapshot o sin aspect/rows persistidos para mantener compatibilidad interna.
-    private async initStorage(): Promise<void> {
-        const stored = localStorage.getItem(DASHBOARDS_STORAGE_KEY);
-        if (!stored) {
-            localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify([]));
-            return;
-        }
-
-        const dashboards: Dashboard[] = JSON.parse(stored);
-        let migrated = false;
-
+    // Corrige dashboards publicados sin snapshot o sin aspect/rows persistidos para
+    // mantener compatibilidad interna. Es una lectura pura: el resultado corregido se
+    // persiste con el siguiente guardado real, nunca desde una lectura (un visor no
+    // tiene sesión para guardar).
+    private migrateDashboards(dashboards: Dashboard[]): Dashboard[] {
         for (let index = 0; index < dashboards.length; index += 1) {
             const dashboard = dashboards[index];
             if (!dashboard.aspect) {
                 dashboard.aspect = DEFAULT_DASHBOARD_ASPECT;
-                migrated = true;
             }
 
             if (!dashboard.rows) {
                 dashboard.rows = DEFAULT_DASHBOARD_ROWS;
-                migrated = true;
             }
 
             if (!dashboard.cols) {
                 dashboard.cols = DEFAULT_COLS;
-                migrated = true;
             }
 
             if (dashboard.status === 'published' && !dashboard.ownerNodeId) {
                 dashboard.status = 'draft';
                 dashboard.publishedSnapshot = undefined;
-                migrated = true;
             }
 
             if (dashboard.status === 'published' && dashboard.ownerNodeId && !dashboard.publishedSnapshot) {
@@ -88,43 +85,36 @@ class DashboardStorageService {
                         : undefined,
                     publishedAt: dashboard.lastUpdateAt ?? new Date().toISOString(),
                 };
-                migrated = true;
                 continue;
             }
 
             if (dashboard.publishedSnapshot) {
                 if (!dashboard.publishedSnapshot.aspect) {
                     dashboard.publishedSnapshot.aspect = dashboard.aspect;
-                    migrated = true;
                 }
 
                 if (!dashboard.publishedSnapshot.rows) {
                     dashboard.publishedSnapshot.rows = dashboard.rows;
-                    migrated = true;
                 }
 
                 if (!dashboard.publishedSnapshot.cols) {
                     dashboard.publishedSnapshot.cols = dashboard.cols;
-                    migrated = true;
                 }
             }
 
             const normalizedDashboard = normalizeDashboardViews(dashboard);
             if (JSON.stringify(normalizedDashboard) !== JSON.stringify(dashboard)) {
                 dashboards[index] = normalizedDashboard;
-                migrated = true;
             }
         }
 
-        if (migrated) {
-            localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
-        }
+        return dashboards;
     }
 
     private async readStorage(): Promise<Dashboard[]> {
-        await this.initStorage();
-        const stored = localStorage.getItem(DASHBOARDS_STORAGE_KEY);
-        return stored ? JSON.parse(stored).map((dashboard: Dashboard) => normalizeDashboardViews(dashboard)) : [];
+        const stored = this.storage.getItem(DASHBOARDS_STORAGE_KEY);
+        if (!stored) return [];
+        return this.migrateDashboards(JSON.parse(stored) as Dashboard[]).map((dashboard) => normalizeDashboardViews(dashboard));
     }
 
     async getDashboards(): Promise<Dashboard[]> {
@@ -204,7 +194,7 @@ class DashboardStorageService {
                 : undefined,
         }, resolvedViewId);
         dashboards[dashboardIndex] = normalizedDashboard;
-        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
+        this.storage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(dashboards));
         return normalizedDashboard;
     }
 
@@ -259,7 +249,7 @@ class DashboardStorageService {
     async deleteDashboard(id: string): Promise<void> {
         const dashboards = await this.readStorage();
         const filtered = dashboards.filter((dashboard) => dashboard.id !== id);
-        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(filtered));
+        this.storage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(filtered));
     }
 
     applyTemplate(dashboard: Dashboard, template: Template): Dashboard {
@@ -305,7 +295,7 @@ class DashboardStorageService {
         const missingDashboards = dashboards.filter((dashboard) => !orderedIds.includes(dashboard.id));
         const nextDashboards = [...reordered, ...missingDashboards];
 
-        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(nextDashboards));
+        this.storage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify(nextDashboards));
         return nextDashboards;
     }
 

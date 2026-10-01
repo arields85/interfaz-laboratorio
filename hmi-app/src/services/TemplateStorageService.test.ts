@@ -24,7 +24,7 @@ describe('TemplateStorageService', () => {
         const templates = await templatesPromise;
 
         expect(templates).toEqual([]);
-        expect(localStorage.getItem(TEMPLATES_STORAGE_KEY)).not.toBeNull();
+        expect(localStorage.getItem(TEMPLATES_STORAGE_KEY)).toBeNull();
     });
 
     it('creates templates from dashboards preserving layoutPreset, aspect, cols, and rows', async () => {
@@ -130,7 +130,7 @@ describe('TemplateStorageService', () => {
         await expect(templateStorage.getTemplate('any-template')).rejects.toThrow(SyntaxError);
     });
 
-    it('hydrates missing dashboardType from the source dashboard and persists the migration', async () => {
+    it('hydrates missing dashboardType from the source dashboard without writing on read', async () => {
         const sourceDashboard = makeDashboard({
             id: 'source-dashboard',
             dashboardType: 'line',
@@ -158,9 +158,7 @@ describe('TemplateStorageService', () => {
         const template = await templatePromise;
 
         expect(template).toEqual(expect.objectContaining({ dashboardType: 'line' }));
-        expect(JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) ?? '[]')).toEqual([
-            expect.objectContaining({ id: storedTemplate.id, dashboardType: 'line' }),
-        ]);
+        expect(JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) ?? '[]')).toEqual([storedTemplate]);
     });
 
     it('falls back to the mock template dashboardType when storage lacks it', async () => {
@@ -181,9 +179,7 @@ describe('TemplateStorageService', () => {
         const template = await templateStorage.getTemplate(storedTemplate.id);
 
         expect(template).toEqual(expect.objectContaining({ dashboardType: 'equipment' }));
-        expect(JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) ?? '[]')).toEqual([
-            expect.objectContaining({ id: storedTemplate.id, dashboardType: 'equipment' }),
-        ]);
+        expect(JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) ?? '[]')).toEqual([storedTemplate]);
     });
 
     it('leaves templates unchanged when no dashboardType can be inferred', async () => {

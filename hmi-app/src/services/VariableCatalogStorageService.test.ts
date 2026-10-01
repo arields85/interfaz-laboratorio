@@ -35,7 +35,7 @@ describe('VariableCatalogStorageService', () => {
         const variables = await variablesPromise;
 
         expect(variables).toEqual([]);
-        expect(JSON.parse(localStorage.getItem(VARIABLE_CATALOG_STORAGE_KEY) ?? 'null')).toEqual([]);
+        expect(localStorage.getItem(VARIABLE_CATALOG_STORAGE_KEY)).toBeNull();
     });
 
     it('reads variables from VARIABLE_CATALOG_STORAGE_KEY', async () => {

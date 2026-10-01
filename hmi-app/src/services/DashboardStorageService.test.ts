@@ -62,7 +62,34 @@ describe('DashboardStorageService', () => {
         const dashboards = await dashboardsPromise;
 
         expect(dashboards).toEqual([]);
-        expect(localStorage.getItem(DASHBOARDS_STORAGE_KEY)).not.toBeNull();
+        expect(localStorage.getItem(DASHBOARDS_STORAGE_KEY)).toBeNull();
+    });
+
+    it('never writes while reading: a legacy dashboard is migrated in memory and persisted by the next save', async () => {
+        const legacy = makeDashboard({
+            id: 'dashboard-read-only',
+            aspect: undefined as never,
+            cols: undefined as never,
+            rows: undefined as never,
+        });
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify([legacy]));
+        const seeded = localStorage.getItem(DASHBOARDS_STORAGE_KEY);
+        const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+        const readPromise = dashboardStorage.getDashboards();
+        await vi.advanceTimersByTimeAsync(300);
+        const [migrated] = await readPromise;
+
+        expect(migrated).toEqual(expect.objectContaining({ aspect: '16:9', cols: 40, rows: 24 }));
+        expect(setItemSpy).not.toHaveBeenCalled();
+        expect(localStorage.getItem(DASHBOARDS_STORAGE_KEY)).toBe(seeded);
+
+        const savePromise = dashboardStorage.saveDashboard(makeDashboard({ id: 'dashboard-other' }));
+        await vi.advanceTimersByTimeAsync(400);
+        await savePromise;
+
+        expect(readStoredDashboards().find((stored: Dashboard) => stored.id === 'dashboard-read-only'))
+            .toEqual(expect.objectContaining({ aspect: '16:9', cols: 40, rows: 24 }));
     });
 
     it('reads header connection widgets using connection-status type from seeded fixture data', async () => {
@@ -134,10 +161,6 @@ describe('DashboardStorageService', () => {
                 layout: [expect.objectContaining({ widgetId: 'widget-legacy', x: 2, y: 1, w: 5, h: 4 })],
             }),
         ]);
-        expect(readStoredDashboards()[0]).toEqual(expect.objectContaining({
-            activeViewId: 'view-default',
-            views: [expect.objectContaining({ id: 'view-default', name: 'Default view' })],
-        }));
     });
 
     it('creates dashboards from templates preserving aspect, cols, and rows', async () => {
@@ -182,11 +205,6 @@ describe('DashboardStorageService', () => {
             cols: 40,
             rows: 24,
         }));
-        expect(readStoredDashboards()[0]).toEqual(expect.objectContaining({
-            aspect: '16:9',
-            cols: 40,
-            rows: 24,
-        }));
     });
 
     it('downgrades published dashboards without ownerNodeId to draft during migration', async () => {
@@ -213,10 +231,6 @@ describe('DashboardStorageService', () => {
 
         expect(dashboard?.status).toBe('draft');
         expect(dashboard?.publishedSnapshot).toBeUndefined();
-        expect(readStoredDashboards()[0]).toEqual(expect.objectContaining({
-            status: 'draft',
-        }));
-        expect(readStoredDashboards()[0]).not.toHaveProperty('publishedSnapshot');
     });
 
     it('creates missing published snapshots for published dashboards with ownerNodeId during migration', async () => {
@@ -284,11 +298,6 @@ describe('DashboardStorageService', () => {
         const dashboard = await dashboardPromise;
 
         expect(dashboard?.publishedSnapshot).toEqual(expect.objectContaining({
-            aspect: '4:3',
-            cols: 16,
-            rows: 12,
-        }));
-        expect(readStoredDashboards()[0].publishedSnapshot).toEqual(expect.objectContaining({
             aspect: '4:3',
             cols: 16,
             rows: 12,
@@ -1040,10 +1049,6 @@ describe('DashboardStorageService', () => {
             id: 'dashboard-null-snapshot',
             name: 'Null snapshot',
             publishedSnapshot: undefined,
-            activeViewId: 'view-default',
-        }));
-        expect(readStoredDashboards()[0]).toEqual(expect.objectContaining({
-            id: 'dashboard-null-snapshot',
             activeViewId: 'view-default',
         }));
     });

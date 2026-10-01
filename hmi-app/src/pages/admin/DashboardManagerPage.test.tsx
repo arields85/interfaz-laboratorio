@@ -1,10 +1,12 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardManagerPage from './DashboardManagerPage';
 import { makeDashboard, makeTemplate } from '../../test/fixtures/dashboard.fixture';
+import { localStorageSharedConfig } from '../../test/localStorageSharedConfig';
+import { DASHBOARDS_STORAGE_KEY, NODE_TYPES_STORAGE_KEY } from '../../utils/legacyStorageCleanup';
 
 const {
     mockNavigate,
@@ -123,6 +125,35 @@ describe('DashboardManagerPage', () => {
             { id: 'node-1', name: 'Línea 1', type: 'cell', parentId: null },
         ]);
         loadNodeTypeLabelsMock.mockResolvedValue(undefined);
+    });
+
+    it('refreshes the list in place when another browser changes the shared configuration', async () => {
+        render(<DashboardManagerPage />);
+        expect(await screen.findByText('Resumen general')).toBeInTheDocument();
+        dashboardStorageMock.getDashboards.mockResolvedValue([
+            makeDashboard({ id: 'dashboard-2', name: 'Remoto', description: 'Cambio de otro navegador' }),
+        ]);
+
+        act(() => {
+            localStorageSharedConfig.emitChange([DASHBOARDS_STORAGE_KEY]);
+        });
+
+        expect(await screen.findByText('Cambio de otro navegador')).toBeInTheDocument();
+        expect(screen.queryByText('Resumen general')).not.toBeInTheDocument();
+    });
+
+    it('reloads the node type labels when another browser changes the node types', async () => {
+        render(<DashboardManagerPage />);
+        await screen.findByText('Resumen general');
+        const loadsBefore = loadNodeTypeLabelsMock.mock.calls.length;
+
+        act(() => {
+            localStorageSharedConfig.emitChange([NODE_TYPES_STORAGE_KEY]);
+        });
+
+        await waitFor(() => {
+            expect(loadNodeTypeLabelsMock.mock.calls.length).toBe(loadsBefore + 1);
+        });
     });
 
     it('shows the initial view explicitly from the first ordered internal view in the dashboard row', async () => {

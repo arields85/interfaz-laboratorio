@@ -3,6 +3,8 @@ import { AlertTriangle, Loader2, Link2Off } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { dashboardStorage } from '../services/DashboardStorageService';
 import { hierarchyStorage } from '../services/HierarchyStorageService';
+import { useSharedConfigVersion } from '../hooks/useSharedConfigVersion';
+import { DASHBOARDS_STORAGE_KEY, HIERARCHY_STORAGE_KEY } from '../utils/legacyStorageCleanup';
 import type { Dashboard, HierarchyNode, ViewerPersistedWidgetDisplayPatch } from '../domain/admin.types';
 import type { ConnectionHealth, ContractMachine } from '../domain/dataContract.types';
 import DashboardViewer from '../components/viewer/DashboardViewer';
@@ -104,6 +106,8 @@ function SnapshotExportController({
 // Especificación Funcional Modo Admin §11
 // =============================================================================
 
+const VIEWER_SHARED_CONFIG_KEYS = [DASHBOARDS_STORAGE_KEY, HIERARCHY_STORAGE_KEY] as const;
+
 export default function Dashboard() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [allDashboards, setAllDashboards] = useState<Dashboard[]>([]);
@@ -178,6 +182,27 @@ export default function Dashboard() {
             resetShieldContentReady();
         };
     }, []);
+
+    // Another browser changed the dashboards or the hierarchy: reload in place, without
+    // the loading state or the shield, so an open viewer just shows the new content.
+    const sharedConfigVersion = useSharedConfigVersion(VIEWER_SHARED_CONFIG_KEYS);
+    useEffect(() => {
+        if (sharedConfigVersion === 0) return;
+        let cancelled = false;
+        void Promise.all([dashboardStorage.getDashboards(), hierarchyStorage.getNodes()])
+            .then(([all, nodes]) => {
+                if (cancelled) return;
+                setAllDashboards(all);
+                setPublishedDashboards(all.filter((dashboard) => dashboard.status === 'published'));
+                setAllNodes(nodes);
+            })
+            .catch((error) => {
+                console.error('Error recargando la configuración compartida:', error);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [sharedConfigVersion]);
 
     // Si la cantidad de tabs publicados cambia y el índice actual queda fuera
     // de rango, se normaliza al primer dashboard disponible.

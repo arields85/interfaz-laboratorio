@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { HIERARCHY_EXPANDED_STORAGE_KEY } from '../../utils/legacyStorageCleanup';
+import { localStorageSharedConfig } from '../../test/localStorageSharedConfig';
+import { HIERARCHY_EXPANDED_STORAGE_KEY, HIERARCHY_STORAGE_KEY } from '../../utils/legacyStorageCleanup';
 
 const mockedData = vi.hoisted(() => ({
     initialNodes: [
@@ -81,6 +82,25 @@ describe('HierarchyPage', () => {
         await waitFor(() => {
             expect(localStorage.getItem(HIERARCHY_EXPANDED_STORAGE_KEY)).toBe(JSON.stringify([]));
         });
+    });
+
+    it('reloads the tree in place when another browser changes the hierarchy', async () => {
+        render(
+            <MemoryRouter>
+                <HierarchyPage />
+            </MemoryRouter>,
+        );
+        expect(await screen.findByText('Planta Demo')).toBeInTheDocument();
+        mockedData.nodes = [
+            ...mockedData.nodes,
+            { id: 'node-plant-remote', name: 'Planta Remota', type: 'plant', parentId: null, order: 1 },
+        ];
+
+        act(() => {
+            localStorageSharedConfig.emitChange([HIERARCHY_STORAGE_KEY]);
+        });
+
+        expect(await screen.findByText('Planta Remota')).toBeInTheDocument();
     });
 
     it('starts each name edit session from the current visible node name', async () => {

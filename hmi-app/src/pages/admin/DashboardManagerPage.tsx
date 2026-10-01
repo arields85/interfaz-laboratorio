@@ -23,6 +23,13 @@ import { getDashboardHeaderSubtitle, getDashboardHeaderTitle } from '../../utils
 import { getDefaultDashboardView } from '../../utils/dashboardViews';
 import AdminWorkspaceLayout from '../../components/admin/AdminWorkspaceLayout';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
+import { useSharedConfigVersion } from '../../hooks/useSharedConfigVersion';
+import {
+    DASHBOARDS_STORAGE_KEY,
+    HIERARCHY_STORAGE_KEY,
+    NODE_TYPES_STORAGE_KEY,
+    TEMPLATES_STORAGE_KEY,
+} from '../../utils/legacyStorageCleanup';
 import {
     ADMIN_CONTEXT_BAR_LABEL_CLS,
     ADMIN_SIDEBAR_INPUT_CLS,
@@ -177,6 +184,9 @@ async function triggerDashboardDownload(dashboard: Dashboard, fileNameOverride?:
 // Especificación Funcional Modo Admin §7 / §13
 // =============================================================================
 
+const MANAGER_CONTENT_KEYS = [DASHBOARDS_STORAGE_KEY, TEMPLATES_STORAGE_KEY, HIERARCHY_STORAGE_KEY] as const;
+const NODE_TYPES_KEYS = [NODE_TYPES_STORAGE_KEY] as const;
+
 export default function DashboardManagerPage() {
     const DASHBOARD_LIST_GRID_CLS = 'grid-cols-[2rem_2fr_1fr_1fr_1fr_10rem]';
     const navigate = useNavigate();
@@ -215,11 +225,30 @@ export default function DashboardManagerPage() {
         setDashboards(nextDashboards);
     };
 
+    const contentVersion = useSharedConfigVersion(MANAGER_CONTENT_KEYS);
+    const nodeTypesVersion = useSharedConfigVersion(NODE_TYPES_KEYS);
+
     useEffect(() => {
         void loadNodeTypeLabels().then(() => {
             setNodeTypeLabelsVersion((current) => current + 1);
         });
-    }, []);
+    }, [nodeTypesVersion]);
+
+    // Another browser changed the content: refresh the lists in place, with no loading state.
+    useEffect(() => {
+        if (contentVersion === 0) return;
+        let cancelled = false;
+        void loadDashboardManagerData()
+            .then((data) => {
+                if (!cancelled) applyManagerData(data);
+            })
+            .catch((error) => {
+                console.error('Error recargando la configuración compartida:', error);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [contentVersion]);
 
     useEffect(() => {
         const loadAll = async () => {

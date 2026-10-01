@@ -20,6 +20,13 @@ export const SHARED_CONFIG_PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set(
 
 const SHARED_CONFIG_KEY_PATTERN = /^[A-Za-z0-9:._-]+$/;
 
+/** Synchronous key/value surface the content stores persist through (the shared adapter, or a fake). */
+export interface ConfigStoragePort {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+}
+
 export type SharedConfigSource = 'server' | 'cache' | 'empty';
 
 export interface SharedConfigDocument {
