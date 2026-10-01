@@ -259,6 +259,21 @@ describe('sharedConfigStorage', () => {
         });
     });
 
+    it('isolates a throwing status listener from the save flow and the other listeners', async () => {
+        const { storage, server } = createHarness();
+        await storage.load();
+        const healthy = vi.fn();
+        storage.subscribeStatus(() => { throw new Error('listener bug'); });
+        storage.subscribeStatus(healthy);
+
+        storage.setItem('hmi:a', '1');
+        await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+        expect(server.items).toEqual({ 'hmi:a': '1' });
+        expect(storage.getStatus()).toMatchObject({ saving: false, unsavedKeyCount: 0 });
+        expect(healthy).toHaveBeenCalled();
+    });
+
     describe('revision poll', () => {
         it('does nothing visible while the revision is unchanged', async () => {
             const { storage, fetcher } = createHarness({ items: { 'hmi:a': '1' }, revision: 3 });

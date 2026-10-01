@@ -357,7 +357,9 @@ export class SharedConfigStorage {
             && previous.unsavedKeyCount === next.unsavedKeyCount && previous.saveError === next.saveError
         ) return;
         this.status = next;
-        for (const listener of [...this.statusListeners]) listener();
+        for (const listener of [...this.statusListeners]) {
+            try { listener(); } catch { /* one subscriber must not block the others or the save flow */ }
+        }
     }
 
     private notifyChange(change: SharedConfigChange): void {
