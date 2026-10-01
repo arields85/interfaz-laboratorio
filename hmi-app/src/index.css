@@ -1592,37 +1592,31 @@ h1, h2, h3, h4, h5, h6 {
   /* Esquinas en widgets con enlace: capa hermana del widget en la superficie del ítem del visor
    * (fuera del marco, que recorta su desborde). Mismas propiedades registradas, mismo dibujo y
    * misma transición que el acento de `.glass-panel::after`; el hover es el del ítem del visor. */
-  /* Square corners on purpose: a background is clipped to its own rounded border box, so a rounded layer would
-   * hide the brackets inside its rounded-off corners. The brackets frame the widget's outer box like a viewfinder. */
+  /* Curved corner brackets: a rounded BORDER (a background would be clipped inside the rounded corners) with the
+   * widget's own radius plus the offset, masked to the four corner squares of side radius + offset + length, so
+   * each bracket is the corner arc plus a straight tail of the accent length. Length, thickness, color and opacity
+   * are the registered accent properties, so the hover animation is the frame accent's. */
   .hmi-link-accents {
     position: absolute;
-    border-radius: 0;
+    border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));
     pointer-events: none;
     --frame-accent-length: var(--link-accent-length-rest);
     --frame-accent-thickness: var(--link-accent-thickness-rest);
     --frame-accent-color: var(--link-accent-color-rest);
     --frame-accent-opacity: var(--link-accent-opacity-rest);
     --frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);
-    background-repeat: no-repeat;
-    background-image:
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint));
-    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
-    background-size:
-      var(--frame-accent-length) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--frame-accent-length),
-      var(--frame-accent-length) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--frame-accent-length),
-      var(--frame-accent-length) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--frame-accent-length),
-      var(--frame-accent-length) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--frame-accent-length);
+    --link-accent-corner: calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length));
+    border: var(--frame-accent-thickness) solid var(--frame-accent-tint);
+    -webkit-mask-image:
+      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
+    mask-image:
+      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
+    -webkit-mask-position: top left, top right, bottom left, bottom right;
+    mask-position: top left, top right, bottom left, bottom right;
+    -webkit-mask-size: var(--link-accent-corner) var(--link-accent-corner);
+    mask-size: var(--link-accent-corner) var(--link-accent-corner);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
     transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
       --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
   }

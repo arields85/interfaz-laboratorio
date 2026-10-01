@@ -33,15 +33,12 @@ describe('link corner accents tokens', () => {
 });
 
 describe('link corner accents layer', () => {
-    it('is an inert absolute layer with SQUARE corners, so the brackets are never clipped away', () => {
+    it('is an inert absolute layer rounded like the widget corners (frame radius + offset)', () => {
         const body = rule('.hmi-link-accents');
 
         expect(body).toContain('position: absolute;');
         expect(body).toContain('pointer-events: none;');
-        // A background is clipped to its own rounded border box: with a rounded layer (frame radius + offset, e.g.
-        // 16 px) the 8 px brackets sit entirely inside the rounded-off corners and are never painted.
-        expect(body).not.toMatch(/border-radius:\s*calc/);
-        expect(body).toContain('border-radius: 0;');
+        expect(body).toContain('border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));');
     });
 
     it('starts from the rest tokens on the registered accent properties', () => {
@@ -53,11 +50,18 @@ describe('link corner accents layer', () => {
         expect(body).toContain('--frame-accent-opacity: var(--link-accent-opacity-rest);');
     });
 
-    it('draws the four corner brackets like the frame accent, with the same timing', () => {
+    it('draws curved corner brackets: a rounded BORDER masked to the four corners (arc + straight tail)', () => {
         const body = rule('.hmi-link-accents');
 
-        expect(body.match(/linear-gradient\(/g)).toHaveLength(8);
-        expect(body).toContain('background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;');
+        // A border follows the rounded corner (a background would be clipped inside it), and the mask keeps only
+        // the corner squares of side radius + offset + length: the arc plus a straight tail of the accent length.
+        expect(body).toContain('border: var(--frame-accent-thickness) solid var(--frame-accent-tint);');
+        expect(body).not.toContain('background-image');
+        expect(body).toContain('--link-accent-corner: calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length));');
+        expect(body).toContain('mask-position: top left, top right, bottom left, bottom right;');
+        expect(body).toContain('-webkit-mask-position: top left, top right, bottom left, bottom right;');
+        expect(body).toContain('mask-size: var(--link-accent-corner) var(--link-accent-corner);');
+        expect(body).toContain('mask-repeat: no-repeat;');
         expect(body).toContain(
             'transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,\n      --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;',
         );
