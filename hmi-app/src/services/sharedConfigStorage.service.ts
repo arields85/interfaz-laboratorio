@@ -1,7 +1,9 @@
 import {
     MAX_SHARED_CONFIG_BATCH_OPERATIONS,
     MAX_SHARED_CONFIG_REQUEST_BYTES,
+    SHARED_CONFIG_KEYS,
     SHARED_CONFIG_PERMANENT_ERROR_CODES,
+    isSharedConfigKey,
     isSharedConfigValueWithinLimit,
     isValidSharedConfigKey,
     parseSharedConfigCache,
@@ -9,6 +11,7 @@ import {
     parseSharedConfigRevision,
     SHARED_CONFIG_CACHE_VERSION,
     type SharedConfigBatch,
+    type SharedConfigBootstrap,
     type SharedConfigChange,
     type SharedConfigDocument,
     type SharedConfigSaveError,
@@ -24,8 +27,10 @@ import { AdminAuthError, adminAuthClient, type AdminAuthClient } from './adminAu
 // update memory at once and reach the server in debounced admin batches (session +
 // CSRF). A revision poll replaces memory when another browser changed the document.
 // localStorage keeps only a cache copy of the last server document, used when the
-// server cannot be reached at boot. This is the HMI's own configuration, never a
-// command toward the plant.
+// server cannot be reached at boot. While the server document was never written
+// (revision 0, no items) the shared keys read this browser's own legacy localStorage
+// values instead (`bootstrap: 'local-fallback'`); any server revision above 0 wins
+// entirely. This is the HMI's own configuration, never a command toward the plant.
 // =============================================================================
 
 export const SHARED_CONFIG_CACHE_KEY = 'hmi:shared-config-cache';
@@ -45,6 +50,8 @@ export interface SharedConfigStorageOptions {
     adminClient?: Pick<AdminAuthClient, 'writeSharedConfig'>;
     /** Cache copy store; `null` disables the cache. Defaults to localStorage. */
     cache?: SharedConfigCachePort | null;
+    /** Where this browser's pre-server shared values live (read-only); `null` disables the fallback. */
+    legacyStorage?: SharedConfigCachePort | null;
     pollIntervalMs?: number;
     debounceMs?: number;
     loadTimeoutMs?: number;
@@ -110,6 +117,7 @@ export class SharedConfigStorage {
     private readonly fetcher: typeof fetch;
     private readonly adminClient: Pick<AdminAuthClient, 'writeSharedConfig'>;
     private readonly cache: SharedConfigCachePort | null;
+    private readonly legacy: SharedConfigCachePort | null;
     private readonly pollIntervalMs: number;
     private readonly debounceMs: number;
     private readonly loadTimeoutMs: number;
@@ -120,6 +128,7 @@ export class SharedConfigStorage {
     private inFlight: Map<string, string | null> | null = null;
     private revision: number | null = null;
     private source: SharedConfigSource | null = null;
+    private bootstrap: SharedConfigBootstrap = null;
     private saveError: SharedConfigSaveError | null = null;
     private loadPromise: Promise<void> | null = null;
     private flushPromise: Promise<void> | null = null;
@@ -136,6 +145,7 @@ export class SharedConfigStorage {
         this.fetcher = options.fetcher ?? fetch.bind(globalThis);
         this.adminClient = options.adminClient ?? adminAuthClient;
         this.cache = options.cache === undefined ? createBrowserCache() : options.cache;
+        this.legacy = options.legacyStorage === undefined ? createBrowserCache() : options.legacyStorage;
         this.pollIntervalMs = options.pollIntervalMs ?? SHARED_CONFIG_POLL_INTERVAL_MS;
         this.debounceMs = options.debounceMs ?? SHARED_CONFIG_DEBOUNCE_MS;
         this.loadTimeoutMs = options.loadTimeoutMs ?? SHARED_CONFIG_LOAD_TIMEOUT_MS;
@@ -255,13 +265,28 @@ export class SharedConfigStorage {
         this.serverItems = new Map(Object.entries(document.items));
         this.revision = document.revision;
         this.source = 'server';
-        this.persistCache();
+        this.bootstrap = this.legacy !== null && document.revision === 0 && this.serverItems.size === 0
+            ? 'local-fallback'
+            : null;
+        // A never-written server must not overwrite a richer cache with an empty copy.
+        if (this.bootstrap === null) this.persistCache();
     }
 
     private effectiveValue(key: string): string | null {
         if (this.pending.has(key)) return this.pending.get(key) ?? null;
         if (this.inFlight?.has(key)) return this.inFlight.get(key) ?? null;
-        return this.serverItems.get(key) ?? null;
+        return this.baseValue(key);
+    }
+
+    // Server value, or this browser's own copy of a shared key while the server is unwritten.
+    private baseValue(key: string): string | null {
+        const served = this.serverItems.get(key);
+        if (served !== undefined) return served;
+        return this.bootstrap !== null && isSharedConfigKey(key) ? this.readLegacy(key) : null;
+    }
+
+    private readLegacy(key: string): string | null {
+        return this.legacy?.getItem(key) ?? null;
     }
 
     private isOverlaid(key: string): boolean {
@@ -270,9 +295,19 @@ export class SharedConfigStorage {
 
     private stage(key: string, value: string | null): void {
         if (this.effectiveValue(key) === value) return;
+        if (this.bootstrap !== null) this.seedLocalValues();
         this.pending.set(key, value);
         this.updateStatus();
         this.scheduleFlush();
+    }
+
+    // The first save to a never-written server carries this browser's other shared values, so
+    // that leaving the fallback does not make them disappear.
+    private seedLocalValues(): void {
+        for (const key of SHARED_CONFIG_KEYS) {
+            const local = this.readLegacy(key);
+            if (local !== null && !this.pending.has(key)) this.pending.set(key, local);
+        }
     }
 
     private clearFlushTimer(): void {
@@ -343,6 +378,7 @@ export class SharedConfigStorage {
             this.inFlight?.delete(key);
         }
         this.revision = revision;
+        this.bootstrap = null;
         // Own echo: the next revision is ours and needs no reload. Anything else means
         // another writer landed in between (or the document was never loaded).
         const isOwnEcho = expected === revision && this.source === 'server';
@@ -391,10 +427,11 @@ export class SharedConfigStorage {
         }
         // A write acknowledged while this request was in flight already moved us past it.
         if (this.source === 'server' && this.revision !== null && document.revision < this.revision) return;
-        const previous = this.serverItems;
+        const keysBefore = [...new Set([...this.serverItems.keys(), ...(this.bootstrap !== null ? SHARED_CONFIG_KEYS : [])])];
+        const before = new Map(keysBefore.map((key) => [key, this.baseValue(key)] as const));
         this.adoptDocument(document);
-        const changedKeys = [...new Set([...previous.keys(), ...this.serverItems.keys()])]
-            .filter((key) => previous.get(key) !== this.serverItems.get(key) && !this.isOverlaid(key));
+        const changedKeys = [...new Set([...before.keys(), ...this.serverItems.keys()])]
+            .filter((key) => (before.get(key) ?? null) !== this.baseValue(key) && !this.isOverlaid(key));
         this.updateStatus();
         if (changedKeys.length > 0) this.notifyChange({ changedKeys });
     }
@@ -409,6 +446,7 @@ export class SharedConfigStorage {
             loaded: this.source !== null,
             source: this.source,
             revision: this.revision,
+            bootstrap: this.bootstrap,
             saving: this.inFlight !== null,
             unsavedKeyCount: new Set([...this.pending.keys(), ...(this.inFlight?.keys() ?? [])]).size,
             saveError: this.saveError,
@@ -420,7 +458,7 @@ export class SharedConfigStorage {
         const previous = this.status;
         if (
             previous.loaded === next.loaded && previous.source === next.source
-            && previous.revision === next.revision && previous.saving === next.saving
+            && previous.revision === next.revision && previous.bootstrap === next.bootstrap && previous.saving === next.saving
             && previous.unsavedKeyCount === next.unsavedKeyCount && previous.saveError === next.saveError
         ) return;
         this.status = next;

@@ -8,6 +8,7 @@ const IDLE_STATUS: SharedConfigStatus = {
     loaded: true,
     source: 'empty',
     revision: null,
+    bootstrap: null,
     saving: false,
     unsavedKeyCount: 0,
     saveError: null,

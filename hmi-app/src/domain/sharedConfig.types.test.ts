@@ -4,10 +4,19 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+    DASHBOARDS_STORAGE_KEY,
+    HIERARCHY_STORAGE_KEY,
+    NODE_TYPES_STORAGE_KEY,
+    TEMPLATES_STORAGE_KEY,
+    VARIABLE_CATALOG_STORAGE_KEY,
+} from '../utils/legacyStorageCleanup';
+
+import {
     MAX_SHARED_CONFIG_BATCH_OPERATIONS,
     MAX_SHARED_CONFIG_KEY_LENGTH,
     MAX_SHARED_CONFIG_REQUEST_BYTES,
     MAX_SHARED_CONFIG_VALUE_BYTES,
+    SHARED_CONFIG_KEYS,
     isSharedConfigValueWithinLimit,
     isValidSharedConfigKey,
     parseSharedConfigCache,
@@ -75,5 +84,25 @@ describe('shared config domain', () => {
         expect(MAX_SHARED_CONFIG_BATCH_OPERATIONS).toBe(count(store, 'MAX_BATCH_OPERATIONS'));
         expect(MAX_SHARED_CONFIG_REQUEST_BYTES).toBe(mib(route, 'MAX_HMI_CONFIG_REQUEST_BYTES'));
         expect(MAX_SHARED_CONFIG_VALUE_BYTES).toBe(4 * 1024 * 1024);
+    });
+
+    it('lists exactly the content stores as shared keys, never per-browser state', () => {
+        expect([...SHARED_CONFIG_KEYS].sort()).toEqual([
+            DASHBOARDS_STORAGE_KEY,
+            HIERARCHY_STORAGE_KEY,
+            NODE_TYPES_STORAGE_KEY,
+            TEMPLATES_STORAGE_KEY,
+            VARIABLE_CATALOG_STORAGE_KEY,
+        ].sort());
+        for (const key of SHARED_CONFIG_KEYS) expect(isValidSharedConfigKey(key)).toBe(true);
+        for (const local of [
+            'hmi:shared-config-cache',
+            'laboratorio_hmi_hierarchy_expanded_v1',
+            'hmi-global-settings-tab',
+            'hmi-auth-session',
+            'hmi-prisma-voice-prebuffer-history',
+        ]) {
+            expect(SHARED_CONFIG_KEYS).not.toContain(local);
+        }
     });
 });

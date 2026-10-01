@@ -18,6 +18,22 @@ export const SHARED_CONFIG_PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set(
     'SHARED_CONFIG_VALUE_TOO_LARGE',
 ]);
 
+// The single list of localStorage keys that belong to the shared configuration: the five
+// content stores. Per-browser state (hierarchy expanded nodes, dialog tab, ui store, voice
+// prebuffer, auth keys, alert history, the adapter cache) must never be added here. Later
+// configuration modules extend this list when they move to the adapter.
+export const SHARED_CONFIG_KEYS: readonly string[] = [
+    'laboratorio_hmi_dashboards_v1',
+    'laboratorio_hmi_templates_v1',
+    'laboratorio_hmi_variable_catalog_v1',
+    'laboratorio_hmi_hierarchy_v1',
+    'laboratorio_hmi_node_types_v1',
+];
+
+export function isSharedConfigKey(key: string): boolean {
+    return SHARED_CONFIG_KEYS.includes(key);
+}
+
 const SHARED_CONFIG_KEY_PATTERN = /^[A-Za-z0-9:._-]+$/;
 
 /** Synchronous key/value surface the content stores persist through (the shared adapter, or a fake). */
@@ -28,6 +44,9 @@ export interface ConfigStoragePort {
 }
 
 export type SharedConfigSource = 'server' | 'cache' | 'empty';
+
+/** `local-fallback`: the server document was never written, so shared keys read this browser's own copy. */
+export type SharedConfigBootstrap = 'local-fallback' | null;
 
 export interface SharedConfigDocument {
     revision: number;
@@ -52,6 +71,7 @@ export interface SharedConfigStatus {
     loaded: boolean;
     source: SharedConfigSource | null;
     revision: number | null;
+    bootstrap: SharedConfigBootstrap;
     saving: boolean;
     unsavedKeyCount: number;
     saveError: SharedConfigSaveError | null;

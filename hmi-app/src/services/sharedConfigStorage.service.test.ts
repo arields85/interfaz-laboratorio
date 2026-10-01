@@ -9,6 +9,7 @@ import {
 import {
     MAX_SHARED_CONFIG_BATCH_OPERATIONS,
     MAX_SHARED_CONFIG_VALUE_BYTES,
+    SHARED_CONFIG_KEYS,
     type SharedConfigBatch,
 } from '../domain/sharedConfig.types';
 
@@ -31,7 +32,12 @@ function createMemoryCache(initial: Record<string, string> = {}) {
     };
 }
 
-function createHarness(options: { items?: Record<string, string>; revision?: number; cache?: Record<string, string> } = {}) {
+function createHarness(options: {
+    items?: Record<string, string>;
+    revision?: number;
+    cache?: Record<string, string>;
+    legacy?: Record<string, string>;
+} = {}) {
     const server = {
         revision: options.revision ?? 0,
         items: { ...(options.items ?? {}) } as Record<string, string>,
@@ -63,15 +69,17 @@ function createHarness(options: { items?: Record<string, string>; revision?: num
         return { revision: server.revision };
     });
     const cache = createMemoryCache(options.cache);
+    const legacy = createMemoryCache(options.legacy);
     const storage = createSharedConfigStorage({
         fetcher,
         adminClient: { writeSharedConfig },
         cache,
+        legacyStorage: legacy,
         pollIntervalMs: SHARED_CONFIG_POLL_INTERVAL_MS,
         debounceMs: DEBOUNCE_MS,
         loadTimeoutMs: LOAD_TIMEOUT_MS,
     });
-    return { server, fetcher, writeSharedConfig, cache, storage };
+    return { server, fetcher, writeSharedConfig, cache, legacy, storage };
 }
 
 function documentFetches(fetcher: ReturnType<typeof createHarness>['fetcher']): number {
@@ -492,6 +500,85 @@ describe('sharedConfigStorage', () => {
             await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
             expect(listener).not.toHaveBeenCalled();
             storage.stopPolling();
+        });
+    });
+
+    describe('local bootstrap fallback', () => {
+        const [DASHBOARDS, TEMPLATES] = SHARED_CONFIG_KEYS;
+        const PER_BROWSER_KEY = 'hmi-global-settings-tab';
+
+        it('reads the shared keys from this browser while the server was never written', async () => {
+            const { storage, legacy, writeSharedConfig, cache } = createHarness({
+                legacy: { [DASHBOARDS]: '[1]', [PER_BROWSER_KEY]: 'theme' },
+            });
+
+            await storage.load();
+
+            expect(storage.getItem(DASHBOARDS)).toBe('[1]');
+            expect(storage.getItem(TEMPLATES)).toBeNull();
+            expect(storage.getItem(PER_BROWSER_KEY)).toBeNull();
+            expect(storage.getStatus()).toMatchObject({ source: 'server', revision: 0, bootstrap: 'local-fallback' });
+            expect(writeSharedConfig).not.toHaveBeenCalled();
+            expect(legacy.data.get(DASHBOARDS)).toBe('[1]');
+            expect(cache.data.has(SHARED_CONFIG_CACHE_KEY)).toBe(false);
+        });
+
+        it('never falls back once the server holds a revision, even for keys it lacks', async () => {
+            const { storage } = createHarness({
+                revision: 3,
+                items: { [TEMPLATES]: '[2]' },
+                legacy: { [DASHBOARDS]: '[stale]' },
+            });
+
+            await storage.load();
+
+            expect(storage.getItem(DASHBOARDS)).toBeNull();
+            expect(storage.getItem(TEMPLATES)).toBe('[2]');
+            expect(storage.getStatus().bootstrap).toBeNull();
+        });
+
+        it('does not fall back when the server is unreachable', async () => {
+            const { storage, server } = createHarness({ legacy: { [DASHBOARDS]: '[1]' } });
+            server.reachable = false;
+
+            await storage.load();
+
+            expect(storage.getItem(DASHBOARDS)).toBeNull();
+            expect(storage.getStatus().bootstrap).toBeNull();
+        });
+
+        it('leaves the fallback and notifies subscribers when the poll sees the first revision', async () => {
+            const { storage, server } = createHarness({ legacy: { [DASHBOARDS]: '[local]', [TEMPLATES]: '[t]' } });
+            await storage.load();
+            const changes: string[][] = [];
+            storage.subscribe(({ changedKeys }) => { changes.push([...changedKeys]); });
+            storage.startPolling();
+
+            server.revision = 1;
+            server.items = { [DASHBOARDS]: '[remote]' };
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
+
+            expect(storage.getItem(DASHBOARDS)).toBe('[remote]');
+            expect(storage.getItem(TEMPLATES)).toBeNull();
+            expect(storage.getStatus().bootstrap).toBeNull();
+            expect(changes).toHaveLength(1);
+            expect(changes[0]).toEqual(expect.arrayContaining([DASHBOARDS, TEMPLATES]));
+            storage.stopPolling();
+        });
+
+        it('carries the other local shared values along with the first save so none disappear', async () => {
+            const { storage, server, writeSharedConfig } = createHarness({
+                legacy: { [DASHBOARDS]: '[d]', [TEMPLATES]: '[t]' },
+            });
+            await storage.load();
+
+            storage.setItem(TEMPLATES, '[t2]');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig).toHaveBeenCalledTimes(1);
+            expect(server.items).toEqual({ [DASHBOARDS]: '[d]', [TEMPLATES]: '[t2]' });
+            expect(storage.getItem(DASHBOARDS)).toBe('[d]');
+            expect(storage.getStatus()).toMatchObject({ revision: 1, bootstrap: null });
         });
     });
 });
