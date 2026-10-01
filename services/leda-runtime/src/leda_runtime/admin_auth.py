@@ -22,7 +22,7 @@ FAILURE_WINDOW_SECONDS = 15 * 60
 ACCOUNT_FAILURE_LIMIT = 5
 SOURCE_FAILURE_LIMIT = 20
 MAX_FAILURE_ROWS = 100
-# Password policy, mirrored by hmi-app/src/domain/adminPasswordPolicy.ts (pinned by a test there).
+# Password policy, mirrored by hmi-app/src/domain/adminPasswordPolicy.types.ts (pinned by a test there).
 MIN_PASSWORD_CHARACTERS = 15
 MAX_PASSWORD_BYTES = 1024
 # Markers left for displaced sessions (see replaced_sessions); bounded so the table cannot grow.
@@ -105,10 +105,6 @@ class ScryptPasswordHasher:
     def __init__(self, scrypt_fn: Callable | None = hashlib.scrypt):
         self._scrypt = scrypt_fn
 
-    @staticmethod
-    def _password_bytes(password: str, *, provisioning: bool) -> bytes:
-        return password_bytes(password, provisioning=provisioning)
-
     def _derive(self, password: bytes, salt: bytes) -> bytes:
         if self._scrypt is None:
             raise AuthUnavailable("AUTH_HASHING_UNAVAILABLE")
@@ -118,7 +114,7 @@ class ScryptPasswordHasher:
             raise AuthUnavailable("AUTH_HASHING_UNAVAILABLE") from None
 
     def hash_password(self, password: str) -> dict:
-        encoded = self._password_bytes(password, provisioning=True)
+        encoded = password_bytes(password, provisioning=True)
         salt = secrets.token_bytes(16)
         digest = self._derive(encoded, salt)
         return {
@@ -130,7 +126,7 @@ class ScryptPasswordHasher:
         }
 
     def verify_password(self, password: str, record: dict) -> bool:
-        encoded = self._password_bytes(password, provisioning=False)
+        encoded = password_bytes(password, provisioning=False)
         expected_keys = {"algorithm", "version", *SCRYPT_PARAMETERS, "salt", "digest"}
         if set(record) != expected_keys or record.get("algorithm") != "scrypt" or record.get("version") != 1:
             raise AuthUnavailable("AUTH_PASSWORD_RECORD_INVALID")
@@ -322,7 +318,7 @@ class AdminAuthRepository:
             with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 cutoff = now - FAILURE_WINDOW_SECONDS
-                account_key = digest_token(username.strip().casefold())
+                account_key = login_account_key(username)
                 connection.execute("DELETE FROM login_failures WHERE failed_at <= ?", (cutoff,))
                 account_count = connection.execute(
                     "SELECT COUNT(*) FROM login_failures WHERE account_key = ? AND source = ?",
@@ -372,7 +368,7 @@ class AdminAuthRepository:
                 now = session.created_at
                 connection.execute(
                     "DELETE FROM login_failures WHERE account_key = ? AND source = ?",
-                    (digest_token(session.username.strip().casefold()), source),
+                    (login_account_key(session.username), source),
                 )
                 live = [
                     (other["session_id_hash"], other["absolute_expires_at"])
@@ -550,7 +546,7 @@ class AdminAuthService:
                 session_id,
                 now=now,
                 idle_seconds=self.idle_seconds,
-                account_key=digest_token(username.strip().casefold()),
+                account_key=login_account_key(username),
                 source=source,
             )
             return PasswordChange.CHANGED if changed else PasswordChange.SESSION_ENDED
@@ -571,6 +567,11 @@ class AdminAuthService:
         if not session_id or not csrf_token:
             return False
         return self.repository.revoke_session(session_id, csrf_token)
+
+
+def login_account_key(username: str) -> str:
+    """Key under which login failures are counted for an account, shared by login and password change."""
+    return digest_token(username.strip().casefold())
 
 
 def digest_token(token: str) -> str:

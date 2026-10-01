@@ -40,8 +40,12 @@ MAX_CREDENTIAL_REQUEST_BYTES = (
 )
 MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
 PASSWORD_CHANGE_ROUTE = "/api/leda/admin/auth/password"
-# Two passwords, each bounded by the policy ceiling; six bytes covers JSON's longest single-byte escape.
-MAX_PASSWORD_CHANGE_REQUEST_BYTES = 2 * MAX_PASSWORD_BYTES * MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE + 1024
+# Two passwords, each at most MAX_PASSWORD_BYTES raw bytes, each raw byte expanding by at most
+# MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE when JSON-escaped. The extra 1024 bytes cover the two key
+# names, quotes, braces, comma and any whitespace around them, same as MAX_CREDENTIAL_JSON_OVERHEAD_BYTES.
+MAX_PASSWORD_CHANGE_REQUEST_BYTES = (
+    2 * MAX_PASSWORD_BYTES * MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE + MAX_CREDENTIAL_JSON_OVERHEAD_BYTES
+)
 # Shared HMI configuration. Public reads live outside the admin prefix because the
 # session cookie is scoped to COOKIE_PATH and must never reach them; the write is
 # mounted under the admin prefix so that cookie (and CSRF) authorize it.

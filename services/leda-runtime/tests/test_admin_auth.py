@@ -25,6 +25,7 @@ from leda_runtime.admin_auth import (
     PasswordPolicyError,
     ScryptPasswordHasher,
     digest_token,
+    login_account_key,
 )
 from leda_runtime.admin_cli import run_cli
 from leda_runtime.storage_permissions import (
@@ -516,6 +517,13 @@ class AdminSingleSessionTests(unittest.TestCase):
         self.clock[0] = 1010.0 + 100
 
         self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "192.0.2.9"))
+
+class LoginAccountKeyTests(unittest.TestCase):
+    def test_the_key_is_the_digest_of_the_trimmed_casefolded_username(self) -> None:
+        self.assertEqual(login_account_key("  Admin  "), digest_token("admin"))
+        self.assertEqual(login_account_key("ADMIN"), login_account_key("admin"))
+        self.assertNotEqual(login_account_key("admin"), login_account_key("other"))
+
 
 class AdminPasswordChangeTests(unittest.TestCase):
     """The administrator changes their own password while keeping the calling session."""

@@ -5,12 +5,18 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
-from leda_runtime.admin_auth import AdminAuthRepository, AdminAuthService, AuthUnavailable
+from leda_runtime.admin_auth import (
+    AdminAuthRepository,
+    AdminAuthService,
+    AuthNotConfigured,
+    AuthUnavailable,
+    PasswordChange,
+)
 from leda_runtime.admin_http import AdminHttpBoundary
 from leda_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
 
@@ -588,6 +594,27 @@ class AdminHttpTests(unittest.TestCase):
         )
         self.assertEqual(oversized.status_code, 413)
         self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_a_session_that_ended_during_the_change_answers_authentication_required(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+
+        with patch.object(self.service, "change_password", return_value=PasswordChange.SESSION_ENDED):
+            response = self.change_password(client, token)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "AUTHENTICATION_REQUIRED"})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_an_unconfigured_auth_store_answers_503_auth_not_configured(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+
+        with patch.object(self.service, "change_password", side_effect=AuthNotConfigured("AUTH_NOT_CONFIGURED")):
+            response = self.change_password(client, token)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "AUTH_NOT_CONFIGURED")
 
     def test_password_change_is_atomic_when_the_store_refuses_the_write(self) -> None:
         client = self.client()
