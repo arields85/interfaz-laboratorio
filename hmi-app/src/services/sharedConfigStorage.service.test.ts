@@ -595,5 +595,75 @@ describe('sharedConfigStorage', () => {
             expect(storage.getItem(DASHBOARDS)).toBe('[d]');
             expect(storage.getStatus()).toMatchObject({ revision: 1, bootstrap: null });
         });
+        it('skips an oversized legacy value when seeding and reports its key without sending it', async () => {
+            const [, , THIRD] = SHARED_CONFIG_KEYS;
+            const { storage, server, writeSharedConfig } = createHarness({
+                legacy: {
+                    [DASHBOARDS]: 'x'.repeat(MAX_SHARED_CONFIG_VALUE_BYTES + 1),
+                    [TEMPLATES]: '[t]',
+                },
+            });
+            await storage.load();
+
+            storage.setItem(THIRD, 'v');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig).toHaveBeenCalledTimes(1);
+            expect(server.items).toEqual({ [TEMPLATES]: '[t]', [THIRD]: 'v' });
+            expect(storage.getStatus().saveError).toMatchObject({
+                code: 'SHARED_CONFIG_VALUE_TOO_LARGE',
+                keys: [DASHBOARDS],
+            });
+        });
+
+        it('skips a legacy value whose escaped form exceeds one request when seeding', async () => {
+            const { storage, server } = createHarness({
+                legacy: { [DASHBOARDS]: '\u0001'.repeat(MAX_SHARED_CONFIG_VALUE_BYTES), [TEMPLATES]: '[t]' },
+            });
+            await storage.load();
+
+            storage.setItem(TEMPLATES, '[t2]');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(server.items).toEqual({ [TEMPLATES]: '[t2]' });
+            expect(storage.getStatus().saveError).toMatchObject({ keys: [DASHBOARDS] });
+        });
+
+        it('does not seed when another browser wrote the server first, and adopts its document', async () => {
+            const { storage, server, writeSharedConfig, fetcher } = createHarness({
+                legacy: { [DASHBOARDS]: '[local]', [TEMPLATES]: '[t-local]' },
+            });
+            await storage.load();
+            // Another browser seeded the server after this one loaded.
+            server.revision = 1;
+            server.items = { [DASHBOARDS]: '[remote]' };
+
+            storage.setItem(TEMPLATES, '[t2]');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(fetcher.mock.calls.map(([path]) => String(path))).toContain('/api/prisma/hmi-config/revision');
+            expect(writeSharedConfig).toHaveBeenCalledTimes(1);
+            expect(writeSharedConfig.mock.calls[0][0].set).toEqual({ [TEMPLATES]: '[t2]' });
+            expect(server.items).toEqual({ [DASHBOARDS]: '[remote]', [TEMPLATES]: '[t2]' });
+            expect(storage.getItem(DASHBOARDS)).toBe('[remote]');
+            expect(storage.getStatus().bootstrap).toBeNull();
+        });
+
+        it('keeps the edit pending with a save error when the revision re-check fails', async () => {
+            const { storage, server, writeSharedConfig } = createHarness({ legacy: { [DASHBOARDS]: '[d]' } });
+            await storage.load();
+            server.reachable = false;
+
+            storage.setItem(TEMPLATES, '[t]');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig).not.toHaveBeenCalled();
+            expect(storage.getStatus().saveError).not.toBeNull();
+            expect(storage.getItem(TEMPLATES)).toBe('[t]');
+
+            server.reachable = true;
+            await storage.retrySave();
+            expect(server.items).toEqual({ [DASHBOARDS]: '[d]', [TEMPLATES]: '[t]' });
+        });
     });
 });

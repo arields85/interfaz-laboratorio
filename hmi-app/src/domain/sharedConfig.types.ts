@@ -86,6 +86,8 @@ export interface SharedConfigWriteResult {
 export interface SharedConfigSaveError {
     code: string;
     status: number | null;
+    /** Keys the error is about, when it concerns specific values (e.g. seeded values skipped as too large). */
+    keys?: readonly string[];
 }
 
 export interface SharedConfigStatus {

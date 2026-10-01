@@ -101,6 +101,11 @@ function fitsInOneRequest(key: string, value: string): boolean {
     return EMPTY_WIRE_BYTES + jsonBytes(key) + ENTRY_SEPARATOR_BYTES + jsonBytes(value) <= MAX_SHARED_CONFIG_REQUEST_BYTES;
 }
 
+// The per-value and one-request bounds every value must meet before it is queued, however it got there.
+function isStageableValue(key: string, value: string): boolean {
+    return isSharedConfigValueWithinLimit(value) && fitsInOneRequest(key, value);
+}
+
 /** Splits staged edits so every request respects the server's operation and size bounds. */
 function splitIntoChunks(batch: ReadonlyMap<string, string | null>): Array<Map<string, string | null>> {
     const chunks: Array<Map<string, string | null>> = [];
@@ -177,7 +182,7 @@ export class SharedConfigStorage {
             this.setSaveError({ code: 'SHARED_CONFIG_INVALID_KEY', status: null });
             return;
         }
-        if (!isSharedConfigValueWithinLimit(value) || !fitsInOneRequest(key, value)) {
+        if (!isStageableValue(key, value)) {
             this.setSaveError({ code: 'SHARED_CONFIG_VALUE_TOO_LARGE', status: null });
             return;
         }
@@ -305,18 +310,45 @@ export class SharedConfigStorage {
 
     private stage(key: string, value: string | null): void {
         if (this.effectiveValue(key) === value) return;
-        if (this.bootstrap !== null) this.seedLocalValues();
         this.pending.set(key, value);
         this.updateStatus();
         this.scheduleFlush();
     }
 
     // The first save to a never-written server carries this browser's other shared values, so
-    // that leaving the fallback does not make them disappear.
+    // that leaving the fallback does not make them disappear. Seeded values meet the same bounds
+    // as any other write: one the server would reject for good is skipped and reported by key.
     private seedLocalValues(): void {
+        const skipped: string[] = [];
         for (const key of SHARED_CONFIG_KEYS) {
             const local = this.readLegacy(key);
-            if (local !== null && !this.pending.has(key)) this.pending.set(key, local);
+            if (local === null || this.pending.has(key)) continue;
+            if (isStageableValue(key, local)) this.pending.set(key, local);
+            else skipped.push(key);
+        }
+        if (skipped.length > 0) this.setSaveError({ code: 'SHARED_CONFIG_VALUE_TOO_LARGE', status: null, keys: skipped });
+    }
+
+    // Immediately before seeding, the server must still be unwritten. Another browser in the same
+    // fallback may have seeded it since this one loaded: then its document wins and nothing is
+    // seeded (only this browser's own edits are sent). Known limit: a write landing between this
+    // check and the request is not detected (no optimistic concurrency). Returns false when the
+    // server cannot be asked, so the edits stay pending for a retry.
+    private async prepareSeed(): Promise<boolean> {
+        try {
+            const revision = parseSharedConfigRevision(await this.fetchJson(REVISION_ROUTE, this.loadTimeoutMs));
+            if (revision === 0) {
+                this.seedLocalValues();
+            } else {
+                await this.refresh();
+                // A refresh that could not reach the server leaves the fallback in place.
+                if (this.bootstrap !== null) throw new Error('shared config refresh failed');
+            }
+            return true;
+        } catch {
+            this.saveError = { code: 'SHARED_CONFIG_SAVE_FAILED', status: null };
+            this.updateStatus();
+            return false;
         }
     }
 
@@ -333,6 +365,7 @@ export class SharedConfigStorage {
     }
 
     private async performFlush(): Promise<void> {
+        if (this.bootstrap !== null && !(await this.prepareSeed())) return;
         const batch = this.pending;
         this.pending = new Map();
         this.inFlight = batch;
