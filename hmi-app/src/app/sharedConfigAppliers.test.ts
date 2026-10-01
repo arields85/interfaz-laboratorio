@@ -10,7 +10,7 @@ import { useIconCutoutStore } from '../store/iconCutout.store';
 import { useThemeStylePresetStore } from '../store/themeStylePreset.store';
 import { SHADER_DEFAULTS, SHADER_PARAMS_STORAGE_KEY, useShaderParamsStore } from '../store/shaderParams.store';
 import { localStorageSharedConfig } from '../test/localStorageSharedConfig';
-import { LS_KEY_BASE_URL } from '../config/dataConnection.config';
+import { BASE_URL_STORAGE_KEY } from '../config/dataConnection.config';
 import { holdSharedConfigReapply } from '../services/sharedConfigReapplyHold.service';
 import { applySharedConfigToDocument, startSharedConfigReapply } from './sharedConfigAppliers';
 
@@ -107,7 +107,7 @@ describe('shared configuration appliers', () => {
     it('invalidates the data queries when the data connection changes', () => {
         const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
-        remoteChange(LS_KEY_BASE_URL, 'http://plant.invalid');
+        remoteChange(BASE_URL_STORAGE_KEY, 'http://plant.invalid');
 
         expect(invalidate).toHaveBeenCalledTimes(3);
     });

@@ -602,9 +602,8 @@ function applyThemeStateToDocument(themeState: ThemeState): void {
     applyColorStateToDocument(themeState.colorValues);
 }
 
-/** Removes every font and colour override from the document, restoring the CSS defaults. */
-// eslint-disable-next-line react-refresh/only-export-components -- App bootstrap imports this initializer.
-export function resetThemeOverridesOnDocument(): void {
+/** Removes every font override (families, weights, sizes, tracking) from the document. */
+function resetFontOverridesOnDocument(): void {
     const style = document.documentElement.style;
     for (const fontToken of FONT_TOKENS) {
         style.removeProperty(fontToken.key);
@@ -618,6 +617,13 @@ export function resetThemeOverridesOnDocument(): void {
     for (const trackingKey of TRACKING_TOKEN_KEYS) {
         style.removeProperty(trackingKey);
     }
+}
+
+/** Removes every font and colour override from the document, restoring the CSS defaults. */
+// eslint-disable-next-line react-refresh/only-export-components -- The shared-config re-apply path imports this reset.
+export function resetThemeOverridesOnDocument(): void {
+    resetFontOverridesOnDocument();
+    const style = document.documentElement.style;
     for (const colorKey of COLOR_TOKEN_KEYS) {
         style.removeProperty(colorKey);
     }
@@ -1030,18 +1036,7 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
 
     const handleResetFonts = () => {
         clearDesignOverrides(DESIGN_FONT_STORAGE_KEY);
-        for (const fontToken of FONT_TOKENS) {
-            document.documentElement.style.removeProperty(fontToken.key);
-            if (fontToken.weightKey) {
-                document.documentElement.style.removeProperty(fontToken.weightKey);
-            }
-        }
-        for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
-            document.documentElement.style.removeProperty(sizeKey);
-        }
-        for (const trackingKey of TRACKING_TOKEN_KEYS) {
-            document.documentElement.style.removeProperty(trackingKey);
-        }
+        resetFontOverridesOnDocument();
         setFontValues(DEFAULT_FONT_VALUES);
         setWeightValues(DEFAULT_WEIGHT_VALUES);
         setFontSizeValues(DEFAULT_FONT_SIZE_VALUES);
@@ -1069,24 +1064,7 @@ export default function DesignSettingsTab({ onDirtyChange, onSaveStatusChange, s
         clearDesignOverrides(DESIGN_FONT_STORAGE_KEY);
         clearDesignOverrides(DESIGN_COLOR_STORAGE_KEY);
 
-        for (const fontToken of FONT_TOKENS) {
-            document.documentElement.style.removeProperty(fontToken.key);
-            if (fontToken.weightKey) {
-                document.documentElement.style.removeProperty(fontToken.weightKey);
-            }
-        }
-        for (const sizeKey of FONT_SIZE_TOKEN_KEYS) {
-            document.documentElement.style.removeProperty(sizeKey);
-        }
-        for (const trackingKey of TRACKING_TOKEN_KEYS) {
-            document.documentElement.style.removeProperty(trackingKey);
-        }
-
-        for (const group of COLOR_GROUPS) {
-            for (const color of group.colors) {
-                document.documentElement.style.removeProperty(color.key);
-            }
-        }
+        resetThemeOverridesOnDocument();
 
         setFontValues(DEFAULT_FONT_VALUES);
         setWeightValues(DEFAULT_WEIGHT_VALUES);

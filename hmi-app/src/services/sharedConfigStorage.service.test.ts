@@ -186,7 +186,7 @@ describe('sharedConfigStorage', () => {
             await storage.load();
 
             // Under the raw value limit, but every control character escapes to six bytes.
-            const escapeHeavy = ''.repeat(MAX_SHARED_CONFIG_VALUE_BYTES);
+            const escapeHeavy = '\u0001'.repeat(MAX_SHARED_CONFIG_VALUE_BYTES);
             storage.setItem('hmi:escaped', escapeHeavy);
 
             expect(storage.getStatus().saveError).toMatchObject({ code: 'SHARED_CONFIG_VALUE_TOO_LARGE' });

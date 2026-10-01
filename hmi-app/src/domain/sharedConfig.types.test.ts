@@ -11,7 +11,7 @@ import {
     VARIABLE_CATALOG_STORAGE_KEY,
 } from '../utils/legacyStorageCleanup';
 
-import { LS_KEY_ACTIVITY_SERIES_ENDPOINT, LS_KEY_BASE_URL, LS_KEY_ENDPOINT, LS_KEY_HISTORY_ENDPOINT } from '../config/dataConnection.config';
+import { ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY, BASE_URL_STORAGE_KEY, ENDPOINT_STORAGE_KEY, HISTORY_ENDPOINT_STORAGE_KEY } from '../config/dataConnection.config';
 import { LOADER_OPTIONS_STORAGE_KEY } from '../config/loaderOptions.config';
 import { PRISMA_ORB_STORAGE_KEY } from '../config/prismaOrb.config';
 import { TEMPORAL_SETTINGS_STORAGE_KEY } from '../config/temporalSettings.config';
@@ -111,10 +111,10 @@ describe('shared config domain', () => {
             TEMPLATES_STORAGE_KEY,
             VARIABLE_CATALOG_STORAGE_KEY,
             // data connection
-            LS_KEY_BASE_URL,
-            LS_KEY_ENDPOINT,
-            LS_KEY_HISTORY_ENDPOINT,
-            LS_KEY_ACTIVITY_SERIES_ENDPOINT,
+            BASE_URL_STORAGE_KEY,
+            ENDPOINT_STORAGE_KEY,
+            HISTORY_ENDPOINT_STORAGE_KEY,
+            ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY,
             // identity, options and presentation
             HMI_NAME_STORAGE_KEY,
             LOADER_OPTIONS_STORAGE_KEY,

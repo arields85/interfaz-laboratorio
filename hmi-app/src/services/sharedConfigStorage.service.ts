@@ -82,6 +82,10 @@ function jsonBytes(text: string): number {
     return encoder.encode(JSON.stringify(text)).length;
 }
 
+// Wire overhead of one entry beyond its key and value: the colon of a set (or the comma of a
+// delete). fitsInOneRequest and splitIntoChunks must charge the same amount as toWire produces.
+const ENTRY_SEPARATOR_BYTES = 2;
+
 function toWire(chunk: ReadonlyMap<string, string | null>): SharedConfigBatch {
     const wire: SharedConfigBatch = { set: {}, delete: [] };
     for (const [key, value] of chunk) {
@@ -94,7 +98,7 @@ function toWire(chunk: ReadonlyMap<string, string | null>): SharedConfigBatch {
 // A value under the raw limit can still escape past the request bound when sent alone: refuse it
 // before queueing, since the server would reject it for good.
 function fitsInOneRequest(key: string, value: string): boolean {
-    return EMPTY_WIRE_BYTES + jsonBytes(key) + 2 + jsonBytes(value) <= MAX_SHARED_CONFIG_REQUEST_BYTES;
+    return EMPTY_WIRE_BYTES + jsonBytes(key) + ENTRY_SEPARATOR_BYTES + jsonBytes(value) <= MAX_SHARED_CONFIG_REQUEST_BYTES;
 }
 
 /** Splits staged edits so every request respects the server's operation and size bounds. */
@@ -103,8 +107,8 @@ function splitIntoChunks(batch: ReadonlyMap<string, string | null>): Array<Map<s
     let current = new Map<string, string | null>();
     let bytes = EMPTY_WIRE_BYTES;
     for (const [key, value] of batch) {
-        // key + colon/comma, plus the value for a set.
-        const entryBytes = jsonBytes(key) + 2 + (value === null ? 0 : jsonBytes(value));
+        // key + separator, plus the value for a set.
+        const entryBytes = jsonBytes(key) + ENTRY_SEPARATOR_BYTES + (value === null ? 0 : jsonBytes(value));
         const full = current.size >= MAX_SHARED_CONFIG_BATCH_OPERATIONS
             || (current.size > 0 && bytes + entryBytes > MAX_SHARED_CONFIG_REQUEST_BYTES);
         if (full) {

@@ -20,10 +20,10 @@ export const DATA_DEFAULT_HISTORY_ENDPOINT = '/api/hmi-data/history';
 export const DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT = '/api/hmi-data/activity-series';
 export const DATA_CONNECTION_CONFIG_CHANGED_EVENT = 'hmi:data-connection-config-changed';
 
-export const LS_KEY_BASE_URL = 'hmi:node-red-base-url';
-export const LS_KEY_ENDPOINT = 'hmi:node-red-endpoint';
-export const LS_KEY_HISTORY_ENDPOINT = 'hmi:data-history-endpoint';
-export const LS_KEY_ACTIVITY_SERIES_ENDPOINT = 'hmi:activity-series-endpoint';
+export const BASE_URL_STORAGE_KEY = 'hmi:node-red-base-url';
+export const ENDPOINT_STORAGE_KEY = 'hmi:node-red-endpoint';
+export const HISTORY_ENDPOINT_STORAGE_KEY = 'hmi:data-history-endpoint';
+export const ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY = 'hmi:activity-series-endpoint';
 
 function stripTrailingSlashes(raw: string): string {
     return raw.replace(/\/+$/, '');
@@ -60,7 +60,7 @@ function notifyDataConnectionConfigChanged(): void {
 
 export function getDataBaseUrl(): string | null {
     try {
-        const stored = sharedConfigStorage.getItem(LS_KEY_BASE_URL);
+        const stored = sharedConfigStorage.getItem(BASE_URL_STORAGE_KEY);
         const fromStorage = normalizeUrl(stored);
         if (fromStorage) return fromStorage;
     } catch {
@@ -78,19 +78,19 @@ export function isDataConnectionEnabled(): boolean {
 export function saveDataBaseUrl(url: string): void {
     const normalized = normalizeUrl(url);
     if (normalized) {
-        sharedConfigStorage.setItem(LS_KEY_BASE_URL, normalized);
+        sharedConfigStorage.setItem(BASE_URL_STORAGE_KEY, normalized);
         notifyDataConnectionConfigChanged();
     }
 }
 
 export function clearDataBaseUrl(): void {
-    sharedConfigStorage.removeItem(LS_KEY_BASE_URL);
+    sharedConfigStorage.removeItem(BASE_URL_STORAGE_KEY);
     notifyDataConnectionConfigChanged();
 }
 
 export function getSavedDataBaseUrl(): string {
     try {
-        return sharedConfigStorage.getItem(LS_KEY_BASE_URL) ?? '';
+        return sharedConfigStorage.getItem(BASE_URL_STORAGE_KEY) ?? '';
     } catch {
         return '';
     }
@@ -100,7 +100,7 @@ export function getSavedDataBaseUrl(): string {
 
 export function getDataEndpoint(): string {
     try {
-        const stored = sharedConfigStorage.getItem(LS_KEY_ENDPOINT);
+        const stored = sharedConfigStorage.getItem(ENDPOINT_STORAGE_KEY);
         if (stored && stored.trim() !== '') {
             return '/' + stripLeadingSlashes(stored.trim());
         }
@@ -113,17 +113,17 @@ export function getDataEndpoint(): string {
 export function saveDataEndpoint(endpoint: string): void {
     const trimmed = endpoint.trim();
     if (trimmed) {
-        sharedConfigStorage.setItem(LS_KEY_ENDPOINT, trimmed);
+        sharedConfigStorage.setItem(ENDPOINT_STORAGE_KEY, trimmed);
     }
 }
 
 export function clearDataEndpoint(): void {
-    sharedConfigStorage.removeItem(LS_KEY_ENDPOINT);
+    sharedConfigStorage.removeItem(ENDPOINT_STORAGE_KEY);
 }
 
 export function getSavedDataEndpoint(): string {
     try {
-        return sharedConfigStorage.getItem(LS_KEY_ENDPOINT) ?? '';
+        return sharedConfigStorage.getItem(ENDPOINT_STORAGE_KEY) ?? '';
     } catch {
         return '';
     }
@@ -133,7 +133,7 @@ export function getSavedDataEndpoint(): string {
 
 export function getDataHistoryEndpoint(): string | null {
     try {
-        const stored = sharedConfigStorage.getItem(LS_KEY_HISTORY_ENDPOINT);
+        const stored = sharedConfigStorage.getItem(HISTORY_ENDPOINT_STORAGE_KEY);
         if (stored && stored.trim() !== '') {
             return '/' + stripLeadingSlashes(stored.trim());
         }
@@ -146,17 +146,17 @@ export function getDataHistoryEndpoint(): string | null {
 export function saveDataHistoryEndpoint(endpoint: string): void {
     const trimmed = endpoint.trim();
     if (trimmed) {
-        sharedConfigStorage.setItem(LS_KEY_HISTORY_ENDPOINT, trimmed);
+        sharedConfigStorage.setItem(HISTORY_ENDPOINT_STORAGE_KEY, trimmed);
     }
 }
 
 export function clearDataHistoryEndpoint(): void {
-    sharedConfigStorage.removeItem(LS_KEY_HISTORY_ENDPOINT);
+    sharedConfigStorage.removeItem(HISTORY_ENDPOINT_STORAGE_KEY);
 }
 
 export function getSavedDataHistoryEndpoint(): string {
     try {
-        return sharedConfigStorage.getItem(LS_KEY_HISTORY_ENDPOINT) ?? '';
+        return sharedConfigStorage.getItem(HISTORY_ENDPOINT_STORAGE_KEY) ?? '';
     } catch {
         return '';
     }
@@ -168,7 +168,7 @@ export function isDataHistoryEnabled(): boolean {
 
 export function getDataActivitySeriesEndpoint(): string | null {
     try {
-        const stored = sharedConfigStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+        const stored = sharedConfigStorage.getItem(ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY);
 
         if (stored !== null) {
             const trimmed = stored.trim();
@@ -182,16 +182,16 @@ export function getDataActivitySeriesEndpoint(): string | null {
 }
 
 export function saveDataActivitySeriesEndpoint(endpoint: string): void {
-    sharedConfigStorage.setItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT, endpoint.trim());
+    sharedConfigStorage.setItem(ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY, endpoint.trim());
 }
 
 export function clearDataActivitySeriesEndpoint(): void {
-    sharedConfigStorage.removeItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+    sharedConfigStorage.removeItem(ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY);
 }
 
 export function getSavedDataActivitySeriesEndpoint(): string | null {
     try {
-        return sharedConfigStorage.getItem(LS_KEY_ACTIVITY_SERIES_ENDPOINT);
+        return sharedConfigStorage.getItem(ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY);
     } catch {
         return null;
     }

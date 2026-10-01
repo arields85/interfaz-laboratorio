@@ -2,10 +2,10 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { applyThemeOverrides, resetThemeOverridesOnDocument } from '../components/admin/DesignSettingsTab';
 import {
-    LS_KEY_ACTIVITY_SERIES_ENDPOINT,
-    LS_KEY_BASE_URL,
-    LS_KEY_ENDPOINT,
-    LS_KEY_HISTORY_ENDPOINT,
+    ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY,
+    BASE_URL_STORAGE_KEY,
+    ENDPOINT_STORAGE_KEY,
+    HISTORY_ENDPOINT_STORAGE_KEY,
 } from '../config/dataConnection.config';
 import { ACTIVITY_SERIES_QUERY_KEY_PREFIX } from '../queries/useActivitySeries';
 import { DATA_HISTORY_QUERY_KEY_PREFIX } from '../queries/useDataHistory';
@@ -42,10 +42,10 @@ import { SHADER_PARAMS_STORAGE_KEY, useShaderParamsStore } from '../store/shader
 // =============================================================================
 
 const DATA_CONNECTION_KEYS: readonly string[] = [
-    LS_KEY_BASE_URL,
-    LS_KEY_ENDPOINT,
-    LS_KEY_HISTORY_ENDPOINT,
-    LS_KEY_ACTIVITY_SERIES_ENDPOINT,
+    BASE_URL_STORAGE_KEY,
+    ENDPOINT_STORAGE_KEY,
+    HISTORY_ENDPOINT_STORAGE_KEY,
+    ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY,
 ];
 
 interface ApplierContext {
@@ -104,8 +104,6 @@ export function applySharedConfigToDocument(): void {
     }
 }
 
-let activeContext: ApplierContext = {};
-
 function applyChangedKeys(changedKeys: Iterable<string>, context: ApplierContext): void {
     const changed = new Set(changedKeys);
     for (const group of APPLIER_GROUPS) {
@@ -115,8 +113,7 @@ function applyChangedKeys(changedKeys: Iterable<string>, context: ApplierContext
 
 /** Re-applies the configuration whenever another browser changes it. Returns the unsubscribe. */
 export function startSharedConfigReapply(context: ApplierContext = {}): () => void {
-    activeContext = context;
-    setHeldChangesHandler((keys) => applyChangedKeys(keys, activeContext));
+    setHeldChangesHandler((keys) => applyChangedKeys(keys, context));
     const unsubscribe = sharedConfigStorage.subscribe(({ changedKeys }) => {
         if (deferWhileHeld(changedKeys)) return;
         applyChangedKeys(changedKeys, context);
@@ -124,6 +121,5 @@ export function startSharedConfigReapply(context: ApplierContext = {}): () => vo
     return () => {
         unsubscribe();
         setHeldChangesHandler(null);
-        activeContext = {};
     };
 }

@@ -1,3 +1,4 @@
+import { isRecord } from '../domain/sharedConfig.types';
 import { sharedConfigStorage } from './sharedConfigStorage.service';
 
 // Persistence side of the design settings (Configuración general -> Diseño): the font and colour
@@ -6,11 +7,7 @@ export const DESIGN_FONT_STORAGE_KEY = 'hmi-theme-fonts';
 export const DESIGN_COLOR_STORAGE_KEY = 'hmi-theme-colors';
 
 function isStringRecord(value: unknown): value is Record<string, string> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        return false;
-    }
-
-    return Object.values(value).every((entry) => typeof entry === 'string');
+    return isRecord(value) && Object.values(value).every((entry) => typeof entry === 'string');
 }
 
 /** The stored override map for a design key; anything absent or malformed reads as empty. */
