@@ -6,15 +6,21 @@ import json
 import os
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from .bot_identity_reservation import BotIdentityReservationError, TELEGRAM_BOT_IDENTITY_RESERVED
 from .telegram_credentials import TelegramCredentialError
 
 
-STATE_SCHEMA_VERSION = 2
+T = TypeVar("T")
+STATE_SCHEMA_VERSION = 3
+LEGACY_PAIRED_SCHEMA_VERSION = 2
+CHAT_STATUSES = frozenset({"pending", "approved", "rejected", "revoked"})
+DECISION_STATUSES = frozenset({"approved", "rejected", "revoked"})
+CHAT_RECORD_KEYS = frozenset({"status", "displayName", "username", "requestedAt", "decidedAt"})
+UTC_TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z")
 
 
 class TelegramStateUnavailable(RuntimeError):
@@ -27,49 +33,6 @@ class TelegramLifecycleError(RuntimeError):
 
 def empty_telegram_state() -> dict[str, Any]:
     return {"schemaVersion": STATE_SCHEMA_VERSION, "bots": {}}
-
-
-def validate_telegram_state(value: object) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {"schemaVersion", "bots"}:
-        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-    if value.get("schemaVersion") != STATE_SCHEMA_VERSION or isinstance(value.get("schemaVersion"), bool):
-        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-    bots = value.get("bots")
-    if not isinstance(bots, dict):
-        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-    validated: dict[str, Any] = {}
-    for key, record in bots.items():
-        if not isinstance(key, str) or not key.isascii() or not key.isdigit() or key.startswith("0"):
-            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-        bot_id = int(key)
-        if bot_id <= 0 or str(bot_id) != key or not isinstance(record, dict):
-            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-        allowed_keys = {"pairedPrivateChatIds", "nextUpdateOffset", "migrationActive"}
-        if set(record) != allowed_keys:
-            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-        chats = record.get("pairedPrivateChatIds")
-        offset = record.get("nextUpdateOffset")
-        migration_active = record.get("migrationActive")
-        if (
-            not isinstance(chats, list)
-            or any(isinstance(chat_id, bool) or not isinstance(chat_id, int) for chat_id in chats)
-            or len(set(chats)) != len(chats)
-            or (offset is not None and (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0))
-            or not isinstance(migration_active, bool)
-        ):
-            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-        validated[key] = {
-            "pairedPrivateChatIds": list(chats),
-            "nextUpdateOffset": offset,
-            "migrationActive": migration_active,
-        }
-    return {"schemaVersion": STATE_SCHEMA_VERSION, "bots": validated}
-
-
-TELEGRAM_DIAGNOSTIC_FIELDS = frozenset({"stage", "category", "httpStatus", "failureAt", "lastSuccessAt"})
-TELEGRAM_DIAGNOSTIC_STAGES = frozenset({"prepare", "poll", "state_read", "validate", "persist", "handle"})
-TELEGRAM_DIAGNOSTIC_CATEGORIES = frozenset({"transport", "http", "response_json", "state", "unexpected"})
-UTC_TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z")
 
 
 def _is_utc_timestamp(value: Any) -> bool:
@@ -85,6 +48,95 @@ def _is_utc_timestamp(value: Any) -> bool:
     return False
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _is_chat_key(key: object) -> bool:
+    if not isinstance(key, str):
+        return False
+    try:
+        return str(int(key)) == key
+    except ValueError:
+        return False
+
+
+def _validate_chat_record(record: object) -> dict[str, Any]:
+    if not isinstance(record, dict) or set(record) != CHAT_RECORD_KEYS:
+        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+    status, display_name, username = record["status"], record["displayName"], record["username"]
+    requested_at, decided_at = record["requestedAt"], record["decidedAt"]
+    if (
+        not isinstance(status, str)
+        or status not in CHAT_STATUSES
+        or not isinstance(display_name, str)
+        or (username is not None and not isinstance(username, str))
+        or not _is_utc_timestamp(requested_at)
+        # A pending request has no decision yet; every other status was decided at a known time.
+        or (decided_at is not None) == (status == "pending")
+        or (decided_at is not None and not _is_utc_timestamp(decided_at))
+    ):
+        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+    return {"status": status, "displayName": display_name, "username": username, "requestedAt": requested_at, "decidedAt": decided_at}
+
+
+def _migrate_paired_chats(chats: object, now: str) -> dict[str, Any]:
+    """Turn the schema-2 paired id list into approved chat records stamped with the migration time."""
+    if (
+        not isinstance(chats, list)
+        or any(isinstance(chat_id, bool) or not isinstance(chat_id, int) for chat_id in chats)
+        or len(set(chats)) != len(chats)
+    ):
+        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+    return {
+        str(chat_id): {"status": "approved", "displayName": "", "username": None, "requestedAt": now, "decidedAt": now}
+        for chat_id in chats
+    }
+
+
+def validate_telegram_state(value: object, *, now: str | None = None) -> dict[str, Any]:
+    """Validate a state document; a schema-2 document is migrated to schema 3 in memory."""
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "bots"}:
+        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+    version = value.get("schemaVersion")
+    if isinstance(version, bool) or version not in (STATE_SCHEMA_VERSION, LEGACY_PAIRED_SCHEMA_VERSION):
+        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+    legacy = version == LEGACY_PAIRED_SCHEMA_VERSION
+    bots = value.get("bots")
+    if not isinstance(bots, dict):
+        raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+    migration_time = now if now is not None else _utc_now()
+    validated: dict[str, Any] = {}
+    for key, record in bots.items():
+        if not isinstance(key, str) or not key.isascii() or not key.isdigit() or key.startswith("0"):
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        bot_id = int(key)
+        if bot_id <= 0 or str(bot_id) != key or not isinstance(record, dict):
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        chats_key = "pairedPrivateChatIds" if legacy else "chats"
+        if set(record) != {chats_key, "nextUpdateOffset", "migrationActive"}:
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        offset = record.get("nextUpdateOffset")
+        migration_active = record.get("migrationActive")
+        if (
+            (offset is not None and (isinstance(offset, bool) or not isinstance(offset, int) or offset < 0))
+            or not isinstance(migration_active, bool)
+        ):
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        if legacy:
+            chats = _migrate_paired_chats(record[chats_key], migration_time)
+        else:
+            raw_chats = record[chats_key]
+            if not isinstance(raw_chats, dict) or not all(_is_chat_key(chat_key) for chat_key in raw_chats):
+                raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+            chats = {chat_key: _validate_chat_record(chat) for chat_key, chat in raw_chats.items()}
+        validated[key] = {"chats": chats, "nextUpdateOffset": offset, "migrationActive": migration_active}
+    return {"schemaVersion": STATE_SCHEMA_VERSION, "bots": validated}
+
+
+TELEGRAM_DIAGNOSTIC_FIELDS = frozenset({"stage", "category", "httpStatus", "failureAt", "lastSuccessAt"})
+TELEGRAM_DIAGNOSTIC_STAGES = frozenset({"prepare", "poll", "state_read", "validate", "persist", "handle"})
+TELEGRAM_DIAGNOSTIC_CATEGORIES = frozenset({"transport", "http", "response_json", "state", "unexpected"})
 def project_telegram_diagnostic(raw: Any) -> dict[str, Any] | None:
     """Restrict a raw diagnostic record to the public safe schema; invalid values become null."""
     if not isinstance(raw, dict) or set(raw) != TELEGRAM_DIAGNOSTIC_FIELDS:
@@ -143,6 +195,79 @@ class TelegramStateRepository:
                 os.replace(temporary, self.path)
             except OSError:
                 raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE") from None
+
+
+    # Every mutation is a read-modify-write under the repository lock, so the poll
+    # loop's offset write and an admin decision can never overwrite each other.
+
+    def update(self, mutator: Callable[[dict[str, Any]], T]) -> T:
+        """Apply ``mutator`` to the validated state and persist it; nothing is written if it raises."""
+        with self.lock:
+            state = self.read()
+            result = mutator(state)
+            self.write(state)
+            return result
+
+    def _update_when_changed(self, mutator: Callable[[dict[str, Any]], bool]) -> bool:
+        """Like ``update``, but persist only when ``mutator`` reports a change."""
+        with self.lock:
+            state = self.read()
+            if not mutator(state):
+                return False
+            self.write(state)
+            return True
+
+    @staticmethod
+    def _bot_record(state: dict[str, Any], bot_id: int) -> dict[str, Any]:
+        record = state["bots"].get(str(bot_id))
+        if record is None:
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        return record
+
+    def status_of(self, bot_id: int, chat_id: int) -> str | None:
+        chat = self._bot_record(self.read(), bot_id)["chats"].get(str(chat_id))
+        return chat["status"] if chat is not None else None
+
+    def list_chats(self, bot_id: int) -> list[dict[str, Any]]:
+        chats = self._bot_record(self.read(), bot_id)["chats"]
+        return [{"chatId": int(chat_id), **chat} for chat_id, chat in chats.items()]
+
+    def add_pending(self, bot_id: int, chat_id: int, display_name: str, username: str | None, *, now: str | None = None) -> bool:
+        """Record an access request; a chat that is already known is left untouched."""
+        requested_at = now if now is not None else _utc_now()
+
+        def mutate(state: dict[str, Any]) -> bool:
+            chats = self._bot_record(state, bot_id)["chats"]
+            if str(chat_id) in chats:
+                return False
+            chats[str(chat_id)] = {
+                "status": "pending",
+                "displayName": display_name,
+                "username": username,
+                "requestedAt": requested_at,
+                "decidedAt": None,
+            }
+            return True
+
+        return self._update_when_changed(mutate)
+
+    def set_status(self, bot_id: int, chat_id: int, status: str, *, now: str | None = None) -> bool:
+        """Record an admin decision; returns False when the chat is unknown."""
+        if status not in DECISION_STATUSES:
+            raise ValueError(status)
+        decided_at = now if now is not None else _utc_now()
+
+        def mutate(state: dict[str, Any]) -> bool:
+            chat = self._bot_record(state, bot_id)["chats"].get(str(chat_id))
+            if chat is None:
+                return False
+            chat.update(status=status, decidedAt=decided_at)
+            return True
+
+        return self._update_when_changed(mutate)
+
+    def set_offset(self, bot_id: int, offset: int | None) -> None:
+        self.update(lambda state: self._bot_record(state, bot_id).update(nextUpdateOffset=offset))
 
 
 class TelegramLifecycleManager:

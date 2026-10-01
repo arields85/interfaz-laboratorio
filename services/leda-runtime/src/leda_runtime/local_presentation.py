@@ -769,7 +769,7 @@ class TelegramLocalBot:
     def paired_chat_ids(self) -> set[int]:
         if self.bot_id is None or self._state is None:
             return set()
-        return set(self._record()["pairedPrivateChatIds"])
+        return {int(chat_id) for chat_id, chat in self._record()["chats"].items() if chat["status"] == "approved"}
 
     def _call(self, method, *, timeout=35, **kwargs):
         response = self.session.post(f"{self.api_base}/bot{self.token}/{method}", timeout=timeout, **kwargs)
@@ -927,7 +927,7 @@ class TelegramLocalBot:
                 if key not in self._state["bots"]:
                     self._check_active_locked()
                     self._state["bots"][key] = {
-                        "pairedPrivateChatIds": [],
+                        "chats": {},
                         "nextUpdateOffset": None,
                         "migrationActive": True,
                     }
@@ -951,13 +951,15 @@ class TelegramLocalBot:
                     self._settle_locked()
 
     def _pair(self, chat_id):
-        record = self._record()
-        if chat_id not in record["pairedPrivateChatIds"]:
-            record["pairedPrivateChatIds"].append(chat_id)
+        chats = self._record()["chats"]
+        key = str(chat_id)
+        if key not in chats:
+            now = utc_now_iso()
+            chats[key] = {"status": "approved", "displayName": "", "username": None, "requestedAt": now, "decidedAt": now}
             try:
                 self._persist()
             except Exception:
-                record["pairedPrivateChatIds"].remove(chat_id)
+                del chats[key]
                 raise
 
     def _handle_message(self, message, *, migration_active=False):

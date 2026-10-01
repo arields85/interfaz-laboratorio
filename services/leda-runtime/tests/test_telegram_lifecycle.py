@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 import tempfile
@@ -28,10 +29,12 @@ from leda_runtime.local_presentation import (
 )
 from leda_runtime.telegram_config import TelegramConfig
 from leda_runtime.telegram_lifecycle import (
+    STATE_SCHEMA_VERSION,
     TelegramLifecycleError,
     TelegramLifecycleManager,
     TelegramStateRepository,
     TelegramStateUnavailable,
+    validate_telegram_state,
 )
 from leda_runtime.voice_events import VoiceEventStore
 from leda_runtime.voice_transcription import (
@@ -135,6 +138,25 @@ class InertThreadDispatch:
 
     def join(self, timeout=None):
         return None
+
+
+STAMP = "2026-10-01T12:00:00Z"
+
+
+def approved_chat(**overrides):
+    chat = {"status": "approved", "displayName": "", "username": None, "requestedAt": STAMP, "decidedAt": STAMP}
+    chat.update(overrides)
+    return chat
+
+
+def pending_chat(**overrides):
+    chat = {"status": "pending", "displayName": "Ana", "username": "ana", "requestedAt": STAMP, "decidedAt": None}
+    chat.update(overrides)
+    return chat
+
+
+def v3_state(chats=None, offset=None, migration_active=False):
+    return {"schemaVersion": 3, "bots": {"123": {"chats": dict(chats or {}), "nextUpdateOffset": offset, "migrationActive": migration_active}}}
 
 
 def identity_transport(bot_id=123, username="leda_bot"):
@@ -529,7 +551,8 @@ class TelegramLifecycleTests(unittest.TestCase):
         bot.run()
 
         record = bot.state_store.value["bots"]["123"]
-        self.assertEqual(record["pairedPrivateChatIds"], [7])
+        self.assertEqual({chat_id: chat["status"] for chat_id, chat in record["chats"].items()}, {"7": "approved"})
+        self.assertNotIn("pairedPrivateChatIds", record)
         self.assertEqual(record["nextUpdateOffset"], 4)
         self.assertFalse(record["migrationActive"])
         self.assertEqual([text for _, text in sent[:2]], ["Envíe /start nuevamente cuando finalice la migración."] * 2)
@@ -604,7 +627,7 @@ class TelegramLifecycleTests(unittest.TestCase):
                 return bot
 
             first = rotate("old-token", 123, reservation)
-            first._record().update({"pairedPrivateChatIds": [7], "nextUpdateOffset": 44, "migrationActive": False})
+            first._record().update({"chats": {"7": approved_chat()}, "nextUpdateOffset": 44, "migrationActive": False})
             first._persist()
             # A confirmed stop is what frees the identity for the same channel;
             # a replacement object then sees the retained state.
@@ -1897,6 +1920,217 @@ class ChannelBTypingIndicatorTests(unittest.TestCase):
         transcribe.assert_called_once()
         typing.return_value.set.assert_called_once_with()
         bot.send_message.assert_called_once_with(7, "El OEE actual es 88,6 %.")
+
+
+class TelegramStateSchemaV3Tests(unittest.TestCase):
+    def test_schema_version_is_three(self):
+        self.assertEqual(STATE_SCHEMA_VERSION, 3)
+
+    def test_valid_v3_state_round_trips(self):
+        state = v3_state({"7": approved_chat(), "-8": pending_chat(username=None)}, offset=5)
+        self.assertEqual(validate_telegram_state(state), state)
+
+    def test_v3_rejects_malformed_chat_records(self):
+        bad_chats = {
+            "extra key": {**pending_chat(), "note": "x"},
+            "missing key": {k: v for k, v in pending_chat().items() if k != "username"},
+            "unknown status": pending_chat(status="banned"),
+            "bool display name": pending_chat(displayName=True),
+            "int username": pending_chat(username=3),
+            "naive requestedAt": pending_chat(requestedAt="2026-10-01T12:00:00"),
+            "null requestedAt": pending_chat(requestedAt=None),
+            "bad decidedAt": approved_chat(decidedAt="yesterday"),
+            "pending with decidedAt": pending_chat(decidedAt=STAMP),
+            "approved without decidedAt": approved_chat(decidedAt=None),
+            "not an object": "approved",
+        }
+        for label, chat in bad_chats.items():
+            with self.subTest(label), self.assertRaises(TelegramStateUnavailable):
+                validate_telegram_state(v3_state({"7": chat}))
+
+    def test_v3_rejects_malformed_chat_keys_and_bot_records(self):
+        for key in ("07", "+7", "abc", "7.0", " 7", ""):
+            with self.subTest(key), self.assertRaises(TelegramStateUnavailable):
+                validate_telegram_state(v3_state({key: pending_chat()}))
+        record_shapes = [
+            {"pairedPrivateChatIds": [], "nextUpdateOffset": None, "migrationActive": False},
+            {"chats": [], "nextUpdateOffset": None, "migrationActive": False},
+            {"chats": {}, "nextUpdateOffset": -1, "migrationActive": False},
+            {"chats": {}, "nextUpdateOffset": None, "migrationActive": "no"},
+            {"chats": {}, "nextUpdateOffset": None, "migrationActive": False, "extra": 1},
+        ]
+        for record in record_shapes:
+            with self.subTest(record), self.assertRaises(TelegramStateUnavailable):
+                validate_telegram_state({"schemaVersion": 3, "bots": {"123": record}})
+
+    def test_v2_state_migrates_every_paired_id_to_approved(self):
+        v2 = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7, 9], "nextUpdateOffset": 4, "migrationActive": False}}}
+        migrated = validate_telegram_state(v2)
+        record = migrated["bots"]["123"]
+        self.assertEqual(migrated["schemaVersion"], 3)
+        self.assertNotIn("pairedPrivateChatIds", record)
+        self.assertEqual(set(record["chats"]), {"7", "9"})
+        for chat in record["chats"].values():
+            self.assertEqual(chat["status"], "approved")
+            self.assertEqual(chat["displayName"], "")
+            self.assertIsNone(chat["username"])
+            self.assertEqual(chat["requestedAt"], chat["decidedAt"])
+        self.assertEqual(record["nextUpdateOffset"], 4)
+        self.assertFalse(record["migrationActive"])
+        validate_telegram_state(migrated)
+
+    def test_v2_migration_uses_the_given_clock_and_still_rejects_malformed_v2(self):
+        v2 = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
+        self.assertEqual(validate_telegram_state(v2, now=STAMP)["bots"]["123"]["chats"]["7"], approved_chat())
+        for chats in ([7, 7], [True], ["7"]):
+            bad = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": chats, "nextUpdateOffset": None, "migrationActive": False}}}
+            with self.subTest(chats), self.assertRaises(TelegramStateUnavailable):
+                validate_telegram_state(bad)
+
+    def test_unknown_schema_versions_are_rejected(self):
+        for version in (1, 4, True, "3"):
+            with self.subTest(version), self.assertRaises(TelegramStateUnavailable):
+                validate_telegram_state({"schemaVersion": version, "bots": {}})
+
+
+class TelegramStateRepositoryOperationsTests(unittest.TestCase):
+    def setUp(self):
+        self._directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self._directory.cleanup)
+        self.path = Path(self._directory.name) / "chat-state.json"
+        self.repository = TelegramStateRepository(self.path)
+        self.repository.write(v3_state())
+
+    def test_reading_a_v2_file_migrates_and_the_next_write_persists_v3(self):
+        self.path.write_text(
+            '{"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": 3, "migrationActive": false}}}',
+            encoding="utf-8",
+        )
+        self.assertEqual(self.repository.status_of(123, 7), "approved")
+        self.assertIn("pairedPrivateChatIds", self.path.read_text(encoding="utf-8"))
+        self.repository.set_offset(123, 4)
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["schemaVersion"], 3)
+        self.assertEqual(persisted["bots"]["123"]["chats"]["7"]["status"], "approved")
+        self.assertEqual(persisted["bots"]["123"]["nextUpdateOffset"], 4)
+
+    def test_add_pending_records_the_request_once(self):
+        self.assertTrue(self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP))
+        self.assertEqual(self.repository.status_of(123, 7), "pending")
+        self.assertEqual(self.repository.list_chats(123), [{"chatId": 7, **pending_chat()}])
+
+    def test_add_pending_is_a_noop_for_a_known_chat(self):
+        self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
+        self.repository.set_status(123, 7, "rejected", now="2026-10-02T00:00:00Z")
+        self.assertFalse(self.repository.add_pending(123, 7, "Other", None, now="2026-10-03T00:00:00Z"))
+        chat = self.repository.list_chats(123)[0]
+        self.assertEqual((chat["status"], chat["displayName"], chat["requestedAt"]), ("rejected", "Ana", STAMP))
+
+    def test_set_status_records_the_decision_time(self):
+        self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
+        for status in ("approved", "revoked", "approved", "rejected"):
+            with self.subTest(status):
+                self.assertTrue(self.repository.set_status(123, 7, status, now="2026-10-02T00:00:00Z"))
+                self.assertEqual(self.repository.status_of(123, 7), status)
+                self.assertEqual(self.repository.list_chats(123)[0]["decidedAt"], "2026-10-02T00:00:00Z")
+
+    def test_set_status_rejects_unknown_chats_and_invalid_targets(self):
+        self.assertFalse(self.repository.set_status(123, 99, "approved", now=STAMP))
+        self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
+        with self.assertRaises(ValueError):
+            self.repository.set_status(123, 7, "pending", now=STAMP)
+        self.assertEqual(self.repository.status_of(123, 7), "pending")
+
+    def test_status_of_an_unknown_chat_is_none(self):
+        self.assertIsNone(self.repository.status_of(123, 99))
+
+    def test_operations_on_an_unknown_bot_fail_closed(self):
+        with self.assertRaises(TelegramStateUnavailable):
+            self.repository.add_pending(999, 7, "Ana", None, now=STAMP)
+        with self.assertRaises(TelegramStateUnavailable):
+            self.repository.set_offset(999, 1)
+
+    def test_set_offset_keeps_chats_and_migration_flag(self):
+        self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
+        self.repository.set_offset(123, 12)
+        state = self.repository.read()["bots"]["123"]
+        self.assertEqual(state["nextUpdateOffset"], 12)
+        self.assertEqual(set(state["chats"]), {"7"})
+
+    def test_a_failing_mutation_writes_nothing(self):
+        before = self.path.read_text(encoding="utf-8")
+
+        def boom(state):
+            state["bots"]["123"]["nextUpdateOffset"] = 50
+            raise RuntimeError("stop")
+
+        with self.assertRaises(RuntimeError):
+            self.repository.update(boom)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_concurrent_decisions_and_offset_writes_never_clobber_each_other(self):
+        errors = []
+
+        def requests_worker(base):
+            try:
+                for index in range(25):
+                    self.repository.add_pending(123, base + index, "n", None, now=STAMP)
+                    self.repository.set_status(123, base + index, "approved", now=STAMP)
+            except Exception as error:  # pragma: no cover - reported below
+                errors.append(error)
+
+        def offset_worker():
+            try:
+                for offset in range(100):
+                    self.repository.set_offset(123, offset)
+            except Exception as error:  # pragma: no cover - reported below
+                errors.append(error)
+
+        threads = [threading.Thread(target=requests_worker, args=(base,)) for base in (100, 200, 300)]
+        threads.append(threading.Thread(target=offset_worker))
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        record = self.repository.read()["bots"]["123"]
+        self.assertEqual(errors, [])
+        self.assertEqual(len(record["chats"]), 75)
+        self.assertTrue(all(chat["status"] == "approved" for chat in record["chats"].values()))
+        self.assertEqual(record["nextUpdateOffset"], 99)
+
+    def test_writes_are_atomic_and_leave_no_temporary_file(self):
+        self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
+        self.assertEqual(sorted(path.name for path in self.path.parent.iterdir()), ["chat-state.json"])
+
+
+class ChannelBApprovedChatsTests(unittest.TestCase):
+    def build_bot(self, state):
+        bot = TelegramLocalBot("secret-token", Mock(), MemoryStateStore(state), Mock(), reservation=BotIdentityReservation())
+        bot._call = identity_transport(username="bot")
+        bot.prepare()
+        return bot
+
+    def test_only_approved_chats_count_as_paired(self):
+        chats = {"1": approved_chat(), "2": pending_chat(), "3": approved_chat(status="rejected"), "4": approved_chat(status="revoked")}
+        self.assertEqual(self.build_bot(v3_state(chats)).paired_chat_ids, {1})
+
+    def test_start_pairs_the_first_chat_as_an_approved_record(self):
+        bot = self.build_bot(v3_state())
+        bot.send_message = Mock()
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
+        chat = bot.state_store.value["bots"]["123"]["chats"]["7"]
+        self.assertEqual(chat["status"], "approved")
+        self.assertEqual(chat["requestedAt"], chat["decidedAt"])
+        self.assertEqual(bot.paired_chat_ids, {7})
+        bot.send_message.assert_called_once_with(7, "Leda quedó vinculada a este chat. Ya puede hacer sus consultas.")
+
+    def test_a_failed_pairing_write_rolls_the_chat_back(self):
+        bot = self.build_bot(v3_state())
+        bot.state_store = FailingStateStore(bot.state_store.value, failures=1)
+        bot.send_message = Mock()
+        with self.assertRaises(TelegramStateUnavailable):
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
+        self.assertEqual(bot.paired_chat_ids, set())
 
 
 if __name__ == "__main__":
