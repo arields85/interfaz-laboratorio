@@ -284,7 +284,7 @@ Los endpoints esperados de la fuente están en [`docs/DATA_CONTRACT.md`](DATA_CO
 Ejecute con el usuario fijo y con `LEDA_RUNTIME_STATE_DIR` y `LEDA_CREDENTIAL_MASTER_KEY_FILE` definidas.
 
 1. **Clave maestra y almacén cifrado**: `python -m leda_runtime.credential_cli provision-key`. Crea la clave (32 bytes) y `credentials/provider-credentials.sqlite3`. **Falla (`CREDENTIAL_PROVISIONING_FAILED`, código 1) si la clave o la base ya existen.**
-2. **Administrador**: `docker exec -it -u <usuario> <contenedor> python -m leda_runtime.admin_cli provision-admin`. Requiere terminal interactiva (TTY; sin ella falla con `INTERACTIVE_TERMINAL_REQUIRED`), pide y confirma la contraseña (mínimo **15 caracteres**, máximo 1024 bytes UTF-8) y crea la cuenta `admin`.
+2. **Administrador**: `docker exec -it -u <usuario> <contenedor> python -m leda_runtime.admin_cli provision-admin`. Requiere terminal interactiva (TTY; sin ella falla con `INTERACTIVE_TERMINAL_REQUIRED`), pide y confirma la contraseña (mínimo **10 caracteres**, máximo 1024 bytes UTF-8) y crea la cuenta `admin`.
 3. Entregue la contraseña inicial al propietario por un canal seguro. Él debe **cambiarla desde la UI** (ícono de llave en la barra superior del modo administración, `POST /api/leda/admin/auth/password`).
 
 **Manejo idempotente en el auto-deploy**: estos comandos no se ejecutan en cada arranque ni en cada redeploy. Si automatiza la provisión, hágala condicional: ejecutar `provision-key` solo si **no existe** ni la clave ni `credentials/provider-credentials.sqlite3`, y `provision-admin` solo si `GET /api/leda/admin/auth/status` informa `configured: false`. **Nunca borre ni regenere una clave existente.**

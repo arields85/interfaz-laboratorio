@@ -155,7 +155,7 @@ export default function AdminPasswordChangeDialog({
             onClose={close}
             actions={(
                 <>
-                    <HmiButton onClick={close} disabled={pending}>Cancelar</HmiButton>
+                    <HmiButton onClick={close} disabled={pending}>{feedback?.kind === 'success' ? 'Cerrar' : 'Cancelar'}</HmiButton>
                     <HmiButton variant="primary" type="submit" form="admin-password-change-form" disabled={!canSubmit}>
                         <KeyRound size={14} aria-hidden="true" />
                         Cambiar contraseña

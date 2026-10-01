@@ -3,7 +3,7 @@
 // pinned to its constants by adminPasswordPolicy.types.test.ts.
 
 // Minimum length of a password being set, in characters (Unicode code points, as the runtime counts).
-export const MIN_ADMIN_PASSWORD_CHARACTERS = 15;
+export const MIN_ADMIN_PASSWORD_CHARACTERS = 10;
 // Ceiling of any password, in UTF-8 bytes.
 export const MAX_ADMIN_PASSWORD_BYTES = 1024;
 

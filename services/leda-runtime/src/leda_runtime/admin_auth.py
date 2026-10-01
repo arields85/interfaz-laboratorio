@@ -23,7 +23,7 @@ ACCOUNT_FAILURE_LIMIT = 5
 SOURCE_FAILURE_LIMIT = 20
 MAX_FAILURE_ROWS = 100
 # Password policy, mirrored by hmi-app/src/domain/adminPasswordPolicy.types.ts (pinned by a test there).
-MIN_PASSWORD_CHARACTERS = 15
+MIN_PASSWORD_CHARACTERS = 10
 MAX_PASSWORD_BYTES = 1024
 # Markers left for displaced sessions (see replaced_sessions); bounded so the table cannot grow.
 MAX_REPLACED_ROWS = 64

@@ -57,7 +57,7 @@ describe('AdminPasswordChangeDialog', () => {
     });
 
     it.each([
-        ['a new password that is too short', CURRENT, 'short', 'short', /al menos 15 caracteres/],
+        ['a new password that is too short', CURRENT, 'short', 'short', /al menos 10 caracteres/],
         ['a confirmation that does not match', CURRENT, NEXT, `${NEXT}!`, /no coincide/],
         ['a new password equal to the current one', CURRENT, CURRENT, CURRENT, /distinta de la actual/],
     ])('refuses %s without calling the server', async (_name, current, next, confirmation, message) => {
@@ -100,7 +100,7 @@ describe('AdminPasswordChangeDialog', () => {
     });
 
     it.each([
-        ['PASSWORD_POLICY_REJECTED', 400, /al menos 15 caracteres/],
+        ['PASSWORD_POLICY_REJECTED', 400, /al menos 10 caracteres/],
         ['PASSWORD_UNCHANGED', 400, /distinta de la actual/],
         ['LOGIN_RATE_LIMITED', 429, /Demasiados intentos/],
         ['AUTH_STORAGE_UNAVAILABLE', 503, /servicio de autenticación no está disponible/],
@@ -155,6 +155,34 @@ describe('AdminPasswordChangeDialog', () => {
         expect(client.changePassword).not.toHaveBeenCalled();
     });
 
+    it('relabels the secondary button as Cerrar after a success, and keeps Cancelar otherwise', async () => {
+        const { client, onClose, user } = setup();
+        client.changePassword.mockRejectedValueOnce(new AdminAuthError('PASSWORD_UNCHANGED', 400));
+        await fill(user);
+
+        await user.click(submit());
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+        expect(screen.getByRole('button', { name: 'Cancelar' })).toBeEnabled();
+        expect(screen.queryByRole('button', { name: 'Cerrar' })).not.toBeInTheDocument();
+
+        client.changePassword.mockResolvedValueOnce(undefined);
+        await user.click(submit());
+        await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+        expect(screen.queryByRole('button', { name: 'Cancelar' })).not.toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Cerrar' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts a new password of exactly 10 characters', async () => {
+        const { client, user } = setup();
+        client.changePassword.mockResolvedValue(undefined);
+        await fill(user, CURRENT, 'abcdefghij');
+
+        await user.click(submit());
+
+        await waitFor(() => expect(client.changePassword).toHaveBeenCalledWith(CURRENT, 'abcdefghij', expect.any(AbortSignal)));
+    });
+
     it('blocks every way of closing while a request is in flight and restores them afterwards', async () => {
         const { client, onClose, user } = setup();
         let finish: () => void = () => undefined;
@@ -171,7 +199,7 @@ describe('AdminPasswordChangeDialog', () => {
 
         finish();
         await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
-        expect(screen.getByRole('button', { name: 'Cancelar' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Cerrar' })).toBeEnabled();
         fireEvent.keyDown(window, { key: 'Escape' });
         expect(onClose).toHaveBeenCalledTimes(1);
     });

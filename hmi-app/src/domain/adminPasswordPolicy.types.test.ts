@@ -44,6 +44,12 @@ describe('admin password policy', () => {
         expect(change({ next: emoji, confirmation: emoji })).toBeNull();
     });
 
+    it('sets the minimum at 10 characters', () => {
+        expect(MIN_ADMIN_PASSWORD_CHARACTERS).toBe(10);
+        expect(change({ next: 'x'.repeat(10), confirmation: 'x'.repeat(10) })).toBeNull();
+        expect(change({ next: 'x'.repeat(9), confirmation: 'x'.repeat(9) })).toBe('NEW_TOO_SHORT');
+    });
+
     it('counts the maximum in UTF-8 bytes', () => {
         const atMaximum = 'x'.repeat(MAX_ADMIN_PASSWORD_BYTES);
         expect(change({ next: atMaximum, confirmation: atMaximum })).toBeNull();

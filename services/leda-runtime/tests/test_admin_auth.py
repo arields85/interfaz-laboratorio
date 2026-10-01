@@ -16,6 +16,7 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from leda_runtime.admin_auth import (
     MAX_REPLACED_ROWS,
+    MIN_PASSWORD_CHARACTERS,
     AdminAuthRepository,
     AdminAuthService,
     AdminSessionActiveElsewhere,
@@ -70,6 +71,14 @@ class PasswordHasherTests(unittest.TestCase):
             with self.subTest(length=len(password)), self.assertRaises(PasswordPolicyError):
                 hasher.hash_password(password)
         scrypt.assert_not_called()
+
+    def test_password_policy_minimum_is_ten_characters(self) -> None:
+        hasher = ScryptPasswordHasher(scrypt_fn=Mock(return_value=b"x" * 32))
+
+        self.assertEqual(MIN_PASSWORD_CHARACTERS, 10)
+        hasher.hash_password("x" * 10)
+        with self.assertRaises(PasswordPolicyError):
+            hasher.hash_password("x" * 9)
 
     def test_unavailable_scrypt_and_untrusted_parameters_fail_closed(self) -> None:
         with self.assertRaises(AuthUnavailable):

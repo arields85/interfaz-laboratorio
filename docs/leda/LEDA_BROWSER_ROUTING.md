@@ -67,7 +67,7 @@ runtime state dir; it never reaches the plant or Node-RED.
   `200 {"ok": true}`. It requires the session cookie, the `X-CSRF-Token` header and the same Origin/Host
   checks as the other admin writes.
 - The new password follows the same policy as `provision-admin` / `reset-admin-password` (one function in
-  `admin_auth.py`): at least 15 characters, at most 1024 UTF-8 bytes. The HMI mirrors these bounds in
+  `admin_auth.py`): at least 10 characters, at most 1024 UTF-8 bytes. The HMI mirrors these bounds in
   `hmi-app/src/domain/adminPasswordPolicy.types.ts`, pinned to the runtime by a test.
 - The current password is verified with the login hasher under the login rate limit: a wrong one is
   `401 INVALID_CURRENT_PASSWORD`, counts as a failed attempt for that account and source, and exhausting the
