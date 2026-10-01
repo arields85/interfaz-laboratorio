@@ -14,7 +14,7 @@ Findings never expand scope by themselves; they were parked so the features coul
 ## Scope
 
 - In: test-only hardening, the style lab preset sync, a small dedup refactor in the trend charts, pinning the `parseCssLengthPx` unit limit, and A2 once the user decides.
-- Out (closed with reason, see "Dropped findings"): A4, B2, B3, C1, C3, C4, C6, C10, D2.
+- Out (closed with reason, see "Dropped findings"): A2 (false positive, see T5), A4, B2, B3, C1, C3, C4, C6, C10, D2.
 - No user-visible behavior change except A2, and only if the user picks it.
 
 ## Constraints
@@ -46,7 +46,7 @@ Findings never expand scope by themselves; they were parked so the features coul
 - [x] T2 — C9: sync the style lab Instrumento preset with the app (`tools/style-lab/style-lab.html`, radius 5 and its hint text, plus any other stale values). Route: inline.
 - [x] T3 — D3: extract the frame title resolution shared by trend-chart and trend-chart-v2 into one tested helper, with no behavior change. Route: delegated writer.
 - [x] T4 — C2: document that `parseCssLengthPx` supports only px and rem, and pin that limit with a test. Route: delegated writer.
-- [ ] T5 — A2: a locked group with a link but no frame. Waiting on the user's decision.
+- [x] T5 — A2: dropped as a false positive (2026-10-01). The user pointed it out and the code confirms it: `showFrame` ("Mostrar fondo y marco") exists only for the header-compatible widgets `status` and `connection-status` (`utils/headerWidgets.ts:3`, `getWidgetFrameOption`). A group always draws its frame in the grid, so its link accents always show.
 - [ ] T6 — Native review of the slice `e1a8cb7..HEAD`, which includes the tail `6d0c56f` + `f27d55e`. Then close PW-021 in `docs/PENDING_WORK.md` and Engram.
 
 ## Dropped findings (cost > value or stale)
