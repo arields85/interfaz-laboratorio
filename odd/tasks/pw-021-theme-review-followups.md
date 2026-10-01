@@ -47,7 +47,7 @@ Findings never expand scope by themselves; they were parked so the features coul
 - [x] T3 — D3: extract the frame title resolution shared by trend-chart and trend-chart-v2 into one tested helper, with no behavior change. Route: delegated writer.
 - [x] T4 — C2: document that `parseCssLengthPx` supports only px and rem, and pin that limit with a test. Route: delegated writer.
 - [x] T5 — A2: dropped as a false positive (2026-10-01). The user pointed it out and the code confirms it: `showFrame` ("Mostrar fondo y marco") exists only for the header-compatible widgets `status` and `connection-status` (`utils/headerWidgets.ts:3`, `getWidgetFrameOption`). A group always draws its frame in the grid, so its link accents always show.
-- [ ] T6 — Native review of the slice `e1a8cb7..HEAD`, which includes the tail `6d0c56f` + `f27d55e`. Then close PW-021 in `docs/PENDING_WORK.md` and Engram.
+- [x] T6 — Native review of the slice `e1a8cb7..HEAD`, which includes the tail `6d0c56f` + `f27d55e`. Then close PW-021 in `docs/PENDING_WORK.md` and Engram.
 
 ## Dropped findings (cost > value or stale)
 
@@ -84,4 +84,16 @@ Findings never expand scope by themselves; they were parked so the features coul
   - T3 (`b282557`): `utils/trendChartTitle.ts` (`resolveTrendChartTitle` keeps `??`, `resolveTrendChartV2Title` keeps `||`) used by both renderers. RED: `npx vitest run src/utils/trendChartTitle.test.ts` import failed (module missing); GREEN 5 passed; trend chart suites 98 passed. Tooltip series names (`widget.title ?? ...`) left as they were: a different rule, so no behavior change.
   - T4 (`06719ad`): doc comment states that em, %, vw, vh, ch and others read as 0; a test pins it. Mutation (adding `em` to the regex) gave RED 1 failed / 28 passed; restored 29 passed.
   - Gate (hmi-app): `npx tsc -b` clean; `npm run lint` clean; `npm test` 274 files / 3640 passed; `npm run build` built.
+- 2026-10-01 T6:
+  - Assessment of `e1a8cb7..5a989f1`: medium risk, 615 lines, `slice_budget_reached`.
+  - Native review: lineage `review-6339417ca7dc6b3e`, one lens (reliability), consent granted under the standing consent. It was approved and acknowledged; authority is burned. The reviewed boundary is now `5a989f1`.
+  - The review left two advisory findings, both fixed inline in `802a64a`:
+    - `R3-offsetwidth-spy-restore-not-visible`: the "tab width reporting" describe in `WidgetFrame.test.tsx` had no restore. It now has `afterEach(vi.restoreAllMocks)`. This is cleanup only, so there is no RED.
+    - `R3-stale-auto-radius-comment`: the comment in `index.css` `.hmi-link-accents` no longer says "auto"; it names the `--link-accent-radius` setting (default 5 px).
+  - Check: `npx vitest run` on `WidgetFrame.test.tsx` and `linkCornerAccents.css.test.ts` passed 65 of 65.
+  - `802a64a` is left unreviewed (test cleanup plus a CSS comment, under the budget) for the next slice.
+- Closed: PW-021 removed from `docs/PENDING_WORK.md`; the Engram backlog `backlog/theme-review-followups` is closed.
 
+## Next step
+
+None. The feature is complete. Merging into main and pushing are the user's decisions.
