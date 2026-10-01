@@ -31,6 +31,11 @@ import {
     readStoredIconCutout,
     writeStoredIconCutout,
 } from '../../services/iconCutout.service';
+import {
+    previewLinkCornerAccents,
+    readStoredLinkCornerAccents,
+    writeStoredLinkCornerAccents,
+} from '../../services/linkCornerAccents.service';
 import AdminActionButton from './AdminActionButton';
 import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
@@ -133,6 +138,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const [radii, setRadii] = useState<FrameRadiusOverrides>(initialRadii);
     const initialCutout = useMemo(() => readStoredIconCutout(), []);
     const [cutout, setCutout] = useState(initialCutout);
+    const initialLinkAccents = useMemo(() => readStoredLinkCornerAccents(), []);
+    const [linkAccents, setLinkAccents] = useState(initialLinkAccents);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
@@ -141,6 +148,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const snapshotShapeRef = useRef(initialShape);
     const snapshotRadiiRef = useRef(initialRadii);
     const snapshotCutoutRef = useRef(initialCutout);
+    const snapshotLinkAccentsRef = useRef(initialLinkAccents);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -185,11 +193,13 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         shape: FrameShape;
         radii: FrameRadiusOverrides;
         cutout: boolean;
+        linkAccents: boolean;
     }) => next.id !== snapshotIdRef.current
         || !areEntranceSettingsEqual(next.entrance, snapshotEntranceRef.current)
         || next.shape !== snapshotShapeRef.current
         || !areRadiusOverridesEqual(next.radii, snapshotRadiiRef.current)
-        || next.cutout !== snapshotCutoutRef.current;
+        || next.cutout !== snapshotCutoutRef.current
+        || next.linkAccents !== snapshotLinkAccentsRef.current;
 
     const syncDirty = (isDirty: boolean) => {
         dirtyRef.current = isDirty;
@@ -205,7 +215,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         setSelectedId(id);
         previewThemeStyleOnDocument(id, document.documentElement, radii[getThemeStylePreset(id).id]);
 
-        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout }));
+        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout, linkAccents }));
     };
 
     // The shape is previewed on the whole document like a theme card: every framed widget of the
@@ -217,7 +227,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setShape(next);
         previewFrameShape(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout, linkAccents }));
     };
 
     // Moving a slider previews the value on the whole document right away
@@ -230,7 +240,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setEntrance(next);
         applyViewerEntranceSettingsToDocument(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout, linkAccents }));
     };
 
     // The icon cutout is previewed on the whole document like the shape: framed widgets read it
@@ -242,8 +252,24 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setCutout(next);
         previewIconCutout(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next, linkAccents }));
     };
+
+    // The link corner accents are previewed on the whole document like the cutout: the viewer reads
+    // them through `useLinkCornerAccentsActive`.
+    const handleLinkAccentsChange = (next: boolean) => {
+        if (next === linkAccents) {
+            return;
+        }
+
+        setLinkAccents(next);
+        previewLinkCornerAccents(next);
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents: next }));
+    };
+
+    // The link corner accents show with Clasico (any frame shape); the section says so while the
+    // selection is another preset.
+    const linkAccentsApply = selectedId === CLASSIC_THEME_STYLE_ID;
 
     // The cutout only shows with Clasico and the Estandar shape (see `useIconCutoutActive`); the
     // section says so while the current selection makes it not apply.
@@ -269,7 +295,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setRadii(nextRadii);
         previewThemeStyleOnDocument(selectedId, document.documentElement, nextRadii[selectedPreset.id]);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout, linkAccents }));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -289,6 +315,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 applyViewerEntranceSettingsToDocument(snapshotEntranceRef.current);
                 previewFrameShape(snapshotShapeRef.current);
                 previewIconCutout(snapshotCutoutRef.current);
+                previewLinkCornerAccents(snapshotLinkAccentsRef.current);
             }
         };
     }, []);
@@ -307,11 +334,14 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewFrameShape(shape);
             writeStoredIconCutout(cutout);
             previewIconCutout(cutout);
+            writeStoredLinkCornerAccents(linkAccents);
+            previewLinkCornerAccents(linkAccents);
             snapshotIdRef.current = selectedId;
             snapshotEntranceRef.current = entrance;
             snapshotShapeRef.current = shape;
             snapshotRadiiRef.current = radii;
             snapshotCutoutRef.current = cutout;
+            snapshotLinkAccentsRef.current = linkAccents;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -320,7 +350,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [cutout, entrance, onDirtyChange, radii, saveRef, selectedId, shape]);
+    }, [cutout, entrance, linkAccents, onDirtyChange, radii, saveRef, selectedId, shape]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -342,6 +372,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewFrameShape(snapshotShapeRef.current);
             setCutout(snapshotCutoutRef.current);
             previewIconCutout(snapshotCutoutRef.current);
+            setLinkAccents(snapshotLinkAccentsRef.current);
+            previewLinkCornerAccents(snapshotLinkAccentsRef.current);
             dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
@@ -504,6 +536,30 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 {!cutoutApplies && (
                     <p data-testid="theme-cutout-note" className={`mt-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                         Ahora no se aplica: requiere el tema Clásico y la forma de marco Estándar.
+                    </p>
+                )}
+            </section>
+
+            <section aria-labelledby="theme-link-accents-heading" className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
+                <div id="theme-link-accents-heading" className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
+                    Esquinas en widgets con enlace
+                </div>
+                <p className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    Muestra unas esquinas animadas, apenas por fuera del marco, al pasar el cursor sobre un widget que
+                    abre otro dashboard. Se aplica con el tema Clásico y solo en el visor.
+                </p>
+
+                <DockToggleField
+                    label="Esquinas en widgets con enlace"
+                    ariaLabel="Esquinas en widgets con enlace"
+                    labelClassName="w-auto flex-1"
+                    checked={linkAccents}
+                    onChange={handleLinkAccentsChange}
+                />
+
+                {!linkAccentsApply && (
+                    <p data-testid="theme-link-accents-note" className={`mt-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                        Ahora no se aplica: requiere el tema Clásico.
                     </p>
                 )}
             </section>
