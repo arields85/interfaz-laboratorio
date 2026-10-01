@@ -16,6 +16,7 @@ import DiagnosticsPage from '../pages/DiagnosticsPage';
 import LogsPage from '../pages/LogsPage';
 import EppiViewer from '../components/viewer/eppi/EppiViewer';
 import AdminSessionLifecycle from '../components/auth/AdminSessionLifecycle';
+import HiddenAccessRoute from '../components/auth/HiddenAccessRoute';
 
 // =============================================================================
 // APP ROUTER
@@ -39,6 +40,7 @@ const router = createBrowserRouter([{ element: <AdminSessionLifecycle />, childr
             { path: 'diagnostics', element: <DiagnosticsPage /> },
             { path: 'logs', element: <LogsPage /> },
             { path: 'eppi/*', element: <EppiViewer /> },
+            { path: 'acceso', element: <HiddenAccessRoute /> },
         ],
     },
     {

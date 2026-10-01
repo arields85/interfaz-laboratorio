@@ -151,3 +151,36 @@ describe('AppRouter admin guard', () => {
         expect(window.location.search).toBe('?page=2');
     });
 });
+
+describe('AppRouter hidden access route', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        localStorage.removeItem('hmi:hidden-access');
+        authStoreMock.store.setState({
+            session: unauthenticatedSession,
+            isHydrated: true,
+            hasPermission: () => false,
+        });
+    });
+
+    it('reveals the icons, opens the login and replaces /acceso with the viewer root', async () => {
+        await renderRouterAt('/acceso');
+        const { useLoginOverlayStore } = await import('../store/loginOverlay.store');
+
+        expect(await screen.findByText('Dashboard viewer')).toBeInTheDocument();
+        expect(window.location.pathname).toBe('/');
+        expect(localStorage.getItem('hmi:hidden-access')).toBe('on');
+        expect(useLoginOverlayStore.getState().open).toBe(true);
+    });
+
+    it('does not keep /acceso in the history', async () => {
+        window.history.replaceState({}, '', '/previa');
+        const lengthBefore = window.history.length;
+
+        await renderRouterAt('/acceso');
+        await screen.findByText('Dashboard viewer');
+
+        expect(window.history.length).toBe(lengthBefore);
+    });
+});
+

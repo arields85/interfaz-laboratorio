@@ -8,6 +8,7 @@ import AppRouter from './app/router';
 import PrismaOrbOverlay from './components/PrismaOrbOverlay';
 import { useAutomaticViewportZoom } from './hooks/useAutomaticViewportZoom';
 import { useBootShield } from './hooks/useBootShield';
+import { useHiddenAccessShortcut } from './hooks/useHiddenAccessShortcut';
 import { usePrismaOrbPresentation } from './hooks/usePrismaOrbPresentation';
 import { usePrismaOrbVisualConfig } from './hooks/usePrismaOrbVisualConfig';
 import { useReloadShield } from './hooks/useReloadShield';
@@ -25,6 +26,7 @@ export default function App() {
     useAutomaticViewportZoom();
     useBootShield();
     useReloadShield();
+    useHiddenAccessShortcut();
     useVoiceEventListener((event) => {
         logVoiceEvent(event);
         prismaOrb.presentVoiceEvent(event);

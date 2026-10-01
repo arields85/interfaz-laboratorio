@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, Search, User, Home, FolderTree, Activity, AlertTriangle, Box, Settings, LayoutDashboard, Stethoscope, ScrollText, Palette } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import LoginOverlay from '../auth/LoginOverlay';
 import ShaderSettingsPanel from './ShaderSettingsPanel';
 import { useAuthStore } from '../../store/auth.store';
+import { useLoginOverlayStore } from '../../store/loginOverlay.store';
+import { useHiddenAccess } from '../../hooks/useHiddenAccess';
 import { requestShieldReveal } from '../../hooks/useBootShield';
 import { useUIStore } from '../../store/ui.store';
 import { hierarchyStorage } from '../../services/HierarchyStorageService';
@@ -98,7 +100,11 @@ function HomeNavButton() {
 
 export default function Topbar() {
     const [shaderPanelOpen, setShaderPanelOpen] = useState(false);
-    const [loginOverlayOpen, setLoginOverlayOpen] = useState(false);
+    const loginOverlayOpen = useLoginOverlayStore((state) => state.open);
+    const setLoginOverlayOpen = useLoginOverlayStore((state) => state.setOpen);
+    const toggleLoginOverlay = useLoginOverlayStore((state) => state.toggle);
+    // The users icon and the Prisma control only render where the hidden access was revealed.
+    const accessRevealed = useHiddenAccess();
     const userButtonRef = useRef<HTMLButtonElement>(null);
     const isHydrated = useAuthStore((state) => state.isHydrated);
     const hasAdminAccess = useAuthStore((state) => state.hasPermission('admin:access'));
@@ -106,6 +112,12 @@ export default function Topbar() {
     const navigate = useNavigate();
     const shouldShowAdminActions = isHydrated && hasAdminAccess;
     const isEppiMode = isEppiPathname(location.pathname);
+
+    useEffect(() => {
+        if (!accessRevealed) setLoginOverlayOpen(false);
+    }, [accessRevealed, setLoginOverlayOpen]);
+
+    useEffect(() => () => setLoginOverlayOpen(false), [setLoginOverlayOpen]);
 
     const handleBrandNavigation = () => {
         if (isEppiMode) {
@@ -174,7 +186,7 @@ export default function Topbar() {
                                 {navRightItems.map((item) => (
                                     <NavIconLink key={item.path} {...item} />
                                 ))}
-                                <PrismaPairingControl />
+                                {accessRevealed ? <PrismaPairingControl /> : null}
                             </nav>
                         </>
                     )}
@@ -215,14 +227,16 @@ export default function Topbar() {
                             <Settings size={20} />
                         </button>
                     ) : null}
-                    <button
-                        ref={userButtonRef}
-                        title="Usuario"
-                        className={TOPBAR_ICON_BUTTON_CLS}
-                        onClick={() => setLoginOverlayOpen((value) => !value)}
-                    >
-                        <User size={20} />
-                    </button>
+                    {accessRevealed ? (
+                        <button
+                            ref={userButtonRef}
+                            title="Usuario"
+                            className={TOPBAR_ICON_BUTTON_CLS}
+                            onClick={toggleLoginOverlay}
+                        >
+                            <User size={20} />
+                        </button>
+                    ) : null}
                 </div>
             </header>
             <ShaderSettingsPanel

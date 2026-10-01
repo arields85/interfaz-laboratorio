@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,8 @@ const sessionControllerMock = vi.hoisted(() => ({
 
 vi.mock('../../services/adminSession.controller', () => ({ adminSessionController: sessionControllerMock }));
 import { useUIStore } from '../../store/ui.store';
+import { setHiddenAccessRevealed } from '../../services/hiddenAccess.service';
+import { useHiddenAccessShortcut } from '../../hooks/useHiddenAccessShortcut';
 import Topbar from './Topbar';
 import { SHIELD_REVEAL_REQUEST_EVENT } from '../../hooks/useBootShield';
 
@@ -115,9 +117,18 @@ function renderTopbar(initialEntry: string | { pathname: string; state?: unknown
     );
 }
 
+function ShortcutHost() {
+    useHiddenAccessShortcut();
+    return null;
+}
+
+const REVEAL_COMBINATION = { code: 'KeyA', key: 'a', ctrlKey: true, altKey: true } as const;
+
 describe('Topbar', () => {
     beforeEach(() => {
         localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+        // The existing behavior is exercised with the hidden access revealed.
+        setHiddenAccessRevealed(true);
         clearLoaderOptionsConfig();
         hierarchyStorageMock.getNodes.mockResolvedValue([]);
         dashboardStorageMock.getDashboards.mockResolvedValue([]);
@@ -432,4 +443,83 @@ describe('Topbar', () => {
         expect(screen.getByRole('navigation', { name: 'Navegación EPPI' })).toBeInTheDocument();
     });
 
+    describe('hidden access', () => {
+        beforeEach(() => {
+            setHiddenAccessRevealed(false);
+        });
+
+        it('shows neither the users icon nor the Prisma control by default', () => {
+            renderTopbar('/explorer');
+
+            expect(screen.queryByTitle('Usuario')).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Prisma' })).not.toBeInTheDocument();
+        });
+
+        it('shows both after Ctrl+Alt+A, hides them on the second press and remembers the state in this browser', () => {
+            render(
+                <MemoryRouter initialEntries={['/explorer']}>
+                    <ShortcutHost />
+                    <Topbar />
+                </MemoryRouter>,
+            );
+
+            fireEvent.keyDown(document.body, REVEAL_COMBINATION);
+            expect(screen.getByTitle('Usuario')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Prisma' })).toBeInTheDocument();
+            expect(localStorage.getItem('hmi:hidden-access')).toBe('on');
+
+            fireEvent.keyDown(document.body, REVEAL_COMBINATION);
+            expect(screen.queryByTitle('Usuario')).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Prisma' })).not.toBeInTheDocument();
+            expect(localStorage.getItem('hmi:hidden-access')).toBeNull();
+        });
+
+        it('stays revealed after a reload in the same browser', () => {
+            setHiddenAccessRevealed(true);
+
+            renderTopbar('/explorer');
+
+            expect(screen.getByTitle('Usuario')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Prisma' })).toBeInTheDocument();
+        });
+
+        it('ignores the combination while typing in the search field', () => {
+            render(
+                <MemoryRouter initialEntries={['/explorer']}>
+                    <ShortcutHost />
+                    <Topbar />
+                </MemoryRouter>,
+            );
+
+            fireEvent.keyDown(screen.getByPlaceholderText('Analyze equipment...'), REVEAL_COMBINATION);
+
+            expect(screen.queryByTitle('Usuario')).not.toBeInTheDocument();
+        });
+
+        it('closes the login when the icons are hidden again', async () => {
+            const user = userEvent.setup();
+            setHiddenAccessRevealed(true);
+            render(
+                <MemoryRouter initialEntries={['/explorer']}>
+                    <ShortcutHost />
+                    <Topbar />
+                </MemoryRouter>,
+            );
+            await user.click(screen.getByTitle('Usuario'));
+            expect(screen.getByLabelText('Contraseña')).toBeInTheDocument();
+
+            fireEvent.keyDown(document.body, REVEAL_COMBINATION);
+
+            expect(screen.queryByLabelText('Contraseña')).not.toBeInTheDocument();
+        });
+
+        it('keeps the admin actions of an authenticated administrator while the icons are hidden', () => {
+            useAuthStore.setState({ session: adminSession, isHydrated: true, isAuthenticating: false, error: null });
+
+            renderTopbar('/explorer');
+
+            expect(screen.getByTitle('Administracion')).toBeInTheDocument();
+            expect(screen.queryByTitle('Usuario')).not.toBeInTheDocument();
+        });
+    });
 });
