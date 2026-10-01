@@ -178,6 +178,8 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             configurationError: 'TELEGRAM_CREDENTIAL_MISSING', lastError: null,
             desiredGeneration: 1, appliedGeneration: 1, restartRequired: false, botUsername: null,
         });
+        // The Channel B access list has its own suite; this file only guards the singleton's other routes.
+        vi.spyOn(adminAuthClient, 'channelBAccessList').mockResolvedValue([]);
         vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
             activationEpoch: null, activation: null, lastError: null, botUsername: null, paired: false,
@@ -318,6 +320,8 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             },
             isHydrated: true,
         });
+        // The Channel B access list has its own suite; this file only guards the singleton's other routes.
+        vi.spyOn(adminAuthClient, 'channelBAccessList').mockResolvedValue([]);
         const json = (body: unknown, status: number) => new Response(JSON.stringify(body), {
             status,
             headers: { 'Content-Type': 'application/json' },
@@ -436,6 +440,8 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             restartRequired: false,
             botUsername: null,
         });
+        // The Channel B access list has its own suite; this file only guards the singleton's other routes.
+        vi.spyOn(adminAuthClient, 'channelBAccessList').mockResolvedValue([]);
         vi.spyOn(adminAuthClient, 'channelAStatus').mockResolvedValue({
             configured: false, desiredGeneration: 1, appliedGeneration: null,
             activationEpoch: null, activation: null, lastError: null, botUsername: null, paired: false,

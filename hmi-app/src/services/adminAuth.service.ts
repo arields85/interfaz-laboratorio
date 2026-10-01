@@ -1,5 +1,7 @@
 import {
     parseChannelAAdministrationStatus,
+    parseChannelBAccessDecisionResult,
+    parseChannelBAccessList,
     parseChannelAVerificationResult,
     parseCredentialMetadata,
     parseCredentialMutation,
@@ -12,6 +14,9 @@ import {
     type AdminAuthStatus,
     type AdministratorIdentity,
     type ChannelAAdministrationStatus,
+    type ChannelBAccessChat,
+    type ChannelBAccessDecision,
+    type ChannelBAccessDecisionResult,
     type CredentialMetadata,
     type CredentialMutationResult,
     type CredentialProvider,
@@ -30,6 +35,7 @@ const GEMINI_VERIFY_ROUTE = '/api/leda/admin/credentials/gemini/verify';
 const TELEGRAM_VERIFY_ROUTE = '/api/leda/admin/credentials/telegram/verify';
 const CHANNEL_A_VERIFY_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/verify';
 const SHARED_CONFIG_WRITE_ROUTE = '/api/leda/admin/hmi-config';
+const CHANNEL_B_ACCESS_ROUTE = '/api/leda/admin/channel-b/access';
 const CSRF_TOKEN_LENGTH = 43;
 export interface AdminLoginOptions {
     signal?: AbortSignal;
@@ -39,6 +45,11 @@ export interface AdminLoginOptions {
 export const SESSION_REPLACED_CODE = 'ADMIN_SESSION_REPLACED';
 export const SESSION_ACTIVE_ELSEWHERE_CODE = 'ADMIN_SESSION_ACTIVE_ELSEWHERE';
 const PUBLIC_ERROR_CODES = new Set([
+    'CHANNEL_B_ACCESS_UNAVAILABLE',
+    'CHANNEL_B_CHAT_NOT_FOUND',
+    'CHANNEL_B_INVALID_TRANSITION',
+    'INVALID_CHAT_ID',
+    'TELEGRAM_STATE_UNAVAILABLE',
     'ADMIN_CREDENTIAL_BLANK',
     'ADMIN_CREDENTIAL_TOO_LARGE',
     'AUTH_CONFIGURATION_INVALID',
@@ -401,6 +412,32 @@ export class AdminAuthClient {
                 signal: requestSignal,
             });
             return this.parseResponse(response, parseChannelAAdministrationStatus);
+        });
+    }
+
+    // Channel B access list: who asked to use the Telegram assistant and who was admitted.
+    async channelBAccessList(signal?: AbortSignal): Promise<ChannelBAccessChat[]> {
+        return this.protectedOperation(false, signal, async (requestSignal) => {
+            const response = await this.request(CHANNEL_B_ACCESS_ROUTE, { method: 'GET', signal: requestSignal });
+            return this.parseResponse(response, parseChannelBAccessList);
+        });
+    }
+
+    // Approve, reject or revoke one chat. A configuration action on the HMI's own access list,
+    // never a command to the plant. Same session cookie and CSRF contract as the credential routes.
+    async channelBAccessDecision(
+        chatId: number,
+        decision: ChannelBAccessDecision,
+        signal?: AbortSignal,
+    ): Promise<ChannelBAccessDecisionResult> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(`${CHANNEL_B_ACCESS_ROUTE}/${chatId}/${decision}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: '{}',
+                signal: requestSignal,
+            });
+            return this.parseResponse(response, parseChannelBAccessDecisionResult);
         });
     }
 

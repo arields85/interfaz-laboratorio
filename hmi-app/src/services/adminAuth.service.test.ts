@@ -1130,3 +1130,87 @@ describe('AdminAuthClient', () => {
             .toBe(FRESH_SESSION.csrfToken);
     });
 });
+
+describe('AdminAuthClient Channel B access', () => {
+    const ACCESS_ROUTE = '/api/leda/admin/channel-b/access';
+    const CHAT = {
+        chatId: 1001,
+        status: 'pending',
+        displayName: 'Ana Pérez',
+        username: 'ana_perez',
+        requestedAt: '2026-10-01T12:00:00+00:00',
+        decidedAt: null,
+    } as const;
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('reads the access list from its exact private GET route without a CSRF token', async () => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true, chats: [CHAT] }));
+        const client = new AdminAuthClient(fetcher);
+
+        await expect(client.channelBAccessList()).resolves.toEqual([CHAT]);
+
+        expect(fetcher).toHaveBeenCalledWith(ACCESS_ROUTE, expect.objectContaining({
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            redirect: 'error',
+        }));
+        const headers = fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>;
+        expect(headers['X-CSRF-Token']).toBeUndefined();
+    });
+
+    it.each(['approve', 'reject', 'revoke'] as const)(
+        'posts %s to the exact chat route with the private CSRF token',
+        async (decision) => {
+            const decided = { ...CHAT, status: 'approved', decidedAt: '2026-10-01T13:00:00+00:00' };
+            const fetcher = vi.fn<typeof fetch>()
+                .mockResolvedValueOnce(jsonResponse(SESSION))
+                .mockResolvedValueOnce(jsonResponse({ ok: true, chat: decided, noticeSent: true }));
+            const client = new AdminAuthClient(fetcher);
+            await client.session();
+
+            await expect(client.channelBAccessDecision(1001, decision))
+                .resolves.toEqual({ chat: decided, noticeSent: true });
+
+            expect(fetcher.mock.calls[1]?.[0]).toBe(`${ACCESS_ROUTE}/1001/${decision}`);
+            expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: expect.objectContaining({ 'X-CSRF-Token': SESSION.csrfToken }),
+            }));
+        },
+    );
+
+    it('refuses a decision without a session CSRF token and never calls the network', async () => {
+        const fetcher = vi.fn<typeof fetch>();
+        const client = new AdminAuthClient(fetcher);
+
+        await expect(client.channelBAccessDecision(1001, 'approve'))
+            .rejects.toMatchObject({ code: 'CSRF_TOKEN_UNAVAILABLE' });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('rejects a list with an unknown key as an invalid response', async () => {
+        const client = new AdminAuthClient(vi.fn<typeof fetch>()
+            .mockResolvedValue(jsonResponse({ ok: true, chats: [{ ...CHAT, token: 'x' }] })));
+
+        await expect(client.channelBAccessList())
+            .rejects.toMatchObject({ code: 'ADMIN_CREDENTIAL_RESPONSE_INVALID' });
+    });
+
+    it.each([
+        [400, 'INVALID_CHAT_ID'],
+        [404, 'CHANNEL_B_CHAT_NOT_FOUND'],
+        [409, 'CHANNEL_B_INVALID_TRANSITION'],
+        [503, 'CHANNEL_B_ACCESS_UNAVAILABLE'],
+        [503, 'TELEGRAM_STATE_UNAVAILABLE'],
+    ])('preserves the %s %s error code', async (status, code) => {
+        const client = new AdminAuthClient(vi.fn<typeof fetch>()
+            .mockResolvedValue(jsonResponse({ ok: false, error: code }, status)));
+
+        await expect(client.channelBAccessList()).rejects.toMatchObject({ code, status });
+    });
+});

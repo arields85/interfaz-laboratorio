@@ -26,6 +26,7 @@ import LedaVoiceEffectsSettings from './LedaVoiceEffectsSettings';
 import LedaVoicePlaybackBufferSettings from './LedaVoicePlaybackBufferSettings';
 import VoiceCredentialSettings from './VoiceCredentialSettings';
 import HmiNameSettings from './HmiNameSettings';
+import ChannelBAccessSettings from './channelBAccess/ChannelBAccessSettings';
 import {
     ADMIN_SIDEBAR_SECTION_CLS,
     ADMIN_SIDEBAR_SECTION_HEADER_CLS,
@@ -282,6 +283,7 @@ export default function VoiceSettingsTab({
         <div className="space-y-4">
             <HmiNameSettings active={credentialControlsActive} />
             <VoiceCredentialSettings active={credentialControlsActive} />
+            <ChannelBAccessSettings active={credentialControlsActive} />
 
             {remoteVoiceConfig.error ? (
                 <p className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4 text-xs text-industrial-muted`} aria-live="polite">

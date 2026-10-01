@@ -107,11 +107,15 @@ describe('VoiceSettingsTab', () => {
             configured: false, desiredGeneration: 1, appliedGeneration: null,
             activationEpoch: null, activation: null, lastError: null, botUsername: null,
         });
+        const channelBAccess = vi.spyOn(adminAuthClient, 'channelBAccessList').mockResolvedValue([]);
         try {
             const onDirtyChange = vi.fn();
             const view = render(<VoiceSettingsTab credentialControlsActive={false} onDirtyChange={onDirtyChange} />);
             const name = screen.getByLabelText('Nombre de esta HMI');
             const credential = screen.getByLabelText('API Key de Gemini');
+            const channelBSection = screen.getByRole('region', { name: 'Acceso al Canal B' });
+            expect(credential.compareDocumentPosition(channelBSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            expect(channelBAccess).not.toHaveBeenCalled();
             expect(name).toBeDisabled();
             expect(screen.getByRole('button', { name: 'Guardar nombre' })).toBeDisabled();
             expect(name.compareDocumentPosition(credential) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -121,6 +125,7 @@ describe('VoiceSettingsTab', () => {
             fireEvent.change(screen.getByLabelText('Nombre de esta HMI'), { target: { value: 'Panel recepción' } });
             fireEvent.click(screen.getByRole('button', { name: 'Guardar nombre' }));
             expect(await screen.findByText('Nombre guardado en este navegador')).toBeInTheDocument();
+            expect(channelBAccess).toHaveBeenCalled();
             expect(localStorage.getItem('hmi:leda-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
             expect(onDirtyChange).not.toHaveBeenCalledWith(true);
             expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
@@ -130,6 +135,7 @@ describe('VoiceSettingsTab', () => {
             metadata.mockRestore();
             health.mockRestore();
             channelAStatus.mockRestore();
+            channelBAccess.mockRestore();
         }
     });
 
