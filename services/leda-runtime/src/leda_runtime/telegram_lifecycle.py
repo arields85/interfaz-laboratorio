@@ -20,6 +20,15 @@ LEGACY_PAIRED_SCHEMA_VERSION = 2
 CHAT_STATUSES = frozenset({"pending", "approved", "rejected", "revoked"})
 DECISION_STATUSES = frozenset({"approved", "rejected", "revoked"})
 CHAT_RECORD_KEYS = frozenset({"status", "displayName", "username", "requestedAt", "decidedAt"})
+# Admin decisions: (current status, new status). A pending chat is decided once; a decided chat
+# can later be revoked (approved only) or approved again (rejected or revoked).
+ACCESS_TRANSITIONS = frozenset({
+    ("pending", "approved"),
+    ("pending", "rejected"),
+    ("approved", "revoked"),
+    ("rejected", "approved"),
+    ("revoked", "approved"),
+})
 ACCESS_REQUEST_ADDED = "added"
 ACCESS_REQUEST_EXISTS = "exists"
 ACCESS_REQUEST_FULL = "full"
@@ -31,6 +40,14 @@ class TelegramStateUnavailable(RuntimeError):
 
 
 class TelegramLifecycleError(RuntimeError):
+    pass
+
+
+class TelegramChatNotFound(LookupError):
+    pass
+
+
+class TelegramInvalidTransition(ValueError):
     pass
 
 
@@ -293,6 +310,28 @@ class TelegramStateRepository:
             return True
 
         return self._update_when_changed(mutate)
+
+    def apply_decision(self, bot_id: int, chat_id: int, status: str, *, now: str | None = None) -> dict[str, Any]:
+        """Apply one admin decision in a single locked step and return the updated chat record.
+
+        Only the transitions in ``ACCESS_TRANSITIONS`` are accepted; anything else raises
+        ``TelegramInvalidTransition`` and an unknown chat raises ``TelegramChatNotFound``,
+        in both cases without writing.
+        """
+        if status not in DECISION_STATUSES:
+            raise ValueError(status)
+        decided_at = now if now is not None else _utc_now()
+
+        def mutate(state: dict[str, Any]) -> dict[str, Any]:
+            chat = self._bot_record(state, bot_id)["chats"].get(str(chat_id))
+            if chat is None:
+                raise TelegramChatNotFound(chat_id)
+            if (chat["status"], status) not in ACCESS_TRANSITIONS:
+                raise TelegramInvalidTransition(f"{chat['status']}->{status}")
+            chat.update(status=status, decidedAt=decided_at)
+            return {"chatId": chat_id, **chat}
+
+        return self.update(mutate)
 
     def set_offset(self, bot_id: int, offset: int | None) -> None:
         self.update(lambda state: self._bot_record(state, bot_id).update(nextUpdateOffset=offset))

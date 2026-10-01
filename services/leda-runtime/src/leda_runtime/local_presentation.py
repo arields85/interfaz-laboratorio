@@ -48,6 +48,7 @@ from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
+from .channel_b_access import ChannelBAccess
 from .channel_b_admission import AdmissionAuditLog, ChatMessageLimiter, MessageVerdict
 from .telegram_lifecycle import (
     ACCESS_REQUEST_ADDED,
@@ -700,6 +701,7 @@ class TelegramLocalBot:
         # optional redacted audit log of admission events.
         self.rate_limiter = rate_limiter if rate_limiter is not None else ChatMessageLimiter()
         self.audit_log = audit_log
+        self._send_lock = threading.Lock()
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         # B1: both optional -- a bot built without them (e.g. build_telegram_
         # bot's legacy standalone path) simply never requests a Channel B
@@ -807,7 +809,10 @@ class TelegramLocalBot:
     def send_message(self, chat_id, text):
         if self.stop_event.is_set():
             raise RuntimeError("TELEGRAM_UPDATE_CANCELLED")
-        self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
+        # The poll thread and the admin HTTP thread (approval notice) both send: one send at a
+        # time keeps the shared requests session out of concurrent use for outgoing messages.
+        with self._send_lock:
+            self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
 
     def _send_chat_action(self, chat_id, action):
         self._call("sendChatAction", timeout=5, data={"chat_id": chat_id, "action": action})
@@ -1380,10 +1385,11 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             paths.root,
             permissions.verify,
         )
+        # One audit log shared by the bot (requests) and the admin routes (decisions).
+        admission_audit = AdmissionAuditLog(paths.admission_audit)
         if telegram_bot is None and telegram_manager is None:
             resolver = TelegramCredentialResolver(os.environ, lambda: credentials)
             state_store = TelegramStateRepository(paths.chat_state)
-            admission_audit = AdmissionAuditLog(paths.admission_audit)
             telegram_manager = TelegramLifecycleManager(
                 telegram_configuration,
                 resolver,
@@ -1575,6 +1581,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             credential_service=credentials,
             telegram_manager=telegram_manager,
             channel_a_manager=channel_a_manager,
+            channel_b_access=ChannelBAccess(lambda: getattr(telegram_manager, "bot", None), admission_audit),
             public_origin=os.environ.get("LEDA_PUBLIC_ORIGIN"),
             gemini_verification_service=gemini_verification_service,
             telegram_verification_service=telegram_verification_service,

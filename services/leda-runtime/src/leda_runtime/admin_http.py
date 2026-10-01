@@ -25,7 +25,13 @@ from .channel_a_manager import ChannelAManagerError
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
 from .gemini_credentials import GEMINI_VERIFY_MODEL, GeminiVerificationInProgress
 from .hmi_config_store import HmiConfigInvalid, HmiConfigTooLarge, HmiConfigUnavailable
-from .telegram_lifecycle import TelegramLifecycleError
+from .channel_b_access import ACCESS_DECISIONS, ChannelBAccessUnavailable
+from .telegram_lifecycle import (
+    TelegramChatNotFound,
+    TelegramInvalidTransition,
+    TelegramLifecycleError,
+    TelegramStateUnavailable,
+)
 from .telegram_verification import TelegramTokenVerificationInProgress
 
 
@@ -88,6 +94,25 @@ def project_admin_telegram_status(status: dict) -> dict:
     it. Copying keeps the manager-owned status object untouched.
     """
     return {field: status[field] for field in ADMIN_TELEGRAM_STATUS_FIELDS}
+
+
+# Channel B access list (self-registration with admin approval). Frozen wire contract mirrored by
+# the HMI: the list answers {"ok", "chats": [...]} and a decision {"ok", "chat", "noticeSent"}.
+CHANNEL_B_ACCESS_ROUTE = "/api/leda/admin/channel-b/access"
+CHANNEL_B_ACCESS_UNAVAILABLE = "CHANNEL_B_ACCESS_UNAVAILABLE"
+# A Telegram chat id is a signed 64-bit integer: at most 19 digits plus an optional sign.
+MAX_CHAT_ID_CHARACTERS = 20
+
+
+def parse_chat_id(raw: str) -> int | None:
+    """Accept only the canonical decimal form of an integer chat id; anything else is malformed."""
+    if len(raw) > MAX_CHAT_ID_CHARACTERS:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if str(value) == raw else None
 
 
 # Frozen admin Channel A wire contract: exactly ten status keys (T15 adds
@@ -208,8 +233,10 @@ class AdminHttpBoundary:
         telegram_verification_service=None,
         channel_a_verification_service=None,
         hmi_config_store=None,
+        channel_b_access=None,
     ):
         self.auth_service = auth_service
+        self.channel_b_access = channel_b_access
         self.hmi_config_store = hmi_config_store
         self.credential_service = credential_service
         self.telegram_manager = telegram_manager
@@ -929,6 +956,65 @@ class AdminHttpBoundary:
             response = jsonify({"ok": True, "channelA": project_admin_channel_a_status(status)})
             response.headers["Cache-Control"] = "no-store"
             return response
+
+        @app.get(CHANNEL_B_ACCESS_ROUTE)
+        def admin_channel_b_access_list():
+            """Authenticated read of the Channel B access list: pending requests first."""
+            rejected = self._allow(require_origin=False)
+            if rejected:
+                return rejected
+            _, rejected = self._authorized_session(require_csrf=False)
+            if rejected:
+                return rejected
+            return self._channel_b_access_response(lambda access: {"chats": access.list_chats()})
+
+        def channel_b_access_decision(decision: str):
+            def handler(chat_id: str):
+                """Approve, reject or revoke one chat: the same origin, session and CSRF checks as the
+                credential writes. It changes who may use the assistant, never anything on the plant."""
+                rejected = self._allow(require_origin=True)
+                if rejected:
+                    return rejected
+                _, rejected = self._authorized_session(require_csrf=True)
+                if rejected:
+                    return rejected
+                parsed = parse_chat_id(chat_id)
+                if parsed is None:
+                    return self._error("INVALID_CHAT_ID", 400)
+
+                def operation(access):
+                    chat, notice_sent = access.decide(parsed, decision)
+                    return {"chat": chat, "noticeSent": notice_sent}
+
+                return self._channel_b_access_response(operation)
+
+            return handler
+
+        for decision in ACCESS_DECISIONS:
+            app.add_url_rule(
+                f"{CHANNEL_B_ACCESS_ROUTE}/<chat_id>/{decision}",
+                endpoint=f"admin_channel_b_access_{decision}",
+                view_func=channel_b_access_decision(decision),
+                methods=["POST"],
+            )
+
+    def _channel_b_access_response(self, operation):
+        """Run one Channel B access operation and map its closed failures to stable codes."""
+        if self.channel_b_access is None:
+            return self._error(CHANNEL_B_ACCESS_UNAVAILABLE, 503)
+        try:
+            payload = operation(self.channel_b_access)
+        except ChannelBAccessUnavailable:
+            return self._error(CHANNEL_B_ACCESS_UNAVAILABLE, 503)
+        except TelegramChatNotFound:
+            return self._error("CHANNEL_B_CHAT_NOT_FOUND", 404)
+        except TelegramInvalidTransition:
+            return self._error("CHANNEL_B_INVALID_TRANSITION", 409)
+        except TelegramStateUnavailable:
+            return self._error("TELEGRAM_STATE_UNAVAILABLE", 503)
+        response = jsonify({"ok": True, **payload})
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @staticmethod
     def _session_payload(session) -> dict:

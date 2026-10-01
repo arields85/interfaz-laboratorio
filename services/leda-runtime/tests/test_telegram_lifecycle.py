@@ -5,6 +5,8 @@ import os
 import sys
 import tempfile
 import threading
+import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -33,6 +35,8 @@ from leda_runtime.local_presentation import (
 from leda_runtime.telegram_config import TelegramConfig
 from leda_runtime.telegram_lifecycle import (
     STATE_SCHEMA_VERSION,
+    TelegramChatNotFound,
+    TelegramInvalidTransition,
     TelegramLifecycleError,
     TelegramLifecycleManager,
     TelegramStateRepository,
@@ -2176,6 +2180,36 @@ class TelegramStateRepositoryOperationsTests(unittest.TestCase):
         self.assertTrue(all(result == results[0] for result in results))
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), results[0])
 
+    def test_apply_decision_follows_the_transition_table_and_returns_the_updated_record(self):
+        allowed = [("pending", "approved"), ("pending", "rejected"), ("approved", "revoked"), ("rejected", "approved"), ("revoked", "approved")]
+        for current, target in allowed:
+            with self.subTest(current=current, target=target):
+                chat = pending_chat() if current == "pending" else approved_chat(status=current)
+                self.repository.write(v3_state({"7": chat}))
+                record = self.repository.apply_decision(123, 7, target, now="2026-10-02T00:00:00Z")
+                self.assertEqual(record, {"chatId": 7, **chat, "status": target, "decidedAt": "2026-10-02T00:00:00Z"})
+                self.assertEqual(self.repository.status_of(123, 7), target)
+
+    def test_apply_decision_refuses_every_other_transition_without_writing(self):
+        allowed = {("pending", "approved"), ("pending", "rejected"), ("approved", "revoked"), ("rejected", "approved"), ("revoked", "approved")}
+        for current in ("pending", "approved", "rejected", "revoked"):
+            for target in ("approved", "rejected", "revoked"):
+                if (current, target) in allowed:
+                    continue
+                with self.subTest(current=current, target=target):
+                    self.repository.write(v3_state({"7": pending_chat() if current == "pending" else approved_chat(status=current)}))
+                    before = self.path.read_text(encoding="utf-8")
+                    with self.assertRaises(TelegramInvalidTransition):
+                        self.repository.apply_decision(123, 7, target, now=STAMP)
+                    self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_apply_decision_on_an_unknown_chat_or_target_fails_closed(self):
+        with self.assertRaises(TelegramChatNotFound):
+            self.repository.apply_decision(123, 99, "approved", now=STAMP)
+        self.repository.add_pending(123, 7, "Ana", None, now=STAMP)
+        with self.assertRaises(ValueError):
+            self.repository.apply_decision(123, 7, "pending", now=STAMP)
+
     def test_writes_are_atomic_and_leave_no_temporary_file(self):
         self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
         self.assertEqual(sorted(path.name for path in self.path.parent.iterdir()), ["chat-state.json"])
@@ -2445,6 +2479,30 @@ class ChannelBAdmissionTests(unittest.TestCase):
             bot._handle_message(private_message(7, "/start"))
         self.assertIsNone(bot.state_store.status_of(123, 7))
         bot.send_message.assert_called_once_with(7, "En este momento no es posible registrar nuevas solicitudes. Intente más tarde.")
+
+    def test_sends_from_different_threads_never_overlap_on_the_shared_session(self):
+        bot = self.build_bot({"7": approved_chat(), "8": approved_chat()})
+        bot.send_message = types.MethodType(TelegramLocalBot.send_message, bot)
+        in_flight, peak, lock = [0], [0], threading.Lock()
+
+        def slow_call(_method, **_kwargs):
+            with lock:
+                in_flight[0] += 1
+                peak[0] = max(peak[0], in_flight[0])
+            time.sleep(0.02)
+            with lock:
+                in_flight[0] -= 1
+            return {"ok": True}
+
+        bot._call = slow_call
+        # The poll thread answers a message while the admin HTTP thread sends an approval notice.
+        threads = [threading.Thread(target=bot.send_message, args=(7, "a")) for _ in range(3)]
+        threads += [threading.Thread(target=bot.send_approval_notice, args=(8,)) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(peak[0], 1)
 
     def test_approval_notice_is_sent_only_to_a_currently_approved_chat(self):
         text = "Su acceso fue aprobado. Ya puede realizar sus consultas."
