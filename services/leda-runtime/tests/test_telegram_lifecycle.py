@@ -21,6 +21,7 @@ from leda_runtime.bot_identity_reservation import (
     BotIdentityReservationError,
     process_bot_identity_reservation,
 )
+from leda_runtime.channel_b_admission import ChatMessageLimiter
 from leda_runtime.hmi_sessions import HmiSessionRegistry
 from leda_runtime.local_presentation import (
     CHANNEL_B_VOICE_QUEUE_MAX_PENDING,
@@ -2121,9 +2122,74 @@ class TelegramStateRepositoryOperationsTests(unittest.TestCase):
         self.assertTrue(all(chat["status"] == "approved" for chat in record["chats"].values()))
         self.assertEqual(record["nextUpdateOffset"], 99)
 
+    def test_request_access_reports_added_exists_and_full_without_writing_when_refused(self):
+        self.assertEqual(self.repository.request_access(123, 1, "Ana", None, max_pending=2, now=STAMP), "added")
+        self.assertEqual(self.repository.request_access(123, 1, "Otro", None, max_pending=2, now=STAMP), "exists")
+        self.assertEqual(self.repository.request_access(123, 2, "Beto", "beto", max_pending=2, now=STAMP), "added")
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.repository.request_access(123, 3, "Cata", None, max_pending=2, now=STAMP), "full")
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+        self.assertIsNone(self.repository.status_of(123, 3))
+
+    def test_request_access_counts_only_pending_chats_against_the_cap(self):
+        self.repository.request_access(123, 1, "Ana", None, max_pending=1, now=STAMP)
+        self.repository.set_status(123, 1, "approved", now=STAMP)
+        self.assertEqual(self.repository.request_access(123, 2, "Beto", None, max_pending=1, now=STAMP), "added")
+
+    def test_concurrent_requests_never_exceed_the_pending_cap(self):
+        outcomes = []
+        barrier = threading.Barrier(12)
+
+        def worker(chat_id):
+            barrier.wait()
+            outcomes.append(self.repository.request_access(123, chat_id, "n", None, max_pending=5, now=STAMP))
+
+        threads = [threading.Thread(target=worker, args=(chat_id,)) for chat_id in range(12)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(outcomes.count("added"), 5)
+        self.assertEqual(outcomes.count("full"), 7)
+        self.assertEqual(len(self.repository.list_chats(123)), 5)
+
+    def test_concurrent_first_reads_of_a_v2_file_migrate_it_exactly_once(self):
+        self.path.write_text(
+            '{"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7, 8], "nextUpdateOffset": 3, "migrationActive": false}}}',
+            encoding="utf-8",
+        )
+        results = []
+        barrier = threading.Barrier(8)
+
+        def reader():
+            barrier.wait()
+            results.append(self.repository.read())
+
+        with patch.object(self.repository, "write", wraps=self.repository.write) as write:
+            threads = [threading.Thread(target=reader) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(write.call_count, 1)
+        self.assertEqual(len(results), 8)
+        self.assertTrue(all(result == results[0] for result in results))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), results[0])
+
     def test_writes_are_atomic_and_leave_no_temporary_file(self):
         self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP)
         self.assertEqual(sorted(path.name for path in self.path.parent.iterdir()), ["chat-state.json"])
+
+
+class FakeClock:
+    def __init__(self, now=1000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
 
 
 def private_message(chat_id, text="/start", *, first_name="Ana", last_name=None, username=None, **extra):
@@ -2139,11 +2205,11 @@ class ChannelBAdmissionTests(unittest.TestCase):
     def setUp(self):
         install_offline_dispatch_guard(self)
 
-    def build_bot(self, chats=None, *, offset=None, state_store=None, typing_enabled=False):
+    def build_bot(self, chats=None, *, offset=None, state_store=None, typing_enabled=False, **bot_options):
         state = v3_state(chats, offset=offset)
         bot = TelegramLocalBot(
             "secret-token", Mock(), state_store if state_store is not None else MemoryStateStore(state), Mock(),
-            reservation=BotIdentityReservation(), typing_enabled=typing_enabled,
+            reservation=BotIdentityReservation(), typing_enabled=typing_enabled, **bot_options,
         )
         bot._call = identity_transport(username="bot")
         bot.prepare()
@@ -2291,6 +2357,94 @@ class ChannelBAdmissionTests(unittest.TestCase):
             bot._handle_message(private_message(7, "/start"))
         bot.send_message.assert_not_called()
         self.assertIsNone(bot.state_store.status_of(123, 7))
+
+    def test_an_approved_chat_over_the_limit_gets_one_fixed_reply_and_no_further_work(self):
+        bot = self.build_bot({"7": approved_chat()}, typing_enabled=True, rate_limiter=ChatMessageLimiter(clock=FakeClock()))
+        bot.snapshot_store.read = Mock(return_value=None)
+        bot.session = Mock()
+        with patch.object(bot, "_typing") as typing, patch.object(bot, "_transcribe_voice_note") as transcribe:
+            for _ in range(10):
+                bot._handle_message(private_message(7, "/status"))
+            self.assertEqual(typing.call_count, 10)
+            bot.send_message.reset_mock()
+            typing.reset_mock()
+            bot._handle_message(private_message(7, "/status"))
+            bot._handle_message(private_message(7, "¿Cuál es el OEE?"))
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "voice": {"file_id": "f", "duration": 2}})
+        bot.send_message.assert_called_once_with(7, "Ha enviado demasiadas consultas seguidas. Espere un momento y vuelva a intentarlo.")
+        typing.assert_not_called()
+        transcribe.assert_not_called()
+        bot.session.get.assert_not_called()
+
+    def test_an_approved_chat_is_answered_again_after_the_window(self):
+        clock = FakeClock()
+        bot = self.build_bot({"7": approved_chat()}, rate_limiter=ChatMessageLimiter(clock=clock))
+        bot.snapshot_store.read = Mock(return_value=None)
+        for _ in range(11):
+            bot._handle_message(private_message(7, "/status"))
+        clock.advance(61)
+        bot.send_message.reset_mock()
+        bot._handle_message(private_message(7, "/status"))
+        self.assertIn("Leda está activa", bot.send_message.call_args.args[1])
+
+    def test_the_limit_also_caps_the_fixed_replies_for_chats_without_access_and_sends_nothing_extra(self):
+        cases = (
+            ("unknown", {}),
+            ("pending", {"7": pending_chat()}),
+            ("rejected", {"7": approved_chat(status="rejected")}),
+            ("revoked", {"7": approved_chat(status="revoked")}),
+        )
+        for label, chats in cases:
+            with self.subTest(label):
+                bot = self.build_bot(chats, rate_limiter=ChatMessageLimiter(clock=FakeClock()))
+                for _ in range(40):
+                    bot._handle_message(private_message(7, "hola"))
+                self.assertEqual(bot.send_message.call_count, 10)
+                self.assertNotIn(
+                    "Ha enviado demasiadas consultas seguidas. Espere un momento y vuelva a intentarlo.",
+                    [call.args[1] for call in bot.send_message.call_args_list],
+                )
+
+    def test_the_limit_is_per_chat(self):
+        bot = self.build_bot({"7": approved_chat(), "8": approved_chat()}, rate_limiter=ChatMessageLimiter(clock=FakeClock()))
+        bot.snapshot_store.read = Mock(return_value=None)
+        for _ in range(11):
+            bot._handle_message(private_message(7, "/status"))
+        bot.send_message.reset_mock()
+        bot._handle_message(private_message(8, "/status"))
+        self.assertIn("Leda está activa", bot.send_message.call_args.args[1])
+
+    def test_a_new_request_is_audited_without_any_personal_data(self):
+        audit = Mock()
+        bot = self.build_bot(audit_log=audit)
+        bot._handle_message(private_message(7, "/start", first_name="Ana", username="ana_p"))
+        audit.record.assert_called_once_with("requested", 123, 7, "telegram")
+
+    def test_a_refused_request_is_audited_and_a_repeat_start_is_not(self):
+        audit = Mock()
+        chats = {str(100 + index): pending_chat() for index in range(MAX_PENDING_ACCESS_REQUESTS)}
+        bot = self.build_bot(chats, audit_log=audit)
+        bot._handle_message(private_message(7, "/start"))
+        audit.record.assert_called_once_with("request_refused_full", 123, 7, "telegram")
+        audit.reset_mock()
+        bot._handle_message(private_message(100, "/start"))
+        audit.record.assert_not_called()
+
+    def test_an_audit_failure_never_breaks_the_request(self):
+        audit = Mock()
+        audit.record.side_effect = RuntimeError("disk gone")
+        bot = self.build_bot(audit_log=audit)
+        bot._handle_message(private_message(7, "/start"))
+        self.assertEqual(bot.state_store.status_of(123, 7), "pending")
+        bot.send_message.assert_called_once_with(7, "Su solicitud de acceso quedó registrada. Se le avisará cuando un administrador la apruebe.")
+
+    def test_the_pending_cap_is_enforced_by_the_locked_insert_not_by_a_stale_listing(self):
+        chats = {str(100 + index): pending_chat() for index in range(MAX_PENDING_ACCESS_REQUESTS)}
+        bot = self.build_bot(chats)
+        with patch.object(bot.state_store, "list_chats", return_value=[]):
+            bot._handle_message(private_message(7, "/start"))
+        self.assertIsNone(bot.state_store.status_of(123, 7))
+        bot.send_message.assert_called_once_with(7, "En este momento no es posible registrar nuevas solicitudes. Intente más tarde.")
 
     def test_approval_notice_is_sent_only_to_a_currently_approved_chat(self):
         text = "Su acceso fue aprobado. Ya puede realizar sus consultas."

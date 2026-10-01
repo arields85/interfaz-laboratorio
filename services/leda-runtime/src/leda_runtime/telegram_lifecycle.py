@@ -20,7 +20,10 @@ LEGACY_PAIRED_SCHEMA_VERSION = 2
 CHAT_STATUSES = frozenset({"pending", "approved", "rejected", "revoked"})
 DECISION_STATUSES = frozenset({"approved", "rejected", "revoked"})
 CHAT_RECORD_KEYS = frozenset({"status", "displayName", "username", "requestedAt", "decidedAt"})
-UTC_TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z")
+ACCESS_REQUEST_ADDED = "added"
+ACCESS_REQUEST_EXISTS = "exists"
+ACCESS_REQUEST_FULL = "full"
+UTC_TIMESTAMP_PATTERN =re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z")
 
 
 class TelegramStateUnavailable(RuntimeError):
@@ -185,6 +188,8 @@ class TelegramStateRepository:
                 if decoded.get("schemaVersion") == LEGACY_PAIRED_SCHEMA_VERSION:
                     # Persist the migration right away: the migrated records carry a
                     # timestamp, so leaving the file at v2 would stamp a new one on every read.
+                    # The whole read-migrate-write runs under the repository lock, so a concurrent
+                    # reader waits and then finds the v3 file: the migration is stamped once.
                     self.write(validated)
                 return validated
             except (UnicodeError, json.JSONDecodeError, TelegramStateUnavailable):
@@ -237,14 +242,29 @@ class TelegramStateRepository:
         chats = self._bot_record(self.read(), bot_id)["chats"]
         return [{"chatId": int(chat_id), **chat} for chat_id, chat in chats.items()]
 
-    def add_pending(self, bot_id: int, chat_id: int, display_name: str, username: str | None, *, now: str | None = None) -> bool:
-        """Record an access request; a chat that is already known is left untouched."""
-        requested_at = now if now is not None else _utc_now()
+    def request_access(
+        self,
+        bot_id: int,
+        chat_id: int,
+        display_name: str,
+        username: str | None,
+        *,
+        max_pending: int | None = None,
+        now: str | None = None,
+    ) -> str:
+        """Record an access request in one locked step: the cap check and the insert cannot interleave.
 
-        def mutate(state: dict[str, Any]) -> bool:
+        Returns ``ACCESS_REQUEST_ADDED``, ``ACCESS_REQUEST_EXISTS`` (the chat is already known and left
+        untouched) or ``ACCESS_REQUEST_FULL`` (``max_pending`` requests already wait; nothing is written).
+        """
+        requested_at = now if now is not None else _utc_now()
+        with self.lock:
+            state = self.read()
             chats = self._bot_record(state, bot_id)["chats"]
             if str(chat_id) in chats:
-                return False
+                return ACCESS_REQUEST_EXISTS
+            if max_pending is not None and sum(1 for chat in chats.values() if chat["status"] == "pending") >= max_pending:
+                return ACCESS_REQUEST_FULL
             chats[str(chat_id)] = {
                 "status": "pending",
                 "displayName": display_name,
@@ -252,9 +272,12 @@ class TelegramStateRepository:
                 "requestedAt": requested_at,
                 "decidedAt": None,
             }
-            return True
+            self.write(state)
+            return ACCESS_REQUEST_ADDED
 
-        return self._update_when_changed(mutate)
+    def add_pending(self, bot_id: int, chat_id: int, display_name: str, username: str | None, *, now: str | None = None) -> bool:
+        """Record an access request without a cap; a chat that is already known is left untouched."""
+        return self.request_access(bot_id, chat_id, display_name, username, now=now) == ACCESS_REQUEST_ADDED
 
     def set_status(self, bot_id: int, chat_id: int, status: str, *, now: str | None = None) -> bool:
         """Record an admin decision; returns False when the chat is unknown."""

@@ -29,6 +29,7 @@ class RuntimePaths:
     credential_database: Path
     channel_a_configuration: Path
     hmi_config_database: Path
+    admission_audit: Path
 
     @property
     def mutable_files(self) -> tuple[Path, ...]:
@@ -52,6 +53,7 @@ def runtime_paths() -> RuntimePaths:
         credential_database=root / "credentials" / "provider-credentials.sqlite3",
         channel_a_configuration=root / "leda_channel_a_config.json",
         hmi_config_database=root / "hmi-config" / "hmi-config.sqlite3",
+        admission_audit=root / "leda_channel_b_admission_audit.jsonl",
     )
 
 

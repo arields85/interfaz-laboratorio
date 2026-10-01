@@ -48,7 +48,15 @@ from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
-from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, project_telegram_diagnostic
+from .channel_b_admission import AdmissionAuditLog, ChatMessageLimiter, MessageVerdict
+from .telegram_lifecycle import (
+    ACCESS_REQUEST_ADDED,
+    ACCESS_REQUEST_FULL,
+    TelegramLifecycleManager,
+    TelegramStateRepository,
+    TelegramStateUnavailable,
+    project_telegram_diagnostic,
+)
 from .telegram_verification import TelegramTokenVerificationService
 from .voice_events import (
     VOICE_EVENT_KIND_CANCEL,
@@ -150,6 +158,7 @@ ACCESS_REQUEST_HINT_REPLY = "Para solicitar acceso, envíe /start."
 ACCESS_PENDING_REPLY = "Su solicitud de acceso está pendiente de aprobación."
 ACCESS_DENIED_REPLY = "No tiene acceso a este asistente."
 ACCESS_APPROVED_REPLY = "Su acceso fue aprobado. Ya puede realizar sus consultas."
+MESSAGE_LIMIT_REPLY = "Ha enviado demasiadas consultas seguidas. Espere un momento y vuelva a intentarlo."
 
 # PW-013: bounds the presentation -> voice process call for a voice-note
 # QUESTION's transcription (both channels). Unlike CHANNEL_B_VOICE_REPLY_
@@ -685,8 +694,12 @@ class TelegramLocalBot:
     never overwrite a live lease.
     """
 
-    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None, typing_enabled=False):
+    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None, typing_enabled=False, rate_limiter=None, audit_log=None):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
+        # Channel B admission safeguards: a per-chat message limit (always on) and an
+        # optional redacted audit log of admission events.
+        self.rate_limiter = rate_limiter if rate_limiter is not None else ChatMessageLimiter()
+        self.audit_log = audit_log
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         # B1: both optional -- a bot built without them (e.g. build_telegram_
         # bot's legacy standalone path) simply never requests a Channel B
@@ -959,6 +972,15 @@ class TelegramLocalBot:
         username = source.get("username") if isinstance(source.get("username"), str) and source.get("username") else None
         return " ".join(part for part in parts if part), username
 
+    def _audit(self, event, chat_id):
+        """Best-effort admission audit: a failing log must never break the bot."""
+        if self.audit_log is None:
+            return
+        try:
+            self.audit_log.record(event, self.bot_id, chat_id, "telegram")
+        except Exception as error:
+            _logger.warning("Leda Channel B admission audit failed: reason=%s", type(error).__name__)
+
     def _reply_to_unapproved(self, chat_id, status, message, chat, *, is_start):
         """Fixed replies for a chat without access; nothing else is ever done for it."""
         if status == "pending":
@@ -967,12 +989,19 @@ class TelegramLocalBot:
             self.send_message(chat_id, ACCESS_DENIED_REPLY)
         elif not is_start:
             self.send_message(chat_id, ACCESS_REQUEST_HINT_REPLY)
-        elif sum(1 for known in self.state_store.list_chats(self.bot_id) if known["status"] == "pending") >= MAX_PENDING_ACCESS_REQUESTS:
-            self.send_message(chat_id, ACCESS_REQUESTS_FULL_REPLY)
         else:
             display_name, username = self._requester_identity(message, chat)
-            self.state_store.add_pending(self.bot_id, chat_id, display_name, username)
-            self.send_message(chat_id, ACCESS_REQUESTED_REPLY)
+            # One locked repository step: the cap check and the insert cannot interleave.
+            outcome = self.state_store.request_access(
+                self.bot_id, chat_id, display_name, username, max_pending=MAX_PENDING_ACCESS_REQUESTS
+            )
+            if outcome == ACCESS_REQUEST_ADDED:
+                self._audit("requested", chat_id)
+                self.send_message(chat_id, ACCESS_REQUESTED_REPLY)
+            elif outcome == ACCESS_REQUEST_FULL:
+                self._audit("request_refused_full", chat_id)
+                self.send_message(chat_id, ACCESS_REQUESTS_FULL_REPLY)
+            # ACCESS_REQUEST_EXISTS: the chat was decided after this message was read; its next message gets the right reply.
 
     def send_approval_notice(self, chat_id) -> bool:
         """Tell a chat its access was approved; only ever sent while the chat is currently approved."""
@@ -988,6 +1017,12 @@ class TelegramLocalBot:
         if chat.get("type") != "private" or isinstance(chat_id, bool) or not isinstance(chat_id, int) or not (has_text or has_voice): return
         command = normalize(text.split()[0]) if has_text and text.strip() else ""
         is_start = command.startswith("/start")
+        # Per-chat limit, before any other work: it caps the fixed replies of chats without access too.
+        verdict = self.rate_limiter.admit(chat_id)
+        if verdict is not MessageVerdict.ALLOWED:
+            if verdict is MessageVerdict.LIMITED_NOTIFY and self.state_store.status_of(self.bot_id, chat_id) == "approved":
+                self.send_message(chat_id, MESSAGE_LIMIT_REPLY)
+            return
         if is_start and migration_active:
             self.send_message(chat_id, "Envíe /start nuevamente cuando finalice la migración."); return
         # Read on every message, never cached: an admin revocation must apply to the very next one.
@@ -1348,6 +1383,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
         if telegram_bot is None and telegram_manager is None:
             resolver = TelegramCredentialResolver(os.environ, lambda: credentials)
             state_store = TelegramStateRepository(paths.chat_state)
+            admission_audit = AdmissionAuditLog(paths.admission_audit)
             telegram_manager = TelegramLifecycleManager(
                 telegram_configuration,
                 resolver,
@@ -1355,7 +1391,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 lambda token: TelegramLocalBot(
                     token, snapshot_store, state_store, voice_events, reservation=identity_reservation,
                     voice_url=voice_url, local_http=local_http, session_registry=session_registry,
-                    typing_enabled=True,
+                    typing_enabled=True, audit_log=admission_audit,
                 ),
             )
 
