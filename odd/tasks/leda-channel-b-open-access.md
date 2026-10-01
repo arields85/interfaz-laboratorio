@@ -20,6 +20,8 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - Admission model: **self-registration with admin approval**. Fully open admission and a hand-maintained allowlist were rejected.
 - Scope: **admission only**. Every approved person sees the same data the bot shows today: the snapshot of the most recently updated HMI session (`hmi_sessions.py:245`). A per-channel data source stays in PW-003. This is recorded in the master document as a known limitation.
 
+- Where requests are managed (2026-10-01): **both** in Configuración general → Leda (the full list under the Channel B credential) **and** in the topbar bell, which becomes the admin notification entry point. Pending Channel B requests are its first notification type.
+
 ## Defaults taken (the user can override)
 
 - A private chat that sends `/start` and is not yet known becomes a **pending** request. The bot replies that the request is waiting for approval.
@@ -48,6 +50,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - [ ] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
 - [ ] B4 — Runtime: admin HTTP routes to list, approve, reject and revoke chats. Route: delegated.
 - [ ] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
+- [ ] B5b — HMI: enable the topbar bell (`Topbar.tsx:198-206`, today a disabled placeholder) as a notification panel that lists pending Channel B requests, with approve and reject actions and a pending-count badge. It is only active with an admin session (`shouldShowAdminActions`). Other viewers keep today's disabled bell, so requester names are never shown to them. It polls only while the admin session is active. Route: delegated.
 - [ ] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
 - [ ] B7 — Live check with the real bot (request, approve, use, revoke) and native review of the work-unit commits.
 
