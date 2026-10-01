@@ -95,9 +95,23 @@ class LegacyMigrationTestCase(unittest.TestCase):
         self.write(self.legacy_state / "run" / "process-manifest.json", b"stale-manifest")
 
     def migrate(self, function: str = "Invoke-LedaLegacyLocalMigration", env: dict[str, str | None] | None = None) -> subprocess.CompletedProcess:
-        body = f". '{ENVIRONMENT_LIBRARY}'\n{function} -LocalAppData '{self.local_app_data}' | Out-Null\n"
-        result = run_powershell(body, {"LEDA_RUNTIME_STATE_DIR": None, **(env or {})})
+        result = self.run_migration(function, env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    def run_migration(
+        self,
+        function: str = "Invoke-LedaLegacyLocalMigration",
+        env: dict[str, str | None] | None = None,
+        prelude: str = "",
+    ) -> subprocess.CompletedProcess:
+        """Runs the migration; ``prelude`` redefines library functions to inject failures."""
+        body = f". '{ENVIRONMENT_LIBRARY}'\n{prelude}\n{function} -LocalAppData '{self.local_app_data}' | Out-Null\n"
+        return run_powershell(body, {"LEDA_RUNTIME_STATE_DIR": None, **(env or {})})
+
+    def migrate_failing(self, prelude: str) -> subprocess.CompletedProcess:
+        result = self.run_migration(prelude=prelude)
+        self.assertNotEqual(result.returncode, 0, "the migration must fail closed: " + result.stdout + result.stderr)
         return result
 
 
@@ -195,6 +209,33 @@ class LegacyStateMigrationTests(LegacyMigrationTestCase):
         self.assertEqual((self.new_state / "auth" / "admin.sqlite3").read_bytes(), b"auth-db")
         self.assertEqual((self.new_state / "credentials" / "provider-credentials.sqlite3").read_bytes(), b"cipher-text")
 
+    def test_fails_closed_when_a_file_access_rule_cannot_be_copied(self) -> None:
+        self.seed_legacy_state()
+
+        result = self.migrate_failing("function Copy-LedaAccessRules { param($Source, $Destination) if (-not [IO.Directory]::Exists($Destination)) { throw 'injected access rule failure' } }")
+
+        self.assertFalse(self.new_state.exists())
+        self.assertFalse((self.core / "Leda.migrating").exists())
+        self.assertIn("injected access rule failure", result.stdout + result.stderr)
+        self.assertEqual((self.legacy_state / "credentials" / "provider-credentials.sqlite3").read_bytes(), b"cipher-text")
+
+    def test_fails_closed_when_a_directory_access_rule_cannot_be_copied(self) -> None:
+        self.seed_legacy_state()
+
+        result = self.migrate_failing("function Copy-LedaAccessRules { param($Source, $Destination) if ([IO.Directory]::Exists($Destination)) { throw 'injected access rule failure' } }")
+
+        self.assertFalse(self.new_state.exists())
+        self.assertFalse((self.core / "Leda.migrating").exists())
+        self.assertIn("Leda.migrating", result.stdout + result.stderr)
+
+    def test_a_failed_migration_is_retried_on_the_next_run(self) -> None:
+        self.seed_legacy_state()
+        self.migrate_failing("function Copy-LedaAccessRules { param($Source, $Destination) throw 'injected access rule failure' }")
+
+        self.migrate()
+
+        self.assertEqual((self.new_state / "auth" / "admin.sqlite3").read_bytes(), b"auth-db")
+
 
 class LegacyCredentialKeyMigrationTests(LegacyMigrationTestCase):
     KEY_BYTES = bytes(range(32))
@@ -241,6 +282,47 @@ class LegacyCredentialKeyMigrationTests(LegacyMigrationTestCase):
         self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
 
         self.migrate(env={"LEDA_RUNTIME_STATE_DIR": str(self.local_app_data / "custom-state")})
+
+        self.assertEqual((self.new_key_dir / "master.key").read_bytes(), self.KEY_BYTES)
+
+    def test_leaves_no_staging_directory_after_a_successful_migration(self) -> None:
+        self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
+
+        self.migrate()
+
+        self.assertFalse((self.core / "LedaCredentialKey.migrating").exists())
+
+    def test_fails_closed_when_the_key_access_rules_cannot_be_copied(self) -> None:
+        self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
+
+        result = self.migrate_failing("function Copy-LedaAccessRules { param($Source, $Destination) throw 'injected access rule failure' }")
+
+        self.assertFalse(self.new_key_dir.exists())
+        self.assertFalse((self.core / "LedaCredentialKey.migrating").exists())
+        self.assertIn("injected access rule failure", result.stdout + result.stderr)
+
+    def test_fails_closed_when_only_the_key_file_access_rules_cannot_be_copied(self) -> None:
+        self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
+
+        self.migrate_failing("function Copy-LedaAccessRules { param($Source, $Destination) if (-not [IO.Directory]::Exists($Destination)) { throw 'injected access rule failure' } }")
+
+        self.assertFalse(self.new_key_dir.exists())
+        self.assertFalse((self.core / "LedaCredentialKey.migrating").exists())
+
+    def test_replaces_a_stale_key_staging_directory_from_an_interrupted_run(self) -> None:
+        self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
+        self.write(self.core / "LedaCredentialKey.migrating" / "master.key", b"truncated")
+
+        self.migrate()
+
+        self.assertEqual((self.new_key_dir / "master.key").read_bytes(), self.KEY_BYTES)
+        self.assertFalse((self.core / "LedaCredentialKey.migrating").exists())
+
+    def test_a_failed_key_migration_is_retried_on_the_next_run(self) -> None:
+        self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
+        self.migrate_failing("function Copy-LedaAccessRules { param($Source, $Destination) throw 'injected access rule failure' }")
+
+        self.migrate()
 
         self.assertEqual((self.new_key_dir / "master.key").read_bytes(), self.KEY_BYTES)
 

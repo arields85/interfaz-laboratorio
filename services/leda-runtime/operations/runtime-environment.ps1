@@ -483,6 +483,29 @@ function Copy-LedaAccessRules {
     $destinationItem.SetAccessControl($acl)
 }
 
+function Copy-LedaAccessRulesOrThrow {
+    <#
+    .SYNOPSIS
+        Copy-LedaAccessRules that fails closed: an error names the destination and is rethrown.
+
+    .DESCRIPTION
+        A credential copy that silently kept the inherited, more permissive rules would be worse
+        than a launcher that stops, so the migrations never continue past a failed copy.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    try {
+        Copy-LedaAccessRules -Source $Source -Destination $Destination
+    }
+    catch {
+        throw ("Could not preserve the access rules of '{0}' (copied from '{1}'): {2}" -f $Destination, $Source, $_.Exception.Message)
+    }
+}
+
 function Copy-LedaDirectoryTree {
     <#
     .SYNOPSIS
@@ -512,23 +535,13 @@ function Copy-LedaDirectoryTree {
             }
             else {
                 [IO.File]::Copy($child, $target, $false)
-                try {
-                    Copy-LedaAccessRules -Source $child -Destination $target
-                }
-                catch {
-                    Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $target, $_.Exception.Message)
-                }
+                Copy-LedaAccessRulesOrThrow -Source $child -Destination $target
             }
         }
     }
     # Directory rules last, so a protected (non-inheriting) directory never blocks the copy above.
     foreach ($pair in $directories) {
-        try {
-            Copy-LedaAccessRules -Source $pair.Source -Destination $pair.Destination
-        }
-        catch {
-            Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $pair.Destination, $_.Exception.Message)
-        }
+        Copy-LedaAccessRulesOrThrow -Source $pair.Source -Destination $pair.Destination
     }
 }
 
@@ -539,7 +552,8 @@ function Invoke-LedaLegacyStateMigration {
 
     .DESCRIPTION
         The copy is staged in a sibling directory and renamed into place, so an interrupted run
-        never leaves a half-populated Leda directory. The ephemeral run directory (process
+        never leaves a half-populated Leda directory. Failing to copy any access rule aborts the
+        migration (fail closed): the staging directory is removed and the error is thrown. The ephemeral run directory (process
         manifest and locks, which name the old modules) is not copied, and files whose names
         contain the old assistant name are renamed inside the copy.
     #>
@@ -557,16 +571,26 @@ function Invoke-LedaLegacyStateMigration {
     if (Test-Path -LiteralPath $staging) {
         Remove-Item -LiteralPath $staging -Recurse -Force
     }
-    Copy-LedaDirectoryTree -Source $legacy -Destination $staging -ExcludeTopLevelName @('run')
     $renamed = 0
-    foreach ($item in @(Get-ChildItem -LiteralPath $staging -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending)) {
-        $newName = ConvertTo-LedaName -Name $item.Name
-        if ($newName -ceq $item.Name) { continue }
-        if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $item.FullName) $newName)) { continue }
-        Rename-Item -LiteralPath $item.FullName -NewName $newName
-        $renamed++
+    try {
+        Copy-LedaDirectoryTree -Source $legacy -Destination $staging -ExcludeTopLevelName @('run')
+        foreach ($item in @(Get-ChildItem -LiteralPath $staging -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending)) {
+            $newName = ConvertTo-LedaName -Name $item.Name
+            if ($newName -ceq $item.Name) { continue }
+            if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $item.FullName) $newName)) { continue }
+            Rename-Item -LiteralPath $item.FullName -NewName $newName
+            $renamed++
+        }
+        [IO.Directory]::Move($staging, $target)
     }
-    [IO.Directory]::Move($staging, $target)
+    catch {
+        # Fail closed: never leave a half-built or unprotected state directory behind.
+        $failure = $_
+        if (Test-Path -LiteralPath $staging) {
+            try { Remove-Item -LiteralPath $staging -Recurse -Force } catch { Write-Warning ("Could not remove the staging directory '{0}': {1}" -f $staging, $_.Exception.Message) }
+        }
+        throw $failure
+    }
     Write-Host "Migrated the legacy local state '$legacy' to '$target' ($renamed file name(s) renamed). The old directory was left untouched."
     return $true
 }
@@ -577,8 +601,10 @@ function Invoke-LedaLegacyCredentialKeyMigration {
         Copies the credential master key from ...\PrismaCredentialKey to ...\LedaCredentialKey.
 
     .DESCRIPTION
-        Only when the new master key does not exist yet. The key is copied byte for byte with its
-        access rules; the old key is left in place.
+        Only when the new master key does not exist yet. The key is staged in a sibling directory
+        that gets the old key directory's protected rules first, copied byte for byte (verified),
+        and renamed into place, so the final path never holds a truncated or unprotected key. Any
+        failure removes the staging directory and throws; the old key is left in place.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$LocalAppData)
@@ -591,15 +617,35 @@ function Invoke-LedaLegacyCredentialKeyMigration {
         return $false
     }
 
-    New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
-    [IO.File]::Copy($legacyKey, $targetKey, $false)
+    $staging = Join-Path $core 'LedaCredentialKey.migrating'
+    $stagedKey = Join-Path $staging 'master.key'
+    if (Test-Path -LiteralPath $staging) {
+        Remove-Item -LiteralPath $staging -Recurse -Force
+    }
+    if ((Test-Path -LiteralPath $targetDirectory -PathType Container) -and -not @(Get-ChildItem -LiteralPath $targetDirectory -Force).Count) {
+        # An empty directory left by an interrupted run would block the rename into place.
+        Remove-Item -LiteralPath $targetDirectory -Force
+    }
     try {
-        # The directory first: the key file inherits the protected rules from it.
-        Copy-LedaAccessRules -Source (Split-Path -Parent $legacyKey) -Destination $targetDirectory
-        Copy-LedaAccessRules -Source $legacyKey -Destination $targetKey
+        New-Item -ItemType Directory -Path $staging -Force | Out-Null
+        # The directory rules first, so the key is never written into a more permissive location.
+        Copy-LedaAccessRulesOrThrow -Source (Split-Path -Parent $legacyKey) -Destination $staging
+        [IO.File]::Copy($legacyKey, $stagedKey, $false)
+        Copy-LedaAccessRulesOrThrow -Source $legacyKey -Destination $stagedKey
+        $sourceBytes = [IO.File]::ReadAllBytes($legacyKey)
+        $copiedBytes = [IO.File]::ReadAllBytes($stagedKey)
+        if ($sourceBytes.Length -ne $copiedBytes.Length -or -not [Linq.Enumerable]::SequenceEqual([byte[]]$sourceBytes, [byte[]]$copiedBytes)) {
+            throw "The copied credential master key '$stagedKey' does not match '$legacyKey'."
+        }
+        [IO.Directory]::Move($staging, $targetDirectory)
     }
     catch {
-        Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $targetKey, $_.Exception.Message)
+        # Fail closed: never leave a key with inherited rules or a truncated key at the final path.
+        $failure = $_
+        if (Test-Path -LiteralPath $staging) {
+            try { Remove-Item -LiteralPath $staging -Recurse -Force } catch { Write-Warning ("Could not remove the staging directory '{0}': {1}" -f $staging, $_.Exception.Message) }
+        }
+        throw $failure
     }
     Write-Host "Migrated the legacy credential master key to '$targetKey'. The old key was left untouched."
     return $true
