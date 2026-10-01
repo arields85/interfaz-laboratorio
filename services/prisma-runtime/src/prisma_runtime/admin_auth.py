@@ -11,6 +11,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Callable
 
@@ -21,6 +22,8 @@ FAILURE_WINDOW_SECONDS = 15 * 60
 ACCOUNT_FAILURE_LIMIT = 5
 SOURCE_FAILURE_LIMIT = 20
 MAX_FAILURE_ROWS = 100
+# Markers left for displaced sessions (see replaced_sessions); bounded so the table cannot grow.
+MAX_REPLACED_ROWS = 64
 _HASH_SLOT = threading.BoundedSemaphore(1)
 
 
@@ -38,6 +41,16 @@ class LoginRateLimited(RuntimeError):
 
 class PasswordPolicyError(ValueError):
     pass
+
+
+class AdminSessionActiveElsewhere(RuntimeError):
+    """Raised after a verified password when another live session exists and no takeover was requested."""
+
+
+class SessionCreation(Enum):
+    CREATED = "created"
+    STALE_CREDENTIAL = "stale_credential"
+    ACTIVE_ELSEWHERE = "active_elsewhere"
 
 
 @dataclass(frozen=True)
@@ -178,6 +191,11 @@ class AdminAuthRepository:
                         last_seen_at REAL NOT NULL,
                         absolute_expires_at REAL NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS replaced_sessions (
+                        session_id_hash TEXT PRIMARY KEY,
+                        replaced_at REAL NOT NULL,
+                        expires_at REAL NOT NULL
+                    );
                     CREATE TABLE IF NOT EXISTS login_failures (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         account_key TEXT NOT NULL,
@@ -268,22 +286,56 @@ class AdminAuthRepository:
 
         return self._translate_database_error(query)
 
+    @staticmethod
+    def _ensure_replaced_table(connection: sqlite3.Connection) -> None:
+        # Databases provisioned before the single-session rule have no marker table and keep
+        # schema version 1; the table is created on first use instead of bumping the version.
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS replaced_sessions ("
+            "session_id_hash TEXT PRIMARY KEY, replaced_at REAL NOT NULL, expires_at REAL NOT NULL)"
+        )
+
     def create_session_if_version(
         self,
         credential_version: int,
         session: AuthSession,
         source: str,
-    ) -> bool:
-        def write() -> bool:
+        *,
+        takeover: bool = False,
+        idle_seconds: int | None = None,
+    ) -> SessionCreation:
+        def write() -> SessionCreation:
             with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute("SELECT credential_version FROM administrator WHERE singleton = 1").fetchone()
                 if row is None or row[0] != credential_version:
-                    return False
+                    return SessionCreation.STALE_CREDENTIAL
+                now = session.created_at
                 connection.execute(
                     "DELETE FROM login_failures WHERE account_key = ? AND source = ?",
                     (digest_token(session.username.strip().casefold()), source),
                 )
+                live = [
+                    (other["session_id_hash"], other["absolute_expires_at"])
+                    for other in connection.execute("SELECT * FROM admin_sessions").fetchall()
+                    if now < other["absolute_expires_at"]
+                    and (idle_seconds is None or now - other["last_seen_at"] < idle_seconds)
+                ]
+                if live and not takeover:
+                    return SessionCreation.ACTIVE_ELSEWHERE
+                if live:
+                    self._ensure_replaced_table(connection)
+                    connection.execute("DELETE FROM replaced_sessions WHERE expires_at <= ?", (now,))
+                    connection.executemany(
+                        "INSERT OR REPLACE INTO replaced_sessions VALUES (?, ?, ?)",
+                        [(token_hash, now, expires_at) for token_hash, expires_at in live],
+                    )
+                    connection.execute(
+                        "DELETE FROM replaced_sessions WHERE session_id_hash IN ("
+                        "SELECT session_id_hash FROM replaced_sessions ORDER BY replaced_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
+                        (MAX_REPLACED_ROWS,),
+                    )
+                connection.execute("DELETE FROM admin_sessions")
                 connection.execute(
                     "INSERT INTO admin_sessions VALUES (?, ?, ?, ?, ?, ?)",
                     (
@@ -295,9 +347,24 @@ class AdminAuthRepository:
                         session.absolute_expires_at,
                     ),
                 )
-                return True
+                return SessionCreation.CREATED
 
         return self._translate_database_error(write)
+
+    def was_session_replaced(self, session_id: str, *, now: float) -> bool:
+        def read() -> bool:
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._ensure_replaced_table(connection)
+                connection.execute("DELETE FROM replaced_sessions WHERE expires_at <= ?", (now,))
+                return (
+                    connection.execute(
+                        "SELECT 1 FROM replaced_sessions WHERE session_id_hash = ?", (digest_token(session_id),)
+                    ).fetchone()
+                    is not None
+                )
+
+        return self._translate_database_error(read)
 
     def read_session(self, session_id: str, *, now: float, idle_seconds: int) -> AuthSession | None:
         def read() -> AuthSession | None:
@@ -364,7 +431,7 @@ class AdminAuthService:
     def is_configured(self) -> bool:
         return self.repository.is_configured()
 
-    def login(self, username: str, password: str, source: str) -> AuthSession | None:
+    def login(self, username: str, password: str, source: str, *, takeover: bool = False) -> AuthSession | None:
         if not self._hash_slot.acquire(blocking=False):
             raise LoginRateLimited("LOGIN_RATE_LIMITED")
         try:
@@ -383,7 +450,12 @@ class AdminAuthService:
                 last_seen_at=now,
                 absolute_expires_at=now + self.absolute_seconds,
             )
-            return session if self.repository.create_session_if_version(credential_version, session, source) else None
+            outcome = self.repository.create_session_if_version(
+                credential_version, session, source, takeover=takeover, idle_seconds=self.idle_seconds
+            )
+            if outcome is SessionCreation.ACTIVE_ELSEWHERE:
+                raise AdminSessionActiveElsewhere("ADMIN_SESSION_ACTIVE_ELSEWHERE")
+            return session if outcome is SessionCreation.CREATED else None
         finally:
             self._hash_slot.release()
 
@@ -391,6 +463,11 @@ class AdminAuthService:
         if not session_id:
             return None
         return self.repository.read_session(session_id, now=self.now(), idle_seconds=self.idle_seconds)
+
+    def was_session_replaced(self, session_id: str) -> bool:
+        if not session_id:
+            return False
+        return self.repository.was_session_replaced(session_id, now=self.now())
 
     def revoke_session(self, session_id: str, csrf_token: str) -> bool:
         if not session_id or not csrf_token:

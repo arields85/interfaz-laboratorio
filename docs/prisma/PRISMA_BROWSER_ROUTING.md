@@ -53,6 +53,22 @@ runtime state dir; it never reaches the plant or Node-RED.
   `400 HMI_CONFIG_INVALID_REQUEST`, `413 HMI_CONFIG_VALUE_TOO_LARGE` / `HMI_CONFIG_DOCUMENT_TOO_LARGE` /
   `HMI_CONFIG_REQUEST_TOO_LARGE`, and `503 HMI_CONFIG_UNAVAILABLE`. Every response is `Cache-Control: no-store`.
 
+## Single administrator session
+
+The runtime keeps at most one live administrator session (idle and absolute expiry as before).
+
+- `POST /api/prisma/admin/auth/login` accepts an optional boolean `takeover` (default `false`; any other
+  type is `400 INVALID_LOGIN_REQUEST`).
+- If the password is verified and another non-expired session exists, login without `takeover` answers
+  `409 ADMIN_SESSION_ACTIVE_ELSEWHERE`, sets no cookie and creates nothing. A wrong password never reaches
+  that check: it is always `401 INVALID_CREDENTIALS`, so session existence is never revealed to an
+  unauthenticated caller. Rate limiting is unchanged; a verified password clears its failure budget.
+- With `takeover: true` the runtime revokes every other session and creates the new one in one transaction.
+- A displaced session's next request on any admin route (`auth/session`, credentials, `admin/hmi-config`)
+  answers `401 ADMIN_SESSION_REPLACED` instead of `401 AUTHENTICATION_REQUIRED`. The runtime remembers it in
+  `replaced_sessions` (hash of the session id; row kept until the replaced session's own absolute expiry, at
+  most 64 rows). Expiry, logout and a password reset keep the generic code.
+
 Browser constants live in `hmi-app/src/config/prismaAssistant.config.ts`. Development-only targets and rewrite rules live in `hmi-app/vite.prismaProxy.config.ts` and must not be imported by browser modules.
 
 ## Development forwarding

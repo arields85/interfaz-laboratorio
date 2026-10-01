@@ -195,7 +195,7 @@ class AdminHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.get_json()["error"], "INVALID_CREDENTIALS")
-        service.login.assert_called_once_with(username, password, "127.0.0.1")
+        service.login.assert_called_once_with(username, password, "127.0.0.1", takeover=False)
 
     def test_sequential_and_concurrent_style_reads_do_not_invalidate_csrf(self) -> None:
         client = self.client()
@@ -298,6 +298,81 @@ class AdminHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.get_json()["error"], "AUTH_STORAGE_UNAVAILABLE")
         self.assertNotIn(str(corrupt), response.get_data(as_text=True))
+
+    def login_with(self, client, **payload):
+        return client.post(
+            "/api/prisma/admin/auth/login",
+            json={"username": "admin", "password": PASSWORD, **payload},
+            headers={"Origin": "http://127.0.0.1:5173"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"},
+        )
+
+    def test_second_login_without_takeover_gets_409_and_no_cookie(self) -> None:
+        first = self.client()
+        self.login(first)
+        second = self.client()
+
+        response = self.login_with(second)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "ADMIN_SESSION_ACTIVE_ELSEWHERE"})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertNotIn("Set-Cookie", response.headers)
+        self.assertEqual(first.get("/api/prisma/admin/auth/session").status_code, 200)
+
+    def test_wrong_password_returns_401_even_when_a_session_is_active(self) -> None:
+        self.login(self.client())
+
+        response = self.login_with(self.client(), password="wrong but sufficiently long password")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "INVALID_CREDENTIALS")
+
+    def test_takeover_displaces_the_other_browser_with_a_distinct_code(self) -> None:
+        first = self.client()
+        old_token = self.login(first).get_json()["csrfToken"]
+        second = self.client()
+
+        response = self.login_with(second, takeover=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(second.get("/api/prisma/admin/auth/session").status_code, 200)
+        displaced = first.get("/api/prisma/admin/auth/session")
+        self.assertEqual(displaced.status_code, 401)
+        self.assertEqual(displaced.get_json(), {"ok": False, "error": "ADMIN_SESSION_REPLACED"})
+        protected = first.get("/api/prisma/admin/credentials")
+        self.assertEqual(protected.status_code, 401)
+        self.assertEqual(protected.get_json()["error"], "ADMIN_SESSION_REPLACED")
+        write = first.put(
+            "/api/prisma/admin/hmi-config",
+            json={"set": {}, "delete": []},
+            headers={"Origin": "http://127.0.0.1:5173", "X-CSRF-Token": old_token},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"},
+        )
+        self.assertEqual(write.status_code, 401)
+        self.assertEqual(write.get_json()["error"], "ADMIN_SESSION_REPLACED")
+
+    def test_plain_expiry_and_anonymous_requests_keep_the_generic_401(self) -> None:
+        self.assertEqual(self.client().get("/api/prisma/admin/auth/session").get_json()["error"], "AUTHENTICATION_REQUIRED")
+        client = self.client()
+        self.login(client)
+        self.clock[0] += 16 * 60
+
+        self.assertEqual(client.get("/api/prisma/admin/auth/session").get_json()["error"], "AUTHENTICATION_REQUIRED")
+
+    def test_takeover_flag_must_be_a_boolean(self) -> None:
+        for value in ("yes", 1, None, []):
+            with self.subTest(value=value):
+                self.assert_invalid_login_request(self.login_with(self.client(), takeover=value), "yes")
+
+    def test_login_boundary_forwards_the_takeover_flag(self) -> None:
+        service = Mock()
+        service.login.return_value = None
+        client = self.client_for_service(service)
+
+        self.login_with(client, takeover=True)
+
+        service.login.assert_called_once_with("admin", PASSWORD, "127.0.0.1", takeover=True)
 
     def test_generic_failures_and_rate_limit_do_not_reveal_account_existence(self) -> None:
         client = self.client()

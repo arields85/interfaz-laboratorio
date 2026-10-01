@@ -15,8 +15,10 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from prisma_runtime.admin_auth import (
+    MAX_REPLACED_ROWS,
     AdminAuthRepository,
     AdminAuthService,
+    AdminSessionActiveElsewhere,
     AuthUnavailable,
     LoginRateLimited,
     PasswordPolicyError,
@@ -347,6 +349,123 @@ class AdminAuthRepositoryTests(unittest.TestCase):
             self.repository.is_configured()
 
         self.assertNotIn(str(self.database), str(error.exception))
+
+
+class AdminSingleSessionTests(unittest.TestCase):
+    """Only one administrator session may exist; a second login needs an explicit takeover."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.database = Path(self.temporary.name) / "auth" / "admin.sqlite3"
+        self.repository = AdminAuthRepository(self.database, permission_checker=lambda *_: None)
+        self.hasher = FastPasswordHasher()
+        self.repository.initialize_for_provisioning()
+        self.repository.provision_admin("admin", self.hasher.hash_password(VALID_PASSWORD), now=1000.0)
+        self.clock = [1010.0]
+        self.service = AdminAuthService(
+            self.repository, self.hasher, now=lambda: self.clock[0], idle_seconds=100, absolute_seconds=1000
+        )
+
+    def test_second_login_without_takeover_is_refused_and_creates_no_session(self) -> None:
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+
+        with self.assertRaises(AdminSessionActiveElsewhere):
+            self.service.login("admin", VALID_PASSWORD, "192.0.2.9")
+
+        self.assertEqual(self.repository.count_sessions(), 1)
+        self.assertIsNotNone(self.service.read_session(first.session_id))
+        self.assertFalse(self.service.was_session_replaced(first.session_id))
+
+    def test_takeover_revokes_the_other_session_and_marks_it_replaced(self) -> None:
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+
+        second = self.service.login("admin", VALID_PASSWORD, "192.0.2.9", takeover=True)
+
+        self.assertIsNotNone(second)
+        self.assertEqual(self.repository.count_sessions(), 1)
+        self.assertIsNone(self.service.read_session(first.session_id))
+        self.assertTrue(self.service.was_session_replaced(first.session_id))
+        self.assertIsNotNone(self.service.read_session(second.session_id))
+        self.assertFalse(self.service.was_session_replaced(second.session_id))
+
+    def test_takeover_without_another_session_is_a_plain_login(self) -> None:
+        session = self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+
+        self.assertIsNotNone(session)
+        self.assertEqual(self.repository.count_sessions(), 1)
+
+    def test_expired_other_sessions_do_not_block_login_and_are_not_reported_as_replaced(self) -> None:
+        idle = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.clock[0] = 1010.0 + 100
+        replacement = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.assertIsNotNone(replacement)
+        self.assertIsNone(self.service.read_session(idle.session_id))
+        self.assertFalse(self.service.was_session_replaced(idle.session_id))
+
+        self.clock[0] = 1010.0 + 1000 + 1
+        absolute = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.assertIsNotNone(absolute)
+        self.assertEqual(self.repository.count_sessions(), 1)
+
+    def test_wrong_password_never_reveals_an_active_session(self) -> None:
+        self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+
+        for takeover in (False, True):
+            with self.subTest(takeover=takeover):
+                self.assertIsNone(self.service.login("admin", "wrong but sufficiently long", "192.0.2.9", takeover=takeover))
+                self.assertIsNone(self.service.login("other", VALID_PASSWORD, "192.0.2.9", takeover=takeover))
+        self.assertEqual(self.repository.count_sessions(), 1)
+
+    def test_refused_login_still_clears_the_failure_budget_of_a_verified_password(self) -> None:
+        self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+
+        with self.assertRaises(AdminSessionActiveElsewhere):
+            self.service.login("admin", VALID_PASSWORD, "192.0.2.9")
+
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_takeover_is_atomic_when_the_new_session_cannot_be_written(self) -> None:
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.executescript(
+                "CREATE TRIGGER refuse_insert BEFORE INSERT ON admin_sessions "
+                "BEGIN SELECT RAISE(ABORT, 'refused'); END;"
+            )
+
+        with self.assertRaisesRegex(AuthUnavailable, "AUTH_STORAGE_UNAVAILABLE"):
+            self.service.login("admin", VALID_PASSWORD, "192.0.2.9", takeover=True)
+
+        self.assertIsNotNone(self.service.read_session(first.session_id))
+        self.assertFalse(self.service.was_session_replaced(first.session_id))
+
+    def test_replaced_markers_expire_with_the_replaced_session_and_stay_bounded(self) -> None:
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        second = self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+        self.assertTrue(self.service.was_session_replaced(first.session_id))
+
+        self.clock[0] = 1010.0 + 1000 + 1
+        self.assertFalse(self.service.was_session_replaced(first.session_id))
+
+        self.clock[0] = 1010.0 + 1
+        current = second
+        for _ in range(MAX_REPLACED_ROWS + 5):
+            current = self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+        with closing(sqlite3.connect(self.database)) as connection:
+            count = connection.execute("SELECT COUNT(*) FROM replaced_sessions").fetchone()[0]
+        self.assertLessEqual(count, MAX_REPLACED_ROWS)
+        self.assertIsNotNone(self.service.read_session(current.session_id))
+
+    def test_a_database_provisioned_before_this_rule_gains_the_marker_table_lazily(self) -> None:
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.execute("DROP TABLE replaced_sessions")
+            connection.commit()
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.assertFalse(self.service.was_session_replaced(first.session_id))
+
+        self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+
+        self.assertTrue(self.service.was_session_replaced(first.session_id))
 
 
 class AdminCliTests(unittest.TestCase):

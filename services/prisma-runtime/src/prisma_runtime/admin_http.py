@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from flask import Response, jsonify, request
 
-from .admin_auth import AuthNotConfigured, AuthUnavailable, LoginRateLimited
+from .admin_auth import AdminSessionActiveElsewhere, AuthNotConfigured, AuthUnavailable, LoginRateLimited
 from .bot_identity_reservation import TELEGRAM_BOT_IDENTITY_RESERVED
 from .channel_a_lifecycle import PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE, PRISMA_CHANNEL_A_UNAUTHORIZED
 from .channel_a_manager import ChannelAManagerError
@@ -337,13 +337,26 @@ class AdminHttpBoundary:
             return self._error("AUTH_TRANSPORT_REJECTED", 403)
         return None
 
+    def _unauthenticated(self):
+        """401 for a request without a live session.
+
+        A session that was displaced by another login (takeover) answers with its own code so the
+        client can say so; every other cause (no cookie, expiry, logout, reset) stays generic.
+        """
+        cookie = request.cookies.get(COOKIE_NAME, "")
+        try:
+            replaced = self.auth_service.was_session_replaced(cookie) is True if cookie else False
+        except AuthUnavailable:
+            return self._error("AUTH_STORAGE_UNAVAILABLE", 503)
+        return self._error("ADMIN_SESSION_REPLACED" if replaced else "AUTHENTICATION_REQUIRED", 401)
+
     def _authorized_session(self, *, require_csrf: bool):
         try:
             session = self.auth_service.read_session(request.cookies.get(COOKIE_NAME, ""))
         except AuthUnavailable:
             return None, self._error("AUTH_STORAGE_UNAVAILABLE", 503)
         if session is None:
-            return None, self._error("AUTHENTICATION_REQUIRED", 401)
+            return None, self._unauthenticated()
         if require_csrf:
             supplied = request.headers.get("X-CSRF-Token", "")
             expected = getattr(session, "csrf_token", None)
@@ -486,14 +499,17 @@ class AdminHttpBoundary:
                 return self._error("INVALID_LOGIN_REQUEST", 400)
             username = payload.get("username")
             password = payload.get("password")
-            if not isinstance(username, str) or not isinstance(password, str):
+            takeover = payload.get("takeover", False)
+            if not isinstance(username, str) or not isinstance(password, str) or not isinstance(takeover, bool):
                 return self._error("INVALID_LOGIN_REQUEST", 400)
             try:
-                session = self.auth_service.login(username, password, request.remote_addr or "")
+                session = self.auth_service.login(username, password, request.remote_addr or "", takeover=takeover)
             except AuthNotConfigured:
                 return self._error("AUTH_NOT_CONFIGURED", 503)
             except LoginRateLimited:
                 return self._error("LOGIN_RATE_LIMITED", 429)
+            except AdminSessionActiveElsewhere:
+                return self._error("ADMIN_SESSION_ACTIVE_ELSEWHERE", 409)
             except AuthUnavailable:
                 return self._error("AUTH_STORAGE_UNAVAILABLE", 503)
             except ValueError:
@@ -522,7 +538,7 @@ class AdminHttpBoundary:
             except AuthUnavailable:
                 return self._error("AUTH_STORAGE_UNAVAILABLE", 503)
             if session is None:
-                return self._error("AUTHENTICATION_REQUIRED", 401)
+                return self._unauthenticated()
             response = jsonify(self._session_payload(session))
             response.headers["Cache-Control"] = "no-store"
             return response
