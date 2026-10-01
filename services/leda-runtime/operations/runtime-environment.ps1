@@ -446,7 +446,7 @@ function Initialize-LedaRuntimeState {
 # an existing new directory or key is never overwritten, and a repeated call is a no-op. This is
 # the only place that still names the old locations.
 
-function Get-LedaLegacyPrismaName {
+function ConvertTo-LedaName {
     <#
     .SYNOPSIS
         Maps a name containing the old assistant name to its Leda spelling, preserving case.
@@ -560,7 +560,7 @@ function Invoke-LedaLegacyStateMigration {
     Copy-LedaDirectoryTree -Source $legacy -Destination $staging -ExcludeTopLevelName @('run')
     $renamed = 0
     foreach ($item in @(Get-ChildItem -LiteralPath $staging -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending)) {
-        $newName = Get-LedaLegacyPrismaName -Name $item.Name
+        $newName = ConvertTo-LedaName -Name $item.Name
         if ($newName -ceq $item.Name) { continue }
         if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $item.FullName) $newName)) { continue }
         Rename-Item -LiteralPath $item.FullName -NewName $newName
