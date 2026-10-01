@@ -110,10 +110,22 @@ describe('DashboardViewer link corner accents', () => {
         expect(screen.getByTestId('dashboard-viewer-item-a').className).not.toContain('hmi-link-accents-host');
     });
 
-    it("draws the layer for a member that inherits its locked group's target", () => {
+    it("lights the locked group, not its members, when a member only inherits the group's target", () => {
         renderViewer([
             makeGroupWidget({ id: 'g', locked: true, memberWidgetIds: ['m'], navigationTargetDashboardId: 'dash-2' }),
             makeWidget({ id: 'm' }),
+        ]);
+
+        // The clickable unit is the group: its accents frame the whole group, the member gets none of its own.
+        expect(accents('g')).not.toBeNull();
+        expect(accents('m')).toBeNull();
+        expect(screen.getByTestId('dashboard-viewer-item-m').className).not.toContain('hmi-link-accents-host');
+    });
+
+    it('keeps the accents of a member of a locked group that has its own target', () => {
+        renderViewer([
+            makeGroupWidget({ id: 'g', locked: true, memberWidgetIds: ['m'], navigationTargetDashboardId: 'dash-2' }),
+            makeWidget({ id: 'm', navigationTargetDashboardId: 'dash-3' }),
         ]);
 
         expect(accents('m')).not.toBeNull();

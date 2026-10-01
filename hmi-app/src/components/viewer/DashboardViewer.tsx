@@ -182,10 +182,11 @@ export default function DashboardViewer({
                             navigationTargetDashboardId: resolveEffectiveNavigationTarget(widget, widgets),
                         };
 
-                        // Only widgets that actually navigate on click (own or inherited target) and
-                        // draw a frame get the corner accents outside it.
+                        // Corner accents outside the frame: only widgets with their OWN navigation target that draw a
+                        // frame. A member that merely inherits its locked group's target is part of the group, whose
+                        // own accents frame the whole group (lit while any member is hovered, see index.css).
                         const showLinkAccents = linkAccentsActive
-                            && Boolean(effectiveWidget.navigationTargetDashboardId)
+                            && Boolean(widget.navigationTargetDashboardId?.trim())
                             && drawsGridFrame(widget);
 
                         // G5 group hover: which locked group (if any) hovering THIS item should

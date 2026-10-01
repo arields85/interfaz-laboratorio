@@ -1625,7 +1625,10 @@ h1, h2, h3, h4, h5, h6 {
       --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
   }
 
-  .hmi-link-accents-host:hover .hmi-link-accents {
+  /* A locked group is mostly covered by its members (sibling grid items): the viewer marks the group item with
+   * `data-group-hover-target` while any member is hovered, so its accents light up from there too. */
+  .hmi-link-accents-host:hover .hmi-link-accents,
+  .hmi-link-accents-host[data-group-hover-target='true'] .hmi-link-accents {
     --frame-accent-length: var(--link-accent-length-hover);
     --frame-accent-thickness: var(--link-accent-thickness-hover);
     --frame-accent-color: var(--link-accent-color-hover);

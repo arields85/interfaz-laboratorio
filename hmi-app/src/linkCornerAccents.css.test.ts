@@ -61,12 +61,23 @@ describe('link corner accents layer', () => {
     });
 
     it('switches to the hover tokens while the viewer item is hovered', () => {
-        const body = rule('.hmi-link-accents-host:hover .hmi-link-accents');
+        const body = indexCss.match(/\.hmi-link-accents-host:hover \.hmi-link-accents,[^{]*{([\s\S]*?)\n\s*}/)?.[1] ?? '';
 
         expect(body).toContain('--frame-accent-length: var(--link-accent-length-hover);');
         expect(body).toContain('--frame-accent-thickness: var(--link-accent-thickness-hover);');
         expect(body).toContain('--frame-accent-color: var(--link-accent-color-hover);');
         expect(body).toContain('--frame-accent-opacity: var(--link-accent-opacity-hover);');
+    });
+
+    it('also switches to the hover tokens while a member of its locked group is hovered (group hover target)', () => {
+        // Members cover most of a group, so the group item itself is rarely `:hover`: the viewer marks it with
+        // `data-group-hover-target` while any member is hovered (G5), and the accents must follow that too.
+        const combined = indexCss.match(
+            /\.hmi-link-accents-host:hover \.hmi-link-accents,\s*\.hmi-link-accents-host\[data-group-hover-target='true'\] \.hmi-link-accents\s*{([\s\S]*?)\n\s*}/,
+        );
+
+        expect(combined, 'combined hover rule not found').not.toBeNull();
+        expect(combined?.[1]).toContain('--frame-accent-opacity: var(--link-accent-opacity-hover);');
     });
 
     it('disables its transition under prefers-reduced-motion like the other accents', () => {
