@@ -69,6 +69,9 @@ Strict mode ON (source: global user configuration). Runners:
 
 - 2026-10-01: decisions taken, code mapped, feature document created.
 - 2026-10-01: B1 done in `1914f6d` (delegated writer). RED: 20 of 94 new/changed tests in `test_telegram_lifecycle.py` failed (schema still 2, no v3 validation, no repository operations). GREEN: that file 94 tests OK; full runtime suite via the clean-env gate, 1921 tests OK. The bot still persists whole-state through `read`/`write`; B2 must move its offset and pairing writes onto the repository operations.
+  - Parent spot check: `test_telegram_lifecycle.py` re-run, 94 OK.
+  - Native review (slice `a15ac95..d362da4`, medium, `slice_budget_reached`): granted under standing consent, one reliability lens, **approved** and acknowledged (lineage `review-b6f8a7aa524fd8a4`, authority burned). The next reviewed boundary is `d362da4`.
+  - Advisory findings, non-blocking, folded into B2: `R3-pair-timestamp-roundtrip` (`local_presentation.py:955-956`) and `R3-v2-migration-clock-unstable` (`telegram_lifecycle.py:108`, the v2 migration stamps a new time on every read until the first write).
 
 ## Acceptance criteria
 
