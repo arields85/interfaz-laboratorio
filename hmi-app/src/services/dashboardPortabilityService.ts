@@ -7,6 +7,7 @@ import type {
 
 import { HEADER_WIDGET_SLOT_COUNT, isHeaderCompatibleWidget } from '../utils/headerWidgets';
 import { buildCatalogVariableId } from '../utils/catalogVariableId';
+import { formatPortableTimestamp } from '../utils/portableFile';
 import {
     DEFAULT_DASHBOARD_VIEW_ID,
     DEFAULT_DASHBOARD_VIEW_NAME,
@@ -712,16 +713,6 @@ export function sanitizePortableDashboardFileName(fileName: string): string {
         .replace(/^[.-]+|[.-]+$/g, '');
 
     return `${normalizedBaseName || 'dashboard'}.json`;
-}
-
-function formatPortableTimestamp(value: Date): string {
-    const year = value.getUTCFullYear();
-    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(value.getUTCDate()).padStart(2, '0');
-    const hours = String(value.getUTCHours()).padStart(2, '0');
-    const minutes = String(value.getUTCMinutes()).padStart(2, '0');
-
-    return `${year}${month}${day}-${hours}${minutes}`;
 }
 
 function slugifyFileSegment(value: string): string {

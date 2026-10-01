@@ -23,6 +23,7 @@ import { getDashboardHeaderSubtitle, getDashboardHeaderTitle } from '../../utils
 import { getDefaultDashboardView } from '../../utils/dashboardViews';
 import AdminWorkspaceLayout from '../../components/admin/AdminWorkspaceLayout';
 import { loadNodeTypeLabels, resolveTypeLabel } from '../../utils/nodeTypeLabels';
+import { downloadJsonFile } from '../../utils/portableFile';
 import { useSharedConfigVersion } from '../../hooks/useSharedConfigVersion';
 import {
     DASHBOARDS_STORAGE_KEY,
@@ -166,16 +167,7 @@ function createImportSuccessFeedback(result: DashboardImportResult): DashboardPo
 
 async function triggerDashboardDownload(dashboard: Dashboard, fileNameOverride?: string) {
     const exportResult = await dashboardPortabilityService.exportDashboard(dashboard);
-    const downloadUrl = URL.createObjectURL(new Blob([exportResult.json], { type: 'application/json' }));
-
-    try {
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = sanitizePortableDashboardFileName(fileNameOverride ?? exportResult.fileName);
-        link.click();
-    } finally {
-        URL.revokeObjectURL(downloadUrl);
-    }
+    downloadJsonFile(sanitizePortableDashboardFileName(fileNameOverride ?? exportResult.fileName), exportResult.json);
 }
 
 // =============================================================================
