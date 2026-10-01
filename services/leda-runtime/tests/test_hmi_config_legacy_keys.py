@@ -70,6 +70,34 @@ class LegacyKeyMigrationTests(unittest.TestCase):
     def test_fresh_database_stays_at_revision_zero(self) -> None:
         self.assertEqual(HmiConfigStore(self.path).read_document(), (0, {}))
 
+    def test_a_second_opener_that_loses_the_race_does_not_bump_the_revision_again(self) -> None:
+        seed(self.path, {"hmi:prisma-hmi-name": '"Planta"'}, 1)
+
+        class RacingConnection:
+            """Lets another opener finish its migration right before this one takes the write lock."""
+
+            def __init__(self, inner: sqlite3.Connection, other_opener) -> None:
+                self._inner = inner
+                self._other_opener = other_opener
+                self._raced = False
+
+            def execute(self, sql, *args):
+                if sql == "BEGIN IMMEDIATE" and not self._raced:
+                    self._raced = True
+                    self._other_opener()
+                return self._inner.execute(sql, *args)
+
+        def first_opener() -> None:
+            with sqlite3.connect(self.path, timeout=5.0, isolation_level=None) as other:
+                HmiConfigStore._migrate_legacy_keys(other)
+            other.close()
+
+        with sqlite3.connect(self.path, timeout=5.0, isolation_level=None) as second:
+            HmiConfigStore._migrate_legacy_keys(RacingConnection(second, first_opener))
+        second.close()
+
+        self.assertEqual(HmiConfigStore(self.path).read_document(), (2, {"hmi:leda-hmi-name": '"Planta"'}))
+
 
 if __name__ == "__main__":
     unittest.main()

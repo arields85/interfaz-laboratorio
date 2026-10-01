@@ -92,20 +92,28 @@ class HmiConfigStore:
 
     @staticmethod
     def _migrate_legacy_keys(connection: sqlite3.Connection) -> None:
-        """Copy each legacy key to its new name when absent, drop the old key, bump the revision once."""
+        """Copy each legacy key to its new name when absent, drop the old key, bump the revision once.
+
+        The cheap check outside the transaction only avoids taking the write lock on every open; the
+        authoritative check runs inside BEGIN IMMEDIATE, so a second opener that lost the race finds
+        nothing left to move and leaves the revision alone.
+        """
         placeholders = ", ".join("?" for _ in LEGACY_PRISMA_KEY_RENAMES)
         legacy_keys = [old for old, _ in LEGACY_PRISMA_KEY_RENAMES]
         if connection.execute(f"SELECT 1 FROM config WHERE key IN ({placeholders}) LIMIT 1", legacy_keys).fetchone() is None:
             return
         connection.execute("BEGIN IMMEDIATE")
         try:
+            moved = 0
             for old, new in LEGACY_PRISMA_KEY_RENAMES:
                 row = connection.execute("SELECT value FROM config WHERE key = ?", (old,)).fetchone()
                 if row is None:
                     continue
                 connection.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", (new, row[0]))
                 connection.execute("DELETE FROM config WHERE key = ?", (old,))
-            connection.execute("UPDATE meta SET revision = revision + 1 WHERE id = 1")
+                moved += 1
+            if moved:
+                connection.execute("UPDATE meta SET revision = revision + 1 WHERE id = 1")
         except BaseException:
             connection.execute("ROLLBACK")
             raise
