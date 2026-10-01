@@ -49,7 +49,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - [x] B2 — Runtime: admission flow in the bot (request on `/start`, status replies, pending cap, approval notice). Route: delegated.
 - [x] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
 - [x] B4 — Runtime: admin HTTP routes to list, approve, reject and revoke chats. Route: delegated.
-- [ ] B4b — Runtime: review follow-ups. Guard every use of the shared Telegram session (not only `sendMessage`) against the HTTP-thread notice, test the `create_app` Channel B access wiring, and keep limiter counts on eviction where cheap. HMI: clear the bell decision feedback and share the in-flight guard between the bell and the Leda tab. Route: delegated.
+- [x] B4b — Runtime: review follow-ups. Guard every use of the shared Telegram session (not only `sendMessage`) against the HTTP-thread notice, test the `create_app` Channel B access wiring, and keep limiter counts on eviction where cheap. HMI: clear the bell decision feedback and share the in-flight guard between the bell and the Leda tab. Route: delegated.
 - [x] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
 - [x] B5b — HMI: enable the topbar bell (`Topbar.tsx:198-206`, today a disabled placeholder) as a notification panel that lists pending Channel B requests, with approve and reject actions and a pending-count badge. It is only active with an admin session (`shouldShowAdminActions`). Other viewers keep today's disabled bell, so requester names are never shown to them. It polls only while the admin session is active. Route: delegated.
 - [ ] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
@@ -109,6 +109,15 @@ Strict mode ON (source: global user configuration). Runners:
     - `R3-bell-feedback-never-cleared` (`NotificationBell.tsx:37`): the decision feedback is never cleared.
     - `R3-inflight-guard-per-instance` (`useChannelBAccess.ts:57-58`): the in-flight guard is per hook instance, so the bell and the Leda tab can decide the same chat twice. The backend answers 409 for the second one.
   - Writer notes kept as defaults: dates use the browser locale like the rest of the HMI; the parsers reuse `ADMIN_CREDENTIAL_RESPONSE_INVALID`. "Ver todas" in the bell was left out because `GlobalSettingsDialog` cannot be opened on a tab from the viewer topbar.
+
+- 2026-10-01: B4b done in `5311366` (runtime) and `c457bbe` (HMI), delegated writer. RED: runtime, 3 of the 4 new notice tests failed (the notice waited on the long poll, no notice session, no close on stop) plus the changed notice test, and the eviction test failed (`ALLOWED` where the active chat's window should have survived); the `create_app` wiring test passed on first run (characterization test of existing wiring). HMI, the bell feedback tests failed (feedback never cleared, kept after closing) and the two-consumer hook test failed. GREEN: runtime suite 1997 tests OK (clean env, temp `LEDA_RUNTIME_STATE_DIR`); HMI 297 files, 3955 tests OK; `npx tsc -b` and `npm run lint` clean.
+  - `R3-send-lock-partial-session-guard`: instead of a lock around every `_call` (a 35 s `getUpdates` long poll would hang the admin request), the approval notice now uses its own `requests` session (`_send_notice_message`, serialized by its own lock, closed with the bot). `send_message` no longer needs the lock.
+  - `R3-production-access-wiring-untested`: new `CreateAppChannelBWiringTests` proves `create_app` wires `ChannelBAccess` to the manager's current bot and shares one `AdmissionAuditLog` with the bot.
+  - `R3-limiter-lru-eviction-resets-count`: on overflow the limiter drops an expired chat first and the least recent chat only when all are active.
+  - `R3-bell-feedback-never-cleared`: the feedback clears after `CHANNEL_B_FEEDBACK_VISIBLE_MS` (5 s, new named constant in `channelBAccessCopy.ts`; the only existing feedback timers are module-private, 1.5 s for a copy swap) and when the panel closes.
+  - `R3-inflight-guard-per-instance`: decisions are TanStack mutations under one key; the guard reads the shared mutation cache per chat and `pendingChatId` comes from `useMutationState`, so the bell and the Leda tab see the same in-flight decision.
+  - Pre-commit review (GGA) passed on the HMI commit; note only: `CHANNEL_B_INACTIVE_TEXT` and the bell labels live in the component, not the copy module.
+  - Route evidence: B4b delegated (bounded writer).
 
 ## Acceptance criteria
 
