@@ -14,12 +14,16 @@ export function holdSharedConfigReapply(): () => void {
         if (released) return;
         released = true;
         holds -= 1;
-        if (holds === 0 && heldKeys.size > 0) {
-            const pending = [...heldKeys];
-            heldKeys.clear();
-            handler?.(pending);
-        }
+        deliverHeldKeys();
     };
+}
+
+// Without a handler the keys stay held (a change must not be lost), until one is registered.
+function deliverHeldKeys(): void {
+    if (holds !== 0 || heldKeys.size === 0 || handler === null) return;
+    const pending = [...heldKeys];
+    heldKeys.clear();
+    handler(pending);
 }
 
 /** Called by the re-apply path: true when the change was deferred because an editor holds it. */
@@ -29,7 +33,8 @@ export function deferWhileHeld(changedKeys: readonly string[]): boolean {
     return true;
 }
 
-/** Where deferred changes go on release (the re-apply path registers itself; null clears). */
+/** Where deferred changes go on release (the re-apply path registers itself; null clears). Changes held with no handler go out now.. */
 export function setHeldChangesHandler(next: ((changedKeys: readonly string[]) => void) | null): void {
     handler = next;
+    deliverHeldKeys();
 }
