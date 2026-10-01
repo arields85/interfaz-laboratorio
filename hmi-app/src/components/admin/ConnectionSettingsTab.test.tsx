@@ -123,3 +123,107 @@ describe('ConnectionSettingsTab activity-series settings', () => {
         expect(localStorage.getItem('hmi:snapshot-export-interval-ms')).toBe('1234');
     });
 });
+
+describe('ConnectionSettingsTab copy buttons', () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>();
+
+    const COPY_FIELDS = [
+        { copyLabel: 'Copiar URL base', fieldLabel: 'URL Base de Node-RED', value: 'https://node-red.local', copied: 'URL base copiada.' },
+        { copyLabel: 'Copiar endpoint snapshot', fieldLabel: 'Endpoint Snapshot', value: '/api/custom', copied: 'Endpoint snapshot copiado.' },
+        { copyLabel: 'Copiar endpoint histórico', fieldLabel: 'Endpoint Histórico', value: '/api/custom/history', copied: 'Endpoint histórico copiado.' },
+        { copyLabel: 'Copiar endpoint activity-series', fieldLabel: 'Endpoint Activity-Series', value: '/api/custom/series', copied: 'Endpoint activity-series copiado.' },
+    ];
+
+    beforeEach(() => {
+        localStorage.clear();
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', '');
+        writeText.mockReset();
+        writeText.mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText },
+        });
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        localStorage.clear();
+        vi.unstubAllEnvs();
+        Reflect.deleteProperty(navigator, 'clipboard');
+    });
+
+    it.each(COPY_FIELDS)('copies the current unsaved value of $fieldLabel', async ({ copyLabel, fieldLabel, value, copied }) => {
+        render(<ConnectionSettingsTab />);
+
+        fireEvent.change(screen.getByLabelText(fieldLabel), { target: { value } });
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: copyLabel }));
+        });
+
+        expect(writeText).toHaveBeenCalledTimes(1);
+        expect(writeText).toHaveBeenCalledWith(value);
+        expect(screen.getByRole('status')).toHaveTextContent(copied);
+    });
+
+    it('swaps the copy icon for a check for about 1.5 seconds and then restores it', async () => {
+        vi.useFakeTimers();
+        render(<ConnectionSettingsTab />);
+        const button = screen.getByRole('button', { name: 'Copiar URL base' });
+
+        expect(button.querySelector('.lucide-copy')).toBeInTheDocument();
+
+        await act(async () => {
+            fireEvent.click(button);
+        });
+
+        expect(button.querySelector('.lucide-check')).toBeInTheDocument();
+        expect(button.querySelector('.lucide-copy')).not.toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(1_600);
+        });
+
+        expect(button.querySelector('.lucide-copy')).toBeInTheDocument();
+        expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    });
+
+    it('announces the feedback through a polite live region', () => {
+        render(<ConnectionSettingsTab />);
+
+        expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    });
+
+    it('shows a clear message when the clipboard rejects the write', async () => {
+        writeText.mockRejectedValue(new Error('denied'));
+        render(<ConnectionSettingsTab />);
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Copiar URL base' }));
+        });
+
+        expect(screen.getByRole('status')).toHaveTextContent('No pudimos copiar al portapapeles.');
+        expect(screen.getByRole('button', { name: 'Copiar URL base' }).querySelector('.lucide-check')).not.toBeInTheDocument();
+    });
+
+    it('shows the same message when the clipboard is unavailable', async () => {
+        Reflect.deleteProperty(navigator, 'clipboard');
+        render(<ConnectionSettingsTab />);
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Copiar endpoint snapshot' }));
+        });
+
+        expect(screen.getByRole('status')).toHaveTextContent('No pudimos copiar al portapapeles.');
+    });
+
+    it('does not mark the tab dirty when copying', async () => {
+        const onDirtyChange = vi.fn();
+        render(<ConnectionSettingsTab onDirtyChange={onDirtyChange} />);
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Copiar URL base' }));
+        });
+
+        expect(onDirtyChange).not.toHaveBeenCalled();
+    });
+});

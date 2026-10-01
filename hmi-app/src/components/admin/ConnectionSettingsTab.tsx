@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import AdminActionButton from './AdminActionButton';
+import CopyValueButton from './CopyValueButton';
 import { ADMIN_SIDEBAR_LABEL_CLS, ADMIN_SIDEBAR_INPUT_CLS, ADMIN_SIDEBAR_HINT_CLS } from './adminSidebarStyles';
 import type { SaveStatus } from './saveStatus';
 import {
@@ -30,6 +31,18 @@ import { DATA_HISTORY_QUERY_KEY_PREFIX } from '../../queries/useDataHistory';
 // Contenido extraído de NodeRedSettingsDialog — configura URL base y endpoints.
 // =============================================================================
 
+const COPY_FEEDBACK_MS = 1_500;
+const COPY_FAILURE_MESSAGE = 'No pudimos copiar al portapapeles.';
+
+type CopyFieldId = 'baseUrl' | 'endpoint' | 'historyEndpoint' | 'activitySeriesEndpoint';
+
+const COPY_FIELD_TEXT: Record<CopyFieldId, { label: string; success: string }> = {
+    baseUrl: { label: 'Copiar URL base', success: 'URL base copiada.' },
+    endpoint: { label: 'Copiar endpoint snapshot', success: 'Endpoint snapshot copiado.' },
+    historyEndpoint: { label: 'Copiar endpoint histórico', success: 'Endpoint histórico copiado.' },
+    activitySeriesEndpoint: { label: 'Copiar endpoint activity-series', success: 'Endpoint activity-series copiado.' },
+};
+
 interface ConnectionSettingsTabProps {
     onDirtyChange?: (dirty: boolean) => void;
     onSaveStatusChange?: (status: SaveStatus) => void;
@@ -43,6 +56,42 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
     const [draftEndpoint, setDraftEndpoint] = useState(() => getSavedDataEndpoint() || DATA_DEFAULT_ENDPOINT);
     const [draftHistoryEndpoint, setDraftHistoryEndpoint] = useState(() => getSavedDataHistoryEndpoint() || DATA_DEFAULT_HISTORY_ENDPOINT);
     const [draftActivitySeriesEndpoint, setDraftActivitySeriesEndpoint] = useState(() => getSavedDataActivitySeriesEndpoint() ?? DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT);
+
+    const [copiedField, setCopiedField] = useState<CopyFieldId | null>(null);
+    const [copyFailed, setCopyFailed] = useState(false);
+    const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => () => {
+        if (copyResetTimerRef.current !== null) {
+            clearTimeout(copyResetTimerRef.current);
+        }
+    }, []);
+
+    const handleCopy = useCallback(async (field: CopyFieldId, value: string) => {
+        if (copyResetTimerRef.current !== null) {
+            clearTimeout(copyResetTimerRef.current);
+            copyResetTimerRef.current = null;
+        }
+
+        try {
+            await navigator.clipboard.writeText(value);
+        } catch {
+            setCopiedField(null);
+            setCopyFailed(true);
+            return;
+        }
+
+        setCopyFailed(false);
+        setCopiedField(field);
+        copyResetTimerRef.current = setTimeout(() => {
+            setCopiedField(null);
+            copyResetTimerRef.current = null;
+        }, COPY_FEEDBACK_MS);
+    }, []);
+
+    const copyStatusMessage = copyFailed
+        ? COPY_FAILURE_MESSAGE
+        : copiedField ? COPY_FIELD_TEXT[copiedField].success : '';
 
     const previewSnapshotUrl = useMemo(() => {
         const baseUrl = draftUrl.trim().replace(/\/+$/, '');
@@ -167,17 +216,24 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                 <label className={`${ADMIN_SIDEBAR_LABEL_CLS} mb-1.5 block w-auto`}>
                     URL Base de Node-RED
                 </label>
-                <input
-                    aria-label="URL Base de Node-RED"
-                    value={draftUrl}
-                    onChange={(e) => {
-                        setDraftUrl(e.target.value);
-                        onDirtyChange?.(true);
-                        setSaveStatus('dirty');
-                    }}
-                    placeholder="https://node-red.example.local"
-                    className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
-                />
+                <div className="flex items-center gap-2">
+                    <input
+                        aria-label="URL Base de Node-RED"
+                        value={draftUrl}
+                        onChange={(e) => {
+                            setDraftUrl(e.target.value);
+                            onDirtyChange?.(true);
+                            setSaveStatus('dirty');
+                        }}
+                        placeholder="https://node-red.example.local"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} min-w-0 flex-1 px-3 py-2`}
+                    />
+                    <CopyValueButton
+                        label={COPY_FIELD_TEXT.baseUrl.label}
+                        copied={copiedField === 'baseUrl'}
+                        onCopy={() => void handleCopy('baseUrl', draftUrl)}
+                    />
+                </div>
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     URL base del servidor Node-RED. Dejar vacio para deshabilitar.
                 </p>
@@ -187,17 +243,24 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                 <label className={`${ADMIN_SIDEBAR_LABEL_CLS} mb-1.5 block w-auto`}>
                     Endpoint Snapshot
                 </label>
-                <input
-                    aria-label="Endpoint Snapshot"
-                    value={draftEndpoint}
-                    onChange={(e) => {
-                        setDraftEndpoint(e.target.value);
-                        onDirtyChange?.(true);
-                        setSaveStatus('dirty');
-                    }}
-                    placeholder="/api/hmi-data"
-                    className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
-                />
+                <div className="flex items-center gap-2">
+                    <input
+                        aria-label="Endpoint Snapshot"
+                        value={draftEndpoint}
+                        onChange={(e) => {
+                            setDraftEndpoint(e.target.value);
+                            onDirtyChange?.(true);
+                            setSaveStatus('dirty');
+                        }}
+                        placeholder="/api/hmi-data"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} min-w-0 flex-1 px-3 py-2`}
+                    />
+                    <CopyValueButton
+                        label={COPY_FIELD_TEXT.endpoint.label}
+                        copied={copiedField === 'endpoint'}
+                        onCopy={() => void handleCopy('endpoint', draftEndpoint)}
+                    />
+                </div>
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     Ruta del endpoint
                 </p>
@@ -207,17 +270,24 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                 <label className={`${ADMIN_SIDEBAR_LABEL_CLS} mb-1.5 block w-auto`}>
                     Endpoint Histórico
                 </label>
-                <input
-                    aria-label="Endpoint Histórico"
-                    value={draftHistoryEndpoint}
-                    onChange={(e) => {
-                        setDraftHistoryEndpoint(e.target.value);
-                        onDirtyChange?.(true);
-                        setSaveStatus('dirty');
-                    }}
-                    placeholder="/api/hmi-data/history"
-                    className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
-                />
+                <div className="flex items-center gap-2">
+                    <input
+                        aria-label="Endpoint Histórico"
+                        value={draftHistoryEndpoint}
+                        onChange={(e) => {
+                            setDraftHistoryEndpoint(e.target.value);
+                            onDirtyChange?.(true);
+                            setSaveStatus('dirty');
+                        }}
+                        placeholder="/api/hmi-data/history"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} min-w-0 flex-1 px-3 py-2`}
+                    />
+                    <CopyValueButton
+                        label={COPY_FIELD_TEXT.historyEndpoint.label}
+                        copied={copiedField === 'historyEndpoint'}
+                        onCopy={() => void handleCopy('historyEndpoint', draftHistoryEndpoint)}
+                    />
+                </div>
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     Ruta del endpoint de datos históricos. Dejar vacío para deshabilitar.
                 </p>
@@ -227,17 +297,24 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                 <label className={`${ADMIN_SIDEBAR_LABEL_CLS} mb-1.5 block w-auto`}>
                     Endpoint Activity-Series
                 </label>
-                <input
-                    aria-label="Endpoint Activity-Series"
-                    value={draftActivitySeriesEndpoint}
-                    onChange={(e) => {
-                        setDraftActivitySeriesEndpoint(e.target.value);
-                        onDirtyChange?.(true);
-                        setSaveStatus('dirty');
-                    }}
-                    placeholder="/api/hmi-data/activity-series"
-                    className={`${ADMIN_SIDEBAR_INPUT_CLS} px-3 py-2`}
-                />
+                <div className="flex items-center gap-2">
+                    <input
+                        aria-label="Endpoint Activity-Series"
+                        value={draftActivitySeriesEndpoint}
+                        onChange={(e) => {
+                            setDraftActivitySeriesEndpoint(e.target.value);
+                            onDirtyChange?.(true);
+                            setSaveStatus('dirty');
+                        }}
+                        placeholder="/api/hmi-data/activity-series"
+                        className={`${ADMIN_SIDEBAR_INPUT_CLS} min-w-0 flex-1 px-3 py-2`}
+                    />
+                    <CopyValueButton
+                        label={COPY_FIELD_TEXT.activitySeriesEndpoint.label}
+                        copied={copiedField === 'activitySeriesEndpoint'}
+                        onCopy={() => void handleCopy('activitySeriesEndpoint', draftActivitySeriesEndpoint)}
+                    />
+                </div>
                 <p className={`mt-1.5 ${ADMIN_SIDEBAR_HINT_CLS}`}>
                     Ruta del endpoint de activity-series. Dejar vacío para deshabilitar.
                 </p>
@@ -269,6 +346,10 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                     </p>
                 </div>
             </div>
+
+            <p role="status" aria-live="polite" className={copyFailed ? 'text-status-critical' : 'text-industrial-muted'}>
+                {copyStatusMessage}
+            </p>
 
             <div>
                 <AdminActionButton variant="secondary" onClick={handleClear}>
