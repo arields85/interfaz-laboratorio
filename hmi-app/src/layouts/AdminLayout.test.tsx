@@ -23,6 +23,12 @@ vi.mock('../components/admin/GlobalSettingsDialog', () => ({
     ),
 }));
 
+vi.mock('../components/admin/AdminPasswordChangeDialog', () => ({
+    default: ({ open, onClose }: { open: boolean; onClose: () => void }) => (
+        open ? <button type="button" data-testid="password-change-dialog" onClick={onClose}>Cambio abierto</button> : null
+    ),
+}));
+
 vi.mock('../components/admin/SharedConfigSaveNotice', () => ({
     default: () => <div data-testid="shared-config-save-notice" />,
 }));
@@ -129,6 +135,20 @@ describe('AdminLayout', () => {
 
         expect(navigateMock).toHaveBeenCalledWith('/');
         expect(logoutMock).not.toHaveBeenCalled();
+    });
+
+    it('opens the password change dialog from the admin toolbar without ending the session', () => {
+        render(<AdminLayout />);
+        expect(screen.queryByTestId('password-change-dialog')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
+
+        expect(screen.getByTestId('password-change-dialog')).toBeInTheDocument();
+        expect(logoutMock).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByTestId('password-change-dialog'));
+
+        expect(screen.queryByTestId('password-change-dialog')).not.toBeInTheDocument();
     });
 
     it('opens the global settings dialog from the admin toolbar and renders inactive sections separately', () => {

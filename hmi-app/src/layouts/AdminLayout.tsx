@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LogOut, Monitor, Settings } from 'lucide-react';
+import { KeyRound, LogOut, Monitor, Settings } from 'lucide-react';
+import AdminPasswordChangeDialog from '../components/admin/AdminPasswordChangeDialog';
 import GlobalSettingsDialog from '../components/admin/GlobalSettingsDialog';
 import SharedConfigSaveNotice from '../components/admin/SharedConfigSaveNotice';
 import { HmiButton } from '../components/ui';
@@ -27,6 +28,7 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
     const navigate = useNavigate();
     const activeSectionKey = getAdminSectionByPath(location.pathname)?.key;
     const [isNodeRedSettingsOpen, setIsNodeRedSettingsOpen] = useState(false);
+    const [isPasswordChangeOpen, setIsPasswordChangeOpen] = useState(false);
     const session = useAuthStore((state) => state.session);
 
     return (
@@ -67,6 +69,15 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
                         onClick={() => setIsNodeRedSettingsOpen(true)}
                     >
                         <Settings size={20} />
+                    </button>
+                    <button
+                        aria-label="Cambiar contraseña"
+                        className="rounded-lg p-2 text-industrial-muted transition-colors hover:bg-industrial-hover hover:text-industrial-text"
+                        title="Cambiar contraseña"
+                        type="button"
+                        onClick={() => setIsPasswordChangeOpen(true)}
+                    >
+                        <KeyRound size={20} />
                     </button>
                     <span className="text-admin-accent/80 flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-admin-accent animate-pulse" />
@@ -112,6 +123,14 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
             <main className="flex-1 min-h-0 overflow-hidden relative">
                 <Outlet />
             </main>
+
+            {isPasswordChangeOpen && (
+                <AdminPasswordChangeDialog
+                    open={isPasswordChangeOpen}
+                    onClose={() => setIsPasswordChangeOpen(false)}
+                    controller={controller}
+                />
+            )}
 
             {isNodeRedSettingsOpen && (
                 <GlobalSettingsDialog

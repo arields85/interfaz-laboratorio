@@ -84,6 +84,7 @@ describe('Leda Vite proxy configuration', () => {
         ['/api/leda/admin/auth/login', '/api/leda/admin/auth/login', ['POST']],
         ['/api/leda/admin/auth/session', '/api/leda/admin/auth/session', ['GET']],
         ['/api/leda/admin/auth/logout', '/api/leda/admin/auth/logout', ['POST']],
+        ['/api/leda/admin/auth/password', '/api/leda/admin/auth/password', ['POST']],
         ['/api/leda/admin/credentials', '/api/leda/admin/credentials', ['GET']],
         ['/api/leda/admin/credentials/gemini', '/api/leda/admin/credentials/gemini', ['PUT', 'DELETE']],
         ['/api/leda/admin/credentials/gemini/verify', '/api/leda/admin/credentials/gemini/verify', ['POST']],

@@ -72,6 +72,7 @@ export const LEDA_PROXY_ROUTES: readonly LedaProxyRoute[] = Object.freeze([
     createRoute('/api/leda/admin/auth/login', 'http://127.0.0.1:5057', '/api/leda/admin/auth/login', ['POST'], true),
     createRoute('/api/leda/admin/auth/session', 'http://127.0.0.1:5057', '/api/leda/admin/auth/session', ['GET'], true),
     createRoute('/api/leda/admin/auth/logout', 'http://127.0.0.1:5057', '/api/leda/admin/auth/logout', ['POST'], true),
+    createRoute('/api/leda/admin/auth/password', 'http://127.0.0.1:5057', '/api/leda/admin/auth/password', ['POST'], true),
     createRoute('/api/leda/admin/credentials', 'http://127.0.0.1:5057', '/api/leda/admin/credentials', ['GET'], true),
     createRoute('/api/leda/admin/credentials/gemini', 'http://127.0.0.1:5057', '/api/leda/admin/credentials/gemini', ['PUT', 'DELETE'], true),
     createRoute('/api/leda/admin/credentials/gemini/verify', 'http://127.0.0.1:5057', '/api/leda/admin/credentials/gemini/verify', ['POST'], true),

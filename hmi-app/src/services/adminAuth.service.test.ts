@@ -518,6 +518,79 @@ describe('AdminAuthClient', () => {
         expect(fetcher.mock.calls[4]?.[1]?.body).toBe('{}');
     });
 
+    it('changes the password on its exact route with the private CSRF and exact password bytes', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.changePassword('  current pass  ', ' new é pass ')).resolves.toBeUndefined();
+
+        const [path, init] = fetcher.mock.calls[1] ?? [];
+        expect(path).toBe('/api/leda/admin/auth/password');
+        expect(init?.method).toBe('POST');
+        expect(init?.body).toBe(JSON.stringify({ currentPassword: '  current pass  ', newPassword: ' new é pass ' }));
+        expect(init?.headers).toEqual(expect.objectContaining({
+            'X-CSRF-Token': SESSION.csrfToken,
+            'Content-Type': 'application/json',
+        }));
+        expect(init?.credentials).toBe('same-origin');
+    });
+
+    it('refuses a password change without a session CSRF token', async () => {
+        const fetcher = vi.fn<typeof fetch>();
+
+        await expect(new AdminAuthClient(fetcher).changePassword('a', 'b')).rejects.toMatchObject({
+            code: 'CSRF_TOKEN_UNAVAILABLE',
+        });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['INVALID_CURRENT_PASSWORD', 401],
+        ['PASSWORD_POLICY_REJECTED', 400],
+        ['PASSWORD_UNCHANGED', 400],
+        ['INVALID_PASSWORD_CHANGE_REQUEST', 400],
+        ['PASSWORD_CHANGE_REQUEST_TOO_LARGE', 413],
+        ['LOGIN_RATE_LIMITED', 429],
+    ])('preserves the stable %s password change failure', async (code, status) => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: code }, status));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.changePassword('a', 'b')).rejects.toMatchObject({ code, status });
+    });
+
+    it('rejects a password change success that is not the exact acknowledgement', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: false }))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await expect(client.changePassword('a', 'b')).rejects.toMatchObject({ code: 'AUTH_RESPONSE_INVALID' });
+        await expect(client.changePassword('a', 'b')).rejects.toMatchObject({ code: 'AUTH_RESPONSE_INVALID' });
+    });
+
+    it('keeps the session CSRF usable after a password change', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: true }))
+            .mockResolvedValueOnce(jsonResponse({ ok: true, revision: 7 }));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+
+        await client.changePassword('a', 'b');
+        await client.writeSharedConfig({ set: { 'hmi:a': '1' }, delete: [] });
+
+        const [, init] = fetcher.mock.calls[2] ?? [];
+        expect(init?.headers).toEqual(expect.objectContaining({ 'X-CSRF-Token': SESSION.csrfToken }));
+    });
+
     it('writes the shared HMI configuration batch with the session CSRF token', async () => {
         const fetcher = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))

@@ -61,7 +61,9 @@ const PUBLIC_ERROR_CODES = new Set([
     'HMI_CONFIG_VALUE_TOO_LARGE',
     'INVALID_CREDENTIALS',
     'INVALID_CREDENTIAL_REQUEST',
+    'INVALID_CURRENT_PASSWORD',
     'INVALID_LOGIN_REQUEST',
+    'INVALID_PASSWORD_CHANGE_REQUEST',
     'INVALID_TELEGRAM_APPLY_REQUEST',
     'JSON_REQUIRED',
     'LOGIN_RATE_LIMITED',
@@ -77,6 +79,9 @@ const PUBLIC_ERROR_CODES = new Set([
     'LEDA_CHANNEL_A_VERIFICATION_IN_PROGRESS',
     'LEDA_CHANNEL_A_VERIFICATION_UNAVAILABLE',
     'LEDA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING',
+    'PASSWORD_CHANGE_REQUEST_TOO_LARGE',
+    'PASSWORD_POLICY_REJECTED',
+    'PASSWORD_UNCHANGED',
     'TELEGRAM_CREDENTIAL_MISSING',
     'TELEGRAM_DISABLED',
     'TELEGRAM_POLL_FAILED',
@@ -239,6 +244,22 @@ export class AdminAuthClient {
         if (response.status !== 204 || body !== '') {
             throw new AdminAuthError('AUTH_RESPONSE_INVALID', response.status);
         }
+    }
+
+    // The administrator changes their own password. The server keeps this session and ends every
+    // other one, so the private CSRF token stays valid. A wrong current password answers 401
+    // INVALID_CURRENT_PASSWORD, which callers must not treat as a lost session.
+    async changePassword(currentPassword: string, newPassword: string, signal?: AbortSignal): Promise<void> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(`${AUTH_ROOT}/password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: JSON.stringify({ currentPassword, newPassword }),
+                signal: requestSignal,
+            });
+            const payload = await readJson(response);
+            if (!isObject(payload) || payload.ok !== true) throw new AdminAuthError('AUTH_RESPONSE_INVALID', response.status);
+        });
     }
 
     async credentialMetadata(signal?: AbortSignal): Promise<CredentialMetadata> {

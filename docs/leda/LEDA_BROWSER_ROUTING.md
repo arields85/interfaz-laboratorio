@@ -11,13 +11,17 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/leda/session` | `POST`, `DELETE` | `http://127.0.0.1:5057/hmi/session` | Document-session creation and revocation |
 | `/api/leda/snapshot` | `POST` | `http://127.0.0.1:5057/hmi/current-snapshot` | Current valid dashboard presentation frame |
 | `/api/leda/events/latest` | `GET` | `http://127.0.0.1:5057/hmi/voice/latest` | Latest voice event polling |
+| `/api/leda/events/stream` | `GET` | `http://127.0.0.1:5057/hmi/voice/events` | Voice events pushed over SSE, read with a header-based fetch reader (the session capability travels in the ordinary request header) |
 | `/api/leda/ask` | `POST` | `http://127.0.0.1:5057/local/ask` | Question within the current document session |
+| `/api/leda/voice/timeline` | `POST` | `http://127.0.0.1:5057/hmi/voice/timeline` | Batched browser voice timeline diagnostics |
 | `/api/leda/voice-config` | `GET`, `PUT` | `http://127.0.0.1:5057/hmi/leda-config` | Voice-effect configuration envelope |
 | `/api/leda/tts/live` | `POST` | `http://127.0.0.1:5056/leda/speak-live` | Progressive PCM audio stream |
+| `/api/leda/channel-a/pairing` | `GET`, `POST` | `http://127.0.0.1:5057/hmi/channel-a/pairing` | Channel A pairing (QR) status and start |
 | `/api/leda/admin/auth/status` | `GET` | Same path on `http://127.0.0.1:5057` | Offline-provisioning status |
 | `/api/leda/admin/auth/login` | `POST` | Same path on `http://127.0.0.1:5057` | Administrator login |
 | `/api/leda/admin/auth/session` | `GET` | Same path on `http://127.0.0.1:5057` | Validated session bootstrap/revalidation |
 | `/api/leda/admin/auth/logout` | `POST` | Same path on `http://127.0.0.1:5057` | Administrator revocation |
+| `/api/leda/admin/auth/password` | `POST` | Same path on `http://127.0.0.1:5057` | Administrator changes their own password (session + CSRF); ends every other session |
 | `/api/leda/admin/credentials` | `GET` | Same path on `http://127.0.0.1:5057` | Metadata-only credential status |
 | `/api/leda/admin/credentials/gemini` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Explicit Gemini credential save and deletion |
 | `/api/leda/admin/credentials/gemini/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-generating Gemini API key verification |
@@ -25,6 +29,8 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/leda/admin/credentials/telegram/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Telegram apply and restart, kept for callers that need to re-apply without saving a new credential |
 | `/api/leda/admin/credentials/telegram/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Telegram (Canal B) bot token verification |
 | `/api/leda/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Channel A credential save (applies/restarts the bot with the new token in the same request) and deletion (stops the bot) |
+| `/api/leda/admin/credentials/telegram_channel_a/status` | `GET` | Same path on `http://127.0.0.1:5057` | Observational Channel A status (authenticated read only) |
+| `/api/leda/admin/credentials/telegram_channel_a/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Channel A apply and restart |
 | `/api/leda/admin/credentials/telegram_channel_a/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Channel A bot token verification |
 | `/api/leda/hmi-config` | `GET` | Same path on `http://127.0.0.1:5057` | Shared HMI configuration document (public read) |
 | `/api/leda/hmi-config/revision` | `GET` | Same path on `http://127.0.0.1:5057` | Shared configuration revision (cheap poll, public read) |
@@ -52,6 +58,32 @@ runtime state dir; it never reaches the plant or Node-RED.
   AUTHENTICATION_REQUIRED`, `403 CSRF_VALIDATION_FAILED` / `AUTH_TRANSPORT_REJECTED`, `415 JSON_REQUIRED`,
   `400 HMI_CONFIG_INVALID_REQUEST`, `413 HMI_CONFIG_VALUE_TOO_LARGE` / `HMI_CONFIG_DOCUMENT_TOO_LARGE` /
   `HMI_CONFIG_REQUEST_TOO_LARGE`, and `503 HMI_CONFIG_UNAVAILABLE`. Every response is `Cache-Control: no-store`.
+
+## Administrator password change
+
+`POST /api/leda/admin/auth/password` lets the administrator change their own password from the HMI.
+
+- Body: `{"currentPassword": <string>, "newPassword": <string>}` (exactly those two keys). Success is
+  `200 {"ok": true}`. It requires the session cookie, the `X-CSRF-Token` header and the same Origin/Host
+  checks as the other admin writes.
+- The new password follows the same policy as `provision-admin` / `reset-admin-password` (one function in
+  `admin_auth.py`): at least 15 characters, at most 1024 UTF-8 bytes. The HMI mirrors these bounds in
+  `hmi-app/src/domain/adminPasswordPolicy.types.ts`, pinned to the runtime by a test.
+- The current password is verified with the login hasher under the login rate limit: a wrong one is
+  `401 INVALID_CURRENT_PASSWORD`, counts as a failed attempt for that account and source, and exhausting the
+  budget answers `429 LOGIN_RATE_LIMITED`. A verified change clears that budget. Because a wrong current
+  password is also a 401, the browser must not treat it as a lost session.
+- A policy refusal (`400 PASSWORD_POLICY_REJECTED`) or a new password equal to the current one
+  (`400 PASSWORD_UNCHANGED`) is answered before any attempt is counted and says nothing about the current
+  password. Other failures: `400 INVALID_PASSWORD_CHANGE_REQUEST`, `413 PASSWORD_CHANGE_REQUEST_TOO_LARGE`,
+  `415 JSON_REQUIRED`, `403 CSRF_VALIDATION_FAILED` / `AUTH_TRANSPORT_REJECTED`, `401 AUTHENTICATION_REQUIRED`
+  (no live session, or it ended or the credential changed while the request was verifying), and
+  `503 AUTH_STORAGE_UNAVAILABLE`. Every response is `Cache-Control: no-store`.
+- One transaction stores the new hash, bumps the credential version and deletes every other session; the
+  caller's session and CSRF token stay valid. Any failure leaves password and sessions untouched.
+- The sessions it ends get the generic `401 AUTHENTICATION_REQUIRED`, not `ADMIN_SESSION_REPLACED`: they were
+  not displaced by another login, so no replaced marker is written (the same as a CLI password reset).
+- The CLI reset stays the recovery path for a forgotten password.
 
 ## Single administrator session
 
@@ -90,7 +122,7 @@ also applies it (the manager attempts to restart the bot with the new token in t
 `configured: true` metadata value means the store holds a Channel A credential; it does not by itself
 mean the Channel A bot is running, verified, paired, or connected -- the post-save apply attempt can
 still fail (captured in the Channel A status route's `lastError`, never raised back to the save
-response). Channel A pairing and session routes are not part of this proxy yet.
+response). Channel A pairing is routed through `/api/leda/channel-a/pairing`.
 
 The Gemini verify route triggers one on-demand, non-generating key check against Google (a model
 lookup, never a generation call, so it never consumes generation quota) and reports a closed

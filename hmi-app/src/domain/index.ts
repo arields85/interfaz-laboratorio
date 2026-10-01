@@ -14,6 +14,7 @@ export * from './dataContract.types';
 export * from './eppi.types';
 export * from './auth';
 export * from './adminCredential.types';
+export * from './adminPasswordPolicy.types';
 export type { CatalogVariable } from './variableCatalog.types';
 export * from './themeStyle.types';
 export * from './sharedConfig.types';
