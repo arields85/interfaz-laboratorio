@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 
 import { adminSessionController } from '../../services/adminSession.controller';
+import SessionReplacedNotice from './SessionReplacedNotice';
 
 interface AdminSessionLifecycleProps {
     controller?: typeof adminSessionController;
@@ -18,5 +19,10 @@ export default function AdminSessionLifecycle({ controller = adminSessionControl
         return () => controller.stop();
     }, [controller]);
 
-    return <Outlet />;
+    return (
+        <>
+            <SessionReplacedNotice />
+            <Outlet />
+        </>
+    );
 }

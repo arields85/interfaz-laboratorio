@@ -23,13 +23,39 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
     const [password, setPassword] = useState(EMPTY_FORM_STATE.password);
     const [error, setError] = useState(EMPTY_FORM_STATE.error);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [takeoverWarning, setTakeoverWarning] = useState('');
 
     const handleClose = () => {
         setUsername(EMPTY_FORM_STATE.username);
         setPassword(EMPTY_FORM_STATE.password);
         setError(EMPTY_FORM_STATE.error);
         setIsSubmitting(false);
+        setTakeoverWarning('');
         onClose();
+    };
+
+    // Another administrator session is open elsewhere: the credentials stay in this component's
+    // state (already typed, never stored) only until the person confirms or cancels.
+    const handleCancelTakeover = () => {
+        setTakeoverWarning('');
+        setPassword(EMPTY_FORM_STATE.password);
+    };
+
+    const handleConfirmTakeover = async () => {
+        setTakeoverWarning('');
+        setIsSubmitting(true);
+
+        const result = await adminSessionController.login(username, password, { takeover: true });
+
+        setIsSubmitting(false);
+
+        if (!result.ok) {
+            setPassword(EMPTY_FORM_STATE.password);
+            setError(result.error);
+            return;
+        }
+
+        handleClose();
     };
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -48,6 +74,10 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
         setIsSubmitting(false);
 
         if (!result.ok) {
+            if (result.code === 'ADMIN_SESSION_ACTIVE_ELSEWHERE') {
+                setTakeoverWarning(result.error);
+                return;
+            }
             setError(result.error);
             return;
         }
@@ -87,6 +117,20 @@ export default function LoginOverlay({ triggerRef, isOpen, onClose }: LoginOverl
                         >
                             Cerrar sesion
                         </HmiButton>
+                    </div>
+                ) : takeoverWarning ? (
+                    // Rendered inside the panel, not in a modal portal: AnchoredOverlay closes on any
+                    // click outside its own element, which would swallow the buttons of a portal.
+                    <div role="alertdialog" aria-label="Sesión abierta en otro equipo" className="flex flex-col gap-3">
+                        <p className="text-industrial-text">{takeoverWarning}</p>
+                        <div className="flex justify-end gap-2">
+                            <HmiButton variant="secondary" onClick={handleCancelTakeover}>
+                                Cancelar
+                            </HmiButton>
+                            <HmiButton variant="primary" onClick={() => { void handleConfirmTakeover(); }}>
+                                Continuar
+                            </HmiButton>
+                        </div>
                     </div>
                 ) : (
                     <form className="flex flex-col gap-2" onSubmit={handleSubmit}>

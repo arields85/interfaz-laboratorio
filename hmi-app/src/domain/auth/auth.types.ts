@@ -20,9 +20,12 @@ export interface AuthSession {
     absoluteExpiresAt?: number | null;
 }
 
+// Closed set of failures the login UI reacts to beyond showing the message.
+export type AuthFailureCode = 'ADMIN_SESSION_ACTIVE_ELSEWHERE';
+
 export type AuthResult =
     | { ok: true; user: AuthUser }
-    | { ok: false; error: string };
+    | { ok: false; error: string; code?: AuthFailureCode };
 
 export interface AdministratorIdentity {
     username: string;

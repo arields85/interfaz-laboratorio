@@ -31,10 +31,14 @@ const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
 const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
 const SHARED_CONFIG_WRITE_ROUTE = '/api/prisma/admin/hmi-config';
 const CSRF_TOKEN_LENGTH = 43;
+export const SESSION_REPLACED_CODE = 'ADMIN_SESSION_REPLACED';
+export const SESSION_ACTIVE_ELSEWHERE_CODE = 'ADMIN_SESSION_ACTIVE_ELSEWHERE';
 const PUBLIC_ERROR_CODES = new Set([
     'ADMIN_CREDENTIAL_BLANK',
     'ADMIN_CREDENTIAL_TOO_LARGE',
     'AUTH_CONFIGURATION_INVALID',
+    SESSION_ACTIVE_ELSEWHERE_CODE,
+    SESSION_REPLACED_CODE,
     'AUTHENTICATION_REQUIRED',
     'AUTH_NOT_CONFIGURED',
     'AUTH_STORAGE_UNAVAILABLE',
@@ -161,6 +165,7 @@ export class AdminAuthClient {
     private readonly fetcher: typeof fetch;
     private readonly now: () => number;
     private readonly protectedRequests = new Set<AbortController>();
+    private readonly sessionReplacedListeners = new Set<() => void>();
 
     // Native fetch must be bound to the global receiver; a bare method call on this
     // instance throws "Illegal invocation" in browsers. Injected fetchers are untouched.
@@ -176,6 +181,13 @@ export class AdminAuthClient {
         this.protectedRequests.clear();
     }
 
+    // Any request (session refresh, credentials, shared-config writes) can learn that another login
+    // displaced this session; subscribers are told once per such response.
+    onSessionReplaced(listener: () => void): () => void {
+        this.sessionReplacedListeners.add(listener);
+        return () => { this.sessionReplacedListeners.delete(listener); };
+    }
+
     async status(signal?: AbortSignal): Promise<AdminAuthStatus> {
         const response = await this.request(`${AUTH_ROOT}/status`, { method: 'GET', signal });
         const payload = await readJson(response);
@@ -185,12 +197,13 @@ export class AdminAuthClient {
         return { configured: payload.configured };
     }
 
-    async login(username: string, password: string, signal?: AbortSignal): Promise<AdministratorIdentity> {
+    // The runtime keeps one administrator session: `takeover` confirms closing the one open elsewhere.
+    async login(username: string, password: string, signal?: AbortSignal, takeover = false): Promise<AdministratorIdentity> {
         const generation = this.#generation;
         const response = await this.request(`${AUTH_ROOT}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
+            body: JSON.stringify(takeover ? { username, password, takeover: true } : { username, password }),
             signal,
         });
         return this.acceptSession(await readJson(response), generation);
@@ -421,7 +434,11 @@ export class AdminAuthClient {
             throw new AdminAuthError('AUTH_TRANSPORT_UNAVAILABLE', null);
         }
         if (!response.ok) {
-            throw new AdminAuthError(await readErrorCode(response), response.status);
+            const code = await readErrorCode(response);
+            if (code === SESSION_REPLACED_CODE) {
+                for (const listener of [...this.sessionReplacedListeners]) listener();
+            }
+            throw new AdminAuthError(code, response.status);
         }
         return response;
     }

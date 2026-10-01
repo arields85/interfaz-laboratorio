@@ -15,6 +15,10 @@ export interface AuthStore {
     isHydrated: boolean;
     isAuthenticating: boolean;
     error: string | null;
+    // True when this browser's administrator session was closed because another login took over.
+    // Separate from `error`: that one is only visible while the login overlay is open, which a
+    // plain viewer (hidden access) rarely has.
+    sessionReplaced: boolean;
     hasPermission: (permission: Permission) => boolean;
 }
 
@@ -23,6 +27,7 @@ export const useAuthStore = create<AuthStore>()((_, get) => ({
     isHydrated: false,
     isAuthenticating: false,
     error: null,
+    sessionReplaced: false,
     hasPermission: (permission) =>
         get().session.user?.role.permissions.includes(permission) ?? false,
 }));

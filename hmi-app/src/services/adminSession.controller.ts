@@ -1,6 +1,11 @@
 import type { AdministratorIdentity, AuthResult, AuthSession, Permission } from '../domain';
 import { UNAUTHENTICATED_SESSION, useAuthStore, type AuthStore } from '../store/auth.store';
-import { AdminAuthError, adminAuthClient } from './adminAuth.service';
+import {
+    AdminAuthError,
+    SESSION_ACTIVE_ELSEWHERE_CODE,
+    SESSION_REPLACED_CODE,
+    adminAuthClient,
+} from './adminAuth.service';
 import {
     ADMIN_EXIT_INTENT_KEY,
     ADMIN_REVOCATION_EVENT_KEY,
@@ -11,12 +16,15 @@ import {
 export { ADMIN_EXIT_INTENT_KEY, ADMIN_REVOCATION_EVENT_KEY } from './adminAuth.storage';
 
 const UNCONFIRMED_LOGOUT_MESSAGE = 'No se pudo confirmar el cierre remoto de la sesión.';
+const ACTIVE_ELSEWHERE_MESSAGE = 'Hay una sesión de administrador abierta en otro equipo. Si continúa, esa sesión se cerrará.';
 
 export interface AdminAuthGateway {
     clearPrivateSession(): void;
-    login(username: string, password: string, signal?: AbortSignal): Promise<AdministratorIdentity>;
+    login(username: string, password: string, signal?: AbortSignal, takeover?: boolean): Promise<AdministratorIdentity>;
     session(signal?: AbortSignal): Promise<AdministratorIdentity>;
     logout(signal?: AbortSignal): Promise<void>;
+    // Fired when any request learns another login displaced this session (e.g. a shared-config write).
+    onSessionReplaced?(listener: () => void): () => void;
 }
 
 export interface AuthStatePort {
@@ -37,6 +45,7 @@ export function createMemoryAuthStatePort(): AuthStatePort {
         isHydrated: false,
         isAuthenticating: false,
         error: null,
+        sessionReplaced: false,
         hasPermission: (permission: Permission) =>
             state.session.user?.role.permissions.includes(permission) ?? false,
     };
@@ -73,6 +82,10 @@ function errorMessage(error: unknown): string {
     return 'No se pudo validar la sesión de administrador.';
 }
 
+function isSessionReplaced(error: unknown): boolean {
+    return error instanceof AdminAuthError && error.code === SESSION_REPLACED_CODE;
+}
+
 function isAbort(error: unknown): boolean {
     return error instanceof DOMException && error.name === 'AbortError';
 }
@@ -92,6 +105,7 @@ export class AdminSessionController {
     private exitPromise: Promise<void> | null = null;
     private expiryTimer: ReturnType<typeof setTimeout> | null = null;
     private started = false;
+    private unsubscribeReplaced: (() => void) | null = null;
 
     constructor(
         client: AdminAuthGateway,
@@ -114,6 +128,7 @@ export class AdminSessionController {
         this.storage.cleanupLegacyAuthority();
         this.eventTarget?.addEventListener('storage', this.handleStorage as EventListener);
         this.eventTarget?.addEventListener('focus', this.handleFocus as EventListener);
+        this.unsubscribeReplaced = this.client.onSessionReplaced?.(this.handleSessionReplaced) ?? null;
         void this.bootstrap().finally(() => {
             if (this.started && !this.state.get().isHydrated) void this.bootstrap();
         });
@@ -124,6 +139,8 @@ export class AdminSessionController {
         this.started = false;
         this.eventTarget?.removeEventListener('storage', this.handleStorage as EventListener);
         this.eventTarget?.removeEventListener('focus', this.handleFocus as EventListener);
+        this.unsubscribeReplaced?.();
+        this.unsubscribeReplaced = null;
         this.cancelRequest();
         this.clearExpiryTimer();
     }
@@ -137,7 +154,7 @@ export class AdminSessionController {
         return task;
     }
 
-    async login(username: string, password: string): Promise<AuthResult> {
+    async login(username: string, password: string, options: { takeover?: boolean } = {}): Promise<AuthResult> {
         const invocationEpoch = this.epoch;
         await this.logoutPromise;
         await this.pendingExitMutation;
@@ -147,7 +164,7 @@ export class AdminSessionController {
         const { epoch, signal } = this.beginRequest();
         this.client.clearPrivateSession();
         this.state.set({ isAuthenticating: true, error: null });
-        const request = this.client.login(username, password, signal);
+        const request = this.client.login(username, password, signal, options.takeover === true);
         const settlement = request.then(() => undefined, () => undefined);
         this.activeAuthentication = settlement;
         try {
@@ -158,6 +175,11 @@ export class AdminSessionController {
             return { ok: true, user: this.state.get().session.user! };
         } catch (error) {
             if (!this.isCurrent(epoch) || isAbort(error)) return { ok: false, error: 'La solicitud fue cancelada.' };
+            if (error instanceof AdminAuthError && error.code === SESSION_ACTIVE_ELSEWHERE_CODE) {
+                // Not a failed login: the password was right. The overlay asks before taking over.
+                this.suspend(null, true);
+                return { ok: false, error: ACTIVE_ELSEWHERE_MESSAGE, code: SESSION_ACTIVE_ELSEWHERE_CODE };
+            }
             const message = errorMessage(error);
             this.suspend(message, true);
             return { ok: false, error: message };
@@ -175,6 +197,10 @@ export class AdminSessionController {
 
     async handleProtectedRequestError(error: unknown): Promise<void> {
         if (!(error instanceof AdminAuthError)) return;
+        if (isSessionReplaced(error)) {
+            this.handleSessionReplaced();
+            return;
+        }
         if (error.status === 401) {
             this.cancelRequest();
             this.client.clearPrivateSession();
@@ -222,6 +248,10 @@ export class AdminSessionController {
             if (this.isCurrent(epoch) && !this.storage.hasExitIntent()) this.applyIdentity(identity);
         } catch (error) {
             if (!this.isCurrent(epoch) || isAbort(error)) return;
+            if (isSessionReplaced(error)) {
+                this.handleSessionReplaced();
+                return;
+            }
             this.suspend(error instanceof AdminAuthError && error.status === 401 ? null : errorMessage(error), true);
         } finally {
             if (this.isCurrent(epoch)) this.state.set({ isHydrated: true, isAuthenticating: false });
@@ -297,7 +327,13 @@ export class AdminSessionController {
             this.suspend('La sesión de administrador expiró.', true);
             return;
         }
-        this.state.set({ session: toSession(identity), isHydrated: true, isAuthenticating: false, error: null });
+        this.state.set({
+            session: toSession(identity),
+            isHydrated: true,
+            isAuthenticating: false,
+            error: null,
+            sessionReplaced: false,
+        });
         this.armExpiry(identity.absoluteExpiresAt);
     }
 
@@ -354,6 +390,14 @@ export class AdminSessionController {
     };
 
     private handleFocus = (): void => { void this.refresh(); };
+
+    // Another login took this session over. Authority is dropped like any other 401 (the guarded
+    // routes then send the browser to the viewer); the flag lets the UI say why.
+    private handleSessionReplaced = (): void => {
+        this.cancelRequest();
+        this.suspend(null, true);
+        this.state.set({ sessionReplaced: true });
+    };
 }
 
 export const adminSessionController = new AdminSessionController(adminAuthClient);
