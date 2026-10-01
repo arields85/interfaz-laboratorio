@@ -26,6 +26,7 @@ import {
 } from '../services/linkCornerAccents.service';
 import { FRAME_RADIUS_STORAGE_KEY, THEME_STYLE_STORAGE_KEY } from '../services/themeStyle.service';
 import { VIEWER_ENTRANCE_STORAGE_KEY } from '../services/viewerEntranceStyle.service';
+import { SHADER_PARAMS_STORAGE_KEY } from '../store/shaderParams.store';
 import {
     MAX_SHARED_CONFIG_BATCH_OPERATIONS,
     MAX_SHARED_CONFIG_KEY_LENGTH,
@@ -130,7 +131,7 @@ describe('shared config domain', () => {
             LINK_ACCENT_GEOMETRY_STORAGE_KEY,
             DESIGN_FONT_STORAGE_KEY,
             DESIGN_COLOR_STORAGE_KEY,
-            'hmi-shader-params',
+            SHADER_PARAMS_STORAGE_KEY,
         ].sort());
         for (const key of SHARED_CONFIG_KEYS) expect(isValidSharedConfigKey(key)).toBe(true);
         expect(new Set(SHARED_CONFIG_KEYS).size).toBe(SHARED_CONFIG_KEYS.length);

@@ -30,7 +30,7 @@ import {
     THEME_STYLE_STORAGE_KEY,
 } from '../services/themeStyle.service';
 import { applyViewerEntranceOverrides, VIEWER_ENTRANCE_STORAGE_KEY } from '../services/viewerEntranceStyle.service';
-import { useShaderParamsStore } from '../store/shaderParams.store';
+import { SHADER_PARAMS_STORAGE_KEY, useShaderParamsStore } from '../store/shaderParams.store';
 
 // =============================================================================
 // Shared configuration appliers
@@ -41,7 +41,6 @@ import { useShaderParamsStore } from '../store/shaderParams.store';
 // preview of those edits; the held changes are applied when the last hold is released.
 // =============================================================================
 
-const SHADER_PARAMS_STORAGE_KEY = 'hmi-shader-params';
 const DATA_CONNECTION_KEYS: readonly string[] = [
     LS_KEY_BASE_URL,
     LS_KEY_ENDPOINT,

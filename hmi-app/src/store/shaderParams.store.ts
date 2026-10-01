@@ -547,6 +547,8 @@ function mergeShaderPersistedState(
     };
 }
 
+export const SHADER_PARAMS_STORAGE_KEY = 'hmi-shader-params';
+
 export const useShaderParamsStore = create<ShaderParamsStore>()(
     persist(
         (set) => ({
@@ -579,7 +581,7 @@ export const useShaderParamsStore = create<ShaderParamsStore>()(
                 }),
         }),
         {
-            name: 'hmi-shader-params',
+            name: SHADER_PARAMS_STORAGE_KEY,
             storage: createJSONStorage(() => sharedConfigStorage),
             partialize: (state) => ({ params: state.params }),
             merge: mergeShaderPersistedState,

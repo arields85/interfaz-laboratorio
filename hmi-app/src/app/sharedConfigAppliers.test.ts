@@ -8,13 +8,11 @@ import { INSTRUMENT_THEME_STYLE, THEME_STYLE_STORAGE_KEY } from '../services/the
 import { useFrameShapeStore } from '../store/frameShape.store';
 import { useIconCutoutStore } from '../store/iconCutout.store';
 import { useThemeStylePresetStore } from '../store/themeStylePreset.store';
-import { SHADER_DEFAULTS, useShaderParamsStore } from '../store/shaderParams.store';
+import { SHADER_DEFAULTS, SHADER_PARAMS_STORAGE_KEY, useShaderParamsStore } from '../store/shaderParams.store';
 import { localStorageSharedConfig } from '../test/localStorageSharedConfig';
 import { LS_KEY_BASE_URL } from '../config/dataConnection.config';
 import { holdSharedConfigReapply } from '../services/sharedConfigReapplyHold.service';
 import { applySharedConfigToDocument, startSharedConfigReapply } from './sharedConfigAppliers';
-
-const SHADER_KEY = 'hmi-shader-params';
 
 function remoteChange(key: string, value: string | null): void {
     if (value === null) localStorage.removeItem(key);
@@ -101,7 +99,7 @@ describe('shared configuration appliers', () => {
 
     it('rehydrates the shader parameters from the shared configuration', () => {
         const hue = SHADER_DEFAULTS.nebHue + 0.25;
-        remoteChange(SHADER_KEY, JSON.stringify({ state: { params: { ...SHADER_DEFAULTS, nebHue: hue } }, version: 0 }));
+        remoteChange(SHADER_PARAMS_STORAGE_KEY, JSON.stringify({ state: { params: { ...SHADER_DEFAULTS, nebHue: hue } }, version: 0 }));
 
         expect(useShaderParamsStore.getState().params.nebHue).toBe(hue);
     });
