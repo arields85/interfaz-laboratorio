@@ -4,6 +4,7 @@ import DashboardViewer from './DashboardViewer';
 import { makeGroupWidget, makeLayout, makeWidget } from '../../test/fixtures/dashboard.fixture';
 import type { WidgetConfig, WidgetLayout } from '../../domain/admin.types';
 import { previewLinkCornerAccents, resetLinkCornerAccentsOnDocument } from '../../services/linkCornerAccents.service';
+import { previewFrameShape, resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { useThemeStylePresetStore } from '../../store/themeStylePreset.store';
 
 type ResizeCallback = (entries: ResizeObserverEntry[], observer: ResizeObserver) => void;
@@ -66,6 +67,7 @@ describe('DashboardViewer link corner accents', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
         resetLinkCornerAccentsOnDocument();
+        resetFrameShapeOnDocument();
         useThemeStylePresetStore.getState().setClassic(true);
     });
 
@@ -124,6 +126,14 @@ describe('DashboardViewer link corner accents', () => {
         ]);
 
         expect(accents('m')).toBeNull();
+    });
+
+    it('still draws the layer, with the same inset, with the Pestana frame shape', () => {
+        previewFrameShape('tab');
+        renderViewer([makeWidget({ id: 'a', navigationTargetDashboardId: 'dash-2' })]);
+
+        expect(screen.getByTestId('dashboard-viewer-item-a').className).toContain('hmi-link-accents-host');
+        expect(accents('a')?.style.inset).toBe('calc(var(--widget-spacing) - var(--link-accent-offset))');
     });
 
     it('draws nothing when the setting is off', () => {

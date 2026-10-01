@@ -174,3 +174,33 @@ describe('index.css icon cutout', () => {
         expect(reduced).toContain('[data-icon-cutout]::before');
     });
 });
+
+describe('index.css icon cutout selector guard', () => {
+    const ALLOWED = ':is(.glass-panel, .widget-state-warning, .widget-state-critical)[data-icon-cutout]';
+
+    /** Every selector of the stylesheet that names both a `.glass-panel*` class and `[data-icon-cutout]`. */
+    function combiningSelectors(css: string): string[] {
+        const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+        const found: string[] = [];
+        for (const match of withoutComments.matchAll(/([^{}]+){/g)) {
+            const prelude = match[1].split(ALLOWED).join('');
+            for (const selector of prelude.split(',')) {
+                if (/\.glass-panel/.test(selector) && selector.includes('[data-icon-cutout]')) {
+                    found.push(selector.trim());
+                }
+            }
+        }
+
+        return found;
+    }
+
+    it('only the clearing selector (rest and :hover) combines .glass-panel with [data-icon-cutout]', () => {
+        expect(combiningSelectors(indexCss)).toEqual([]);
+    });
+
+    it('the guard catches a bare combination and a group one', () => {
+        expect(combiningSelectors('.glass-panel[data-icon-cutout] { color: red; }')).toHaveLength(1);
+        expect(combiningSelectors('.glass-panel-group[data-icon-cutout]:hover { color: red; }')).toHaveLength(1);
+        expect(combiningSelectors(`${ALLOWED}, ${ALLOWED}:hover { color: red; }`)).toEqual([]);
+    });
+});
