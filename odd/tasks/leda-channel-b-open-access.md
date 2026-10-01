@@ -47,7 +47,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 
 - [x] B1 — Runtime: state schema v3 with migration from v2 and a locked writer. Route: delegated (state module + tests).
 - [x] B2 — Runtime: admission flow in the bot (request on `/start`, status replies, pending cap, approval notice). Route: delegated.
-- [ ] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
+- [x] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
 - [ ] B4 — Runtime: admin HTTP routes to list, approve, reject and revoke chats. Route: delegated.
 - [ ] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
 - [ ] B5b — HMI: enable the topbar bell (`Topbar.tsx:198-206`, today a disabled placeholder) as a notification panel that lists pending Channel B requests, with approve and reject actions and a pending-count badge. It is only active with an admin session (`shouldShowAdminActions`). Other viewers keep today's disabled bell, so requester names are never shown to them. It polls only while the admin session is active. Route: delegated.
@@ -82,6 +82,8 @@ Strict mode ON (source: global user configuration). Runners:
     - `R3-v2-read-now-writes` (`telegram_lifecycle.py:185-188`): `read()` writes the migrated file, so a read has a side effect. It must stay under the lock and be idempotent, and the admin list must cope with it.
     - `R3-add-pending-result-ignored` (`local_presentation.py:974-975`): the pending-cap check and `add_pending` are two separate steps. Do them in one locked `update`.
     - `R3-approval-notice-cross-thread` (`local_presentation.py:979-981`): `send_approval_notice` will be called from the admin HTTP thread. Make the send safe across threads.
+- 2026-10-01: B3 done in `abb39c2` (delegated writer). RED: both new/changed test modules failed to import (`leda_runtime.channel_b_admission` did not exist), so all 19 new limiter/audit tests and the 12 new bot/repository tests failed. GREEN: full runtime suite 1969 tests OK (clean env, temp `LEDA_RUNTIME_STATE_DIR`). New `channel_b_admission.py` holds the bounded in-memory `ChatMessageLimiter` (10 messages per 60 s per chat, injectable clock, LRU-bounded at 1,024 chats) and `AdmissionAuditLog` (`leda_channel_b_admission_audit.jsonl` in the state directory, 1 MiB then one `.1` backup, never raises). `TelegramStateRepository.request_access` does the pending-cap check and the insert in one locked step (`R3-add-pending-result-ignored`). `R3-v2-read-now-writes`: `read()` already ran the migrate-and-write under the repository lock; a concurrency test now pins that the migration is written once (it passed on first run, a characterization test, not a RED).
+- Route evidence: B3 delegated (writer for several non-trivial files).
 
 ## Acceptance criteria
 
