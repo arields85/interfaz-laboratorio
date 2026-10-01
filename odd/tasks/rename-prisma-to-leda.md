@@ -134,3 +134,19 @@ RED/GREEN evidence:
   - M7 `5c2febd`: the legacy-key check and the revision bump moved inside `BEGIN IMMEDIATE`, bumping only when a row moved. RED: the second-opener test saw revision 3 instead of 2; GREEN: 29 passed with `test_hmi_config`.
   - M4: README and the Migration design above state the current override rule and the fail-closed behavior.
   - Gates: `tsc -b` clean, lint clean, vitest 3779 passed, build ok, offline backend gate 1867 tests OK (PAC5 exit 0).
+- 2026-10-01 reviews and verification of the mechanical commit:
+  - The mechanical commit `862c706` is about 166k changed lines, so it was not natively reviewable. It was verified deterministically instead: the forward substitution (PRISMA→LEDA, Prisma→Leda, prisma→leda) applied to the pre-rename tree `c8d818c` reproduces 1072 of 1074 files byte for byte. The only 2 differences are the regenerated audio schema hashes (`ledaAudioMetric.generated.ts`, `audio_record_types.py`), and the bindings checker passes. `Directrices/` is untouched.
+  - The reverse substitution is ambiguous, because `hmi-app/src/vendor/leda-orb.*` already existed before the rename.
+  - `862c706..2d70495` (the L2 migrations and both live-check fixes): four lenses, approved and acknowledged (`review-9ae0121400e236d5`). Its warnings were fixed as M1–M7.
+  - `2d70495..e2644f2`: four lenses, approved and acknowledged (`review-2d94980247dec423`). Reviewed boundary `e2644f2`.
+  - Remaining non-blocking follow-ups:
+    - If `LedaCredentialKey` already exists with other files but no `master.key`, the final directory move fails. It fails closed with a clear error, and someone must clean up by hand.
+    - The POWERSHELL path and WINDOWS_ONLY skip helper are duplicated in two test modules.
+    - A redundant length check before `SequenceEqual`.
+    - One help line is not re-wrapped.
+    - `test_operations.py` and `test_runtime_safety.py` read `SystemRoot` inside test methods, so they would fail on Linux at run time (discovery is fine).
+
+## Status
+
+Complete. L1–L4 are checked, the mechanical commit is verified deterministically, and every hand-written slice was reviewed and approved. Merging and pushing are the user's decision. Old local state is kept as a backup, for the user to delete when satisfied: `%LOCALAPPDATA%\CoreAnalytics\Prisma`, `PrismaCredentialKey` and `Leda.incomplete-20261001-1150`.
+
