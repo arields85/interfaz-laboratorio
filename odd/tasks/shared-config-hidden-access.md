@@ -88,7 +88,7 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 - [x] T2 — Client `sharedConfigStorage` adapter: boot load with cache fallback, sync read API, admin batch writes with CSRF, and the revision poll with a subscription API. Tests.
 - [x] T3 — Move the content stores to the adapter: dashboards, templates, hierarchy, node types and the variable catalog, with query invalidation on a remote change.
 - [ ] T4 — Move the configuration modules to the adapter: data connection, HMI name, loader, temporal, Prisma orb, theme, frame shape, icon cutout, link accents, viewer entrance, design fonts and colors, and shader params. Re-apply on a remote change, replacing the `storage` listeners.
-- [ ] T5 — One-time migration action in the admin to upload this browser's configuration, with confirmation.
+- [x] T5 — Bootstrap fallback to this browser's local content while the server document was never written. (The upload action was dropped by the user: export/import covers the migration.)
 - [ ] T6 — Hidden access:
   - the Topbar hides the users and Prisma icons unless the browser-local flag is on;
   - `Ctrl+Alt+A` toggles the flag;
@@ -132,3 +132,10 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
   - Save notice: `SharedConfigSaveNotice` (admin-only strip mounted in `AdminLayout` under the header, `role="alert"`, Lucide `AlertTriangle`, "No se pudo guardar la configuración en el servidor." plus a "Reintentar" button calling `retrySave`), driven by `subscribeStatus`. The plain viewer never mounts it.
   - Question for T4: the keys `hmi:snapshot-export-*` and `hmi:prisma-runtime-mode` may need to stay per browser (they describe this browser's exporter and runtime mode, not shared configuration); decide when moving the configuration modules.
   - Gates: `npx tsc -b` clean, `npm run lint` clean, `npm test` 279 files / 3701 tests, `npm run build` ok, backend offline gate 1814 tests OK.
+- 2026-10-01 T5 done (`cd94723`). Scope change from the user: the upload action ("Subir la configuración de este navegador al servidor"), its confirmation dialog and the admin hint were dropped by the user: export/import covers the migration; the fallback keeps local data readable/exportable until the server is first written. Nothing of the upload was written.
+  - Live regression fixed: since T3 the viewer read an empty server document (revision 0) and showed "Sin Vistas Publicadas" while the data was intact in localStorage.
+  - RED: 5 adapter tests failed (no `legacyStorage` option, no `bootstrap` status) and the domain test failed with `SHARED_CONFIG_KEYS is not iterable`. GREEN: adapter + domain 39/39; full suite 279 files / 3707 tests.
+  - Fallback: while the loaded server document has revision 0 and no items, reads of the shared keys fall back to this browser's localStorage (read-only; no server write, no cache copy). `status.bootstrap === 'local-fallback'` exposes it (null otherwise). Any revision above 0 wins entirely; a poll that sees 0 to above 0 refetches and notifies the changed keys (including those that were served from local), so open pages reload. An unreachable server does not use the fallback.
+  - Shared keys: `SHARED_CONFIG_KEYS` in `hmi-app/src/domain/sharedConfig.types.ts` (the five content keys; T4 extends it). A domain test pins it to the existing key constants and excludes per-browser keys and the cache key.
+  - Decision: the first save while in fallback also stages this browser's other shared values, so that leaving the fallback (revision above 0) does not make unsaved-to-server data disappear (e.g. saving one template would otherwise hide the dashboards).
+
