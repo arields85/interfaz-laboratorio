@@ -351,6 +351,24 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             expect(resetButton()).toBeDisabled();
         });
 
+        it('treats a radius moved exactly to the default as no override, live and on save', () => {
+            writeStoredLinkCornerAccents(true);
+            writeStoredLinkAccentGeometry({ radiusPx: 20 });
+            const saveRef = createRef<() => void>();
+            render(<ThemeSettingsTab saveRef={saveRef} />);
+            fireEvent.change(radiusSlider(), { target: { value: '30' } });
+            expect(rootValue('--link-accent-radius')).toBe('30px');
+
+            fireEvent.change(radiusSlider(), { target: { value: '5' } });
+
+            expect(rootValue('--link-accent-radius')).toBe('');
+            expect(resetButton()).toBeDisabled();
+            act(() => {
+                saveRef.current?.();
+            });
+            expect(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY)).toBeNull();
+        });
+
         it('persists only the overrides on save and clears dirty', () => {
             writeStoredLinkCornerAccents(true);
             const saveRef = createRef<() => void>();

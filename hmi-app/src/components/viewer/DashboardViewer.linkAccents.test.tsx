@@ -28,12 +28,12 @@ vi.mock('./WidgetPresentationBoundary', () => ({
     default: (props: { widget: { id: string } }) => <div data-testid={`widget-renderer-${props.widget.id}`} />,
 }));
 
-function measure(container: HTMLElement) {
+function measure(container: HTMLElement, contentRect = { width: 1200, height: 675 }, borderBoxSize?: ResizeObserverSize[]) {
     const root = container.querySelector('[data-testid="dashboard-viewer-root"]');
     if (!root) {
         throw new Error('Dashboard viewer root was not rendered.');
     }
-    const entry = { target: root, contentRect: { width: 1200, height: 675 } } as ResizeObserverEntry;
+    const entry = { target: root, contentRect, borderBoxSize } as ResizeObserverEntry;
     act(() => {
         for (const callback of resizeCallbacks.get(root) ?? []) {
             callback([entry], {} as ResizeObserver);
@@ -97,6 +97,18 @@ describe('DashboardViewer link corner accents', () => {
         const root = screen.getByTestId('dashboard-viewer-root');
         expect(root.className).toContain('overflow-hidden');
         expect(root.style.padding).toBe('calc(var(--link-accent-offset) + var(--link-accent-thickness-hover))');
+    });
+
+    it('fits the grid to the content box of the padded root, not to its border box', () => {
+        const { container } = renderViewer([makeWidget({ id: 'a', navigationTargetDashboardId: 'dash-2' })]);
+
+        // jsdom has no layout, so the observer entry stands in for it: the content box is what the root reports
+        // after the gutter padding, while the border box would include it. The grid must follow the content box.
+        measure(container, { width: 800, height: 450 }, [{ inlineSize: 820, blockSize: 470 }]);
+
+        const frame = screen.getByTestId('dashboard-viewer-frame');
+        expect(frame.style.width).toBe('800px');
+        expect(frame.style.height).toBe('450px');
     });
 
     it('keeps the viewer edge-to-edge (no gutter) when the accents are off', () => {
