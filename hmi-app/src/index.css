@@ -1604,7 +1604,7 @@ h1, h2, h3, h4, h5, h6 {
    * animation is the frame accent's. */
   .hmi-link-accents {
     position: absolute;
-    /* Accent radius (auto: frame radius + offset). The length is measured from the MIDDLE of the arc, which sits at
+    /* Accent radius (the --link-accent-radius setting, default 5 px). The length is measured from the MIDDLE of the arc, which sits at
      * r * (1 - 1/sqrt 2) ~= 0.2929 r from the box corner on each axis: 0 shows nothing, any small value reveals a
      * piece of arc centred on the corner whatever the radius, larger values add the straight tails. */
     --link-accent-r: var(--link-accent-radius);

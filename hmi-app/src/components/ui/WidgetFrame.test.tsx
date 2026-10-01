@@ -208,6 +208,10 @@ describe('WidgetFrame', () => {
     });
 
     describe('tab width reporting (for the layers that follow the silhouette)', () => {
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
         function mockTabWidth(width: number) {
             vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
                 return this.dataset.testid === 'tab-frame-tab' ? width : 0;
