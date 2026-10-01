@@ -202,6 +202,11 @@ export function buildTabFrameGlowClipPath(geometry: TabFramePathGeometry, margin
 /**
  * Resolves a computed CSS length (`px` or `rem`) to pixels. Anything else (calc, var, keywords,
  * empty) resolves to 0 rather than a guess.
+ *
+ * Known limit: the other length units (`em`, `%`, `vw`, `vh`, `ch`, ...) are NOT converted, they resolve to 0 too.
+ * Resolving them needs the element they are relative to (a probe element or the layout), which this pure
+ * helper does not have. The `--tab-frame-*` tokens are authored in `px` or `rem`, so a token written in another
+ * unit reads as 0 and the silhouette degrades instead of drawing a wrong guess. Pinned by `tabFramePath.test.ts`.
  */
 export function parseCssLengthPx(value: string, rootFontSizePx: number): number {
     const trimmed = value.trim();

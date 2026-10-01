@@ -237,4 +237,10 @@ describe('parseCssLengthPx', () => {
         expect(parseCssLengthPx('', 16)).toBe(0);
         expect(parseCssLengthPx('auto', 16)).toBe(0);
     });
+
+    it('pins its unit limit: only px and rem resolve, every other length unit reads as 0 (no probe element)', () => {
+        for (const value of ['2em', '50%', '10vw', '10vh', '3ch', '2pt', '1cm']) {
+            expect(parseCssLengthPx(value, 16), value).toBe(0);
+        }
+    });
 });
