@@ -84,7 +84,7 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 
 ## Tasks
 
-- [ ] T1 — Server shared configuration store and routes (`hmi_config` store, GET document, GET revision, PUT batch with admin session and CSRF), plus routing doc and Vite proxy. Python tests.
+- [x] T1 — Server shared configuration store and routes (`hmi_config` store, GET document, GET revision, PUT batch with admin session and CSRF), plus routing doc and Vite proxy. Python tests.
 - [ ] T2 — Client `sharedConfigStorage` adapter: boot load with cache fallback, sync read API, admin batch writes with CSRF, and the revision poll with a subscription API. Tests.
 - [ ] T3 — Move the content stores to the adapter: dashboards, templates, hierarchy, node types and the variable catalog, with query invalidation on a remote change.
 - [ ] T4 — Move the configuration modules to the adapter: data connection, HMI name, loader, temporal, Prisma orb, theme, frame shape, icon cutout, link accents, viewer entrance, design fonts and colors, and shader params. Re-apply on a remote change, replacing the `storage` listeners.
@@ -107,3 +107,8 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 ## Progress
 
 - 2026-10-01: exploration done (configuration persistence map, Prisma runtime HTTP surface and auth, existing SSE and poll patterns). User decisions recorded. Feature document created.
+- 2026-10-01 T1 done (`db0c94f` runtime store and routes, `93afda8` proxy and routing doc).
+  - RED: `tests.test_hmi_config` failed with `ModuleNotFoundError: prisma_runtime.hmi_config_store`; the proxy test rows failed (3 failed) before the routes existed.
+  - GREEN: 17 focused backend tests; proxy test file 87/87; whole backend discover 1807 tests OK.
+  - Route decision: the session cookie is scoped to `/api/prisma/admin`, so it would not reach `/api/prisma/hmi-config`. The write is `PUT /api/prisma/admin/hmi-config`; the public reads stay at `GET /api/prisma/hmi-config` and `GET /api/prisma/hmi-config/revision`. The routes live in `AdminHttpBoundary` (`hmi_config_store=` parameter) and the store in `hmi_config_store.py` (file `<state>/hmi-config/hmi-config.sqlite3`, created lazily).
+  - Wire: GET document `{ok, revision, items:{key:string}}`; GET revision `{ok, revision}`; PUT body `{set?:{key:string}, delete?:[key]}` returns `{ok, revision}`. Bounds: key `[A-Za-z0-9:._-]` up to 128, value up to 1 MiB, 200 operations per batch, 512 keys, 8 MiB document. Errors: `HMI_CONFIG_INVALID_REQUEST` 400, `HMI_CONFIG_VALUE_TOO_LARGE` / `HMI_CONFIG_DOCUMENT_TOO_LARGE` / `HMI_CONFIG_REQUEST_TOO_LARGE` 413, `HMI_CONFIG_UNAVAILABLE` 503, plus the existing 401/403/415 codes.
