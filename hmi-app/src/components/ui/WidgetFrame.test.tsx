@@ -209,7 +209,7 @@ describe('WidgetFrame', () => {
 
     describe('tab width reporting (for the layers that follow the silhouette)', () => {
         function mockTabWidth(width: number) {
-            return vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
+            vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function offsetWidthMock(this: HTMLElement) {
                 return this.dataset.testid === 'tab-frame-tab' ? width : 0;
             });
         }
@@ -226,7 +226,7 @@ describe('WidgetFrame', () => {
 
         it('reports the tab width while the tab shape is rendered and null when it goes away', () => {
             previewFrameShape('tab');
-            const offsetWidth = mockTabWidth(180);
+            mockTabWidth(180);
             const onTabWidth = vi.fn();
 
             const { unmount } = renderReporting(onTabWidth);
@@ -235,19 +235,17 @@ describe('WidgetFrame', () => {
 
             unmount();
             expect(onTabWidth).toHaveBeenLastCalledWith(null);
-            offsetWidth.mockRestore();
         });
 
         it('reports an unmeasured tab (width 0) as PENDING (0), never as the standard shape (null)', () => {
             previewFrameShape('tab');
-            const offsetWidth = mockTabWidth(0);
+            mockTabWidth(0);
             const onTabWidth = vi.fn();
 
             renderReporting(onTabWidth);
 
             expect(onTabWidth).toHaveBeenCalledWith(0);
             expect(onTabWidth).not.toHaveBeenCalledWith(null);
-            offsetWidth.mockRestore();
         });
 
         it('reports nothing in the standard shape', () => {
@@ -260,7 +258,7 @@ describe('WidgetFrame', () => {
 
         it('reports null when the shape switches back to standard', () => {
             previewFrameShape('tab');
-            const offsetWidth = mockTabWidth(180);
+            mockTabWidth(180);
             const onTabWidth = vi.fn();
 
             renderReporting(onTabWidth);
@@ -268,7 +266,6 @@ describe('WidgetFrame', () => {
 
             act(() => previewFrameShape('standard'));
             expect(onTabWidth).toHaveBeenLastCalledWith(null);
-            offsetWidth.mockRestore();
         });
     });
 
