@@ -21,8 +21,10 @@ from leda_runtime.admin_auth import (
     AdminSessionActiveElsewhere,
     AuthUnavailable,
     LoginRateLimited,
+    PasswordChange,
     PasswordPolicyError,
     ScryptPasswordHasher,
+    digest_token,
 )
 from leda_runtime.admin_cli import run_cli
 from leda_runtime.storage_permissions import (
@@ -514,6 +516,157 @@ class AdminSingleSessionTests(unittest.TestCase):
         self.clock[0] = 1010.0 + 100
 
         self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "192.0.2.9"))
+
+class AdminPasswordChangeTests(unittest.TestCase):
+    """The administrator changes their own password while keeping the calling session."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.database = Path(self.temporary.name) / "auth" / "admin.sqlite3"
+        self.repository = AdminAuthRepository(self.database, permission_checker=lambda *_: None)
+        self.hasher = FastPasswordHasher()
+        self.repository.initialize_for_provisioning()
+        self.repository.provision_admin("admin", self.hasher.hash_password(VALID_PASSWORD), now=1000.0)
+        self.clock = [1010.0]
+        self.service = AdminAuthService(
+            self.repository, self.hasher, now=lambda: self.clock[0], idle_seconds=100, absolute_seconds=1000
+        )
+        self.session = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+
+    def add_other_session(self, name: str = "other-session") -> str:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
+            connection.execute(
+                "INSERT INTO admin_sessions VALUES (?, ?, 'admin', ?, ?, ?)",
+                (digest_token(name), "csrf", 1010.0, 1010.0, 2000.0),
+            )
+        return name
+
+    def change(self, current: str = VALID_PASSWORD, new: str = NEW_PASSWORD, source: str = "127.0.0.1"):
+        return self.service.change_password(self.session.session_id, current, new, source)
+
+    def test_success_stores_the_new_password_and_keeps_only_the_calling_session(self) -> None:
+        other = self.add_other_session()
+
+        self.assertIs(self.change(), PasswordChange.CHANGED)
+
+        self.assertIsNotNone(self.service.read_session(self.session.session_id))
+        self.assertIsNone(self.service.read_session(other))
+        self.assertEqual(self.repository.count_sessions(), 1)
+        self.assertIsNone(self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True))
+        self.assertIsNotNone(self.service.login("admin", NEW_PASSWORD, "127.0.0.1", takeover=True))
+
+    def test_revoked_sessions_are_not_marked_as_replaced(self) -> None:
+        other = self.add_other_session()
+
+        self.change()
+
+        self.assertFalse(self.service.was_session_replaced(other))
+
+    def test_the_credential_version_is_bumped(self) -> None:
+        before = self.repository.login_snapshot()[2]
+
+        self.change()
+
+        self.assertEqual(self.repository.login_snapshot()[2], before + 1)
+
+    def test_wrong_current_password_changes_nothing_and_counts_as_a_failed_attempt(self) -> None:
+        other = self.add_other_session()
+
+        outcome = self.change(current="wrong but sufficiently long password")
+
+        self.assertIs(outcome, PasswordChange.WRONG_CURRENT_PASSWORD)
+        self.assertEqual(self.repository.count_failure_rows(), 1)
+        self.assertIsNotNone(self.service.read_session(other))
+        self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True))
+
+    def test_repeated_wrong_current_passwords_exhaust_the_login_budget(self) -> None:
+        for _ in range(5):
+            self.assertIs(self.change(current="wrong but sufficiently long password"), PasswordChange.WRONG_CURRENT_PASSWORD)
+
+        with self.assertRaises(LoginRateLimited):
+            self.change()
+        with self.assertRaises(LoginRateLimited):
+            self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+
+    def test_an_oversized_current_password_is_a_wrong_password_not_an_error(self) -> None:
+        self.assertIs(self.change(current="x" * 1025), PasswordChange.WRONG_CURRENT_PASSWORD)
+
+    def test_success_clears_the_failure_budget_of_that_source(self) -> None:
+        self.change(current="wrong but sufficiently long password")
+
+        self.assertIs(self.change(), PasswordChange.CHANGED)
+
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_policy_violations_are_rejected_before_any_attempt_is_counted(self) -> None:
+        for candidate in ("too short", "x" * 1025):
+            with self.subTest(length=len(candidate)), self.assertRaisesRegex(PasswordPolicyError, "PASSWORD_POLICY_REJECTED"):
+                self.change(new=candidate)
+
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+        self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True))
+
+    def test_the_policy_is_the_one_the_cli_hasher_enforces(self) -> None:
+        for candidate in ("x" * 14, "x" * 15, "é" * 14, "é" * 512, "é" * 513):
+            with self.subTest(length=len(candidate)):
+                try:
+                    ScryptPasswordHasher(scrypt_fn=Mock(return_value=b"x" * 32)).hash_password(candidate)
+                    cli_accepts = True
+                except PasswordPolicyError:
+                    cli_accepts = False
+                try:
+                    self.change(new=candidate)
+                    service_accepts = True
+                except PasswordPolicyError:
+                    service_accepts = False
+                self.assertEqual(service_accepts, cli_accepts)
+                if service_accepts:  # the session survives a change, so the next candidate can start from here
+                    self.assertIsNotNone(self.service.read_session(self.session.session_id))
+                    self.assertIs(self.change(current=candidate, new=VALID_PASSWORD), PasswordChange.CHANGED)
+
+    def test_an_unchanged_password_is_refused_without_counting_an_attempt(self) -> None:
+        with self.assertRaisesRegex(PasswordPolicyError, "PASSWORD_UNCHANGED"):
+            self.change(new=VALID_PASSWORD)
+
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_a_caller_session_that_ended_gets_no_change(self) -> None:
+        self.service.revoke_session(self.session.session_id, self.session.csrf_token)
+
+        self.assertIs(self.change(), PasswordChange.SESSION_ENDED)
+
+        self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "127.0.0.1"))
+
+    def test_the_change_is_atomic_when_the_store_refuses_the_write(self) -> None:
+        other = self.add_other_session()
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.executescript(
+                "CREATE TRIGGER refuse_update BEFORE UPDATE ON administrator "
+                "BEGIN SELECT RAISE(ABORT, 'refused'); END;"
+            )
+
+        with self.assertRaisesRegex(AuthUnavailable, "AUTH_STORAGE_UNAVAILABLE"):
+            self.change()
+
+        self.assertIsNotNone(self.service.read_session(other))
+        self.assertIsNotNone(self.service.read_session(self.session.session_id))
+        self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True))
+
+    def test_a_reset_that_lands_during_verification_wins(self) -> None:
+        verify = self.hasher.verify_password
+
+        def verify_then_reset(password, record):
+            result = verify(password, record)
+            self.repository.reset_admin_password(self.hasher.hash_password("a reset administrator password"), now=1015.0)
+            return result
+
+        with patch.object(self.hasher, "verify_password", verify_then_reset):
+            outcome = self.change()
+
+        self.assertIs(outcome, PasswordChange.SESSION_ENDED)
+        self.assertIsNotNone(self.service.login("admin", "a reset administrator password", "127.0.0.1"))
+
 
 class AdminCliTests(unittest.TestCase):
     def test_provision_and_reset_use_non_echoing_reader_and_revoke_sessions(self) -> None:

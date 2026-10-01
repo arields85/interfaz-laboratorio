@@ -436,6 +436,177 @@ class AdminHttpTests(unittest.TestCase):
         self.assertEqual(results[0], results[1])
         self.assertEqual(results[0][1]["error"], "INVALID_CREDENTIALS")
 
+    PASSWORD_ROUTE = "/api/leda/admin/auth/password"
+    NEW_PASSWORD = "a different durable passphrase"
+
+    def change_password(self, client, token, *, json=None, headers=None, **environ):
+        defaults = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+        defaults.update(environ)
+        request_headers = {"Origin": "http://127.0.0.1:5173"}
+        if token is not None:
+            request_headers["X-CSRF-Token"] = token
+        request_headers.update(headers or {})
+        payload = {"currentPassword": PASSWORD, "newPassword": self.NEW_PASSWORD} if json is None else json
+        return client.post(self.PASSWORD_ROUTE, json=payload, headers=request_headers, environ_overrides=defaults)
+
+    def add_other_session(self, name="other-session") -> str:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
+            connection.execute(
+                "INSERT INTO admin_sessions VALUES (?, 'csrf', 'admin', 1010.0, 1010.0, 2000.0)",
+                (hashlib.sha256(name.encode()).hexdigest(),),
+            )
+        return name
+
+    def test_password_change_stores_the_new_password_and_keeps_the_caller_signed_in(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+        other = self.add_other_session()
+
+        response = self.change_password(client, token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertNotIn("Set-Cookie", response.headers)
+        self.assertEqual(client.get("/api/leda/admin/auth/session").get_json()["csrfToken"], token)
+        self.assertIsNone(self.service.read_session(other))
+        self.assertFalse(self.service.was_session_replaced(other))
+        self.assertEqual(self.login_with(self.client(), password=PASSWORD, takeover=True).status_code, 401)
+        self.assertEqual(self.login_with(self.client(), password=self.NEW_PASSWORD, takeover=True).status_code, 200)
+
+    def test_password_change_never_echoes_either_password(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+
+        for payload in (
+            {"currentPassword": "wrong but sufficiently long password", "newPassword": self.NEW_PASSWORD},
+            {"currentPassword": PASSWORD, "newPassword": "short"},
+        ):
+            body = self.change_password(client, token, json=payload).get_data(as_text=True)
+            for secret in (payload["currentPassword"], payload["newPassword"]):
+                self.assertNotIn(secret, body)
+
+    def test_wrong_current_password_is_a_distinct_401_and_counts_toward_the_login_budget(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+        wrong = {"currentPassword": "wrong but sufficiently long password", "newPassword": self.NEW_PASSWORD}
+
+        response = self.change_password(client, token, json=wrong)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "INVALID_CURRENT_PASSWORD"})
+        self.assertEqual(self.repository.count_failure_rows(), 1)
+        self.assertEqual(client.get("/api/leda/admin/auth/session").status_code, 200)
+
+        for _ in range(4):
+            self.change_password(client, token, json=wrong)
+        limited = self.change_password(client, token)
+
+        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(limited.get_json()["error"], "LOGIN_RATE_LIMITED")
+        self.assertEqual(self.login_with(self.client(), takeover=True).status_code, 429)
+
+    def test_a_policy_violation_is_a_400_that_counts_nothing(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+
+        for new_password in ("too short", "x" * 1025):
+            with self.subTest(length=len(new_password)):
+                response = self.change_password(
+                    client, token, json={"currentPassword": PASSWORD, "newPassword": new_password}
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json(), {"ok": False, "error": "PASSWORD_POLICY_REJECTED"})
+        same = self.change_password(client, token, json={"currentPassword": PASSWORD, "newPassword": PASSWORD})
+        self.assertEqual(same.status_code, 400)
+        self.assertEqual(same.get_json()["error"], "PASSWORD_UNCHANGED")
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_password_change_requires_a_session_and_a_csrf_token(self) -> None:
+        anonymous = self.change_password(self.client(), "irrelevant")
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(anonymous.get_json()["error"], "AUTHENTICATION_REQUIRED")
+
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+        for supplied in (None, "forged-token"):
+            with self.subTest(token=supplied):
+                response = self.change_password(client, supplied)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.get_json()["error"], "CSRF_VALIDATION_FAILED")
+        self.assertEqual(self.login_with(self.client(), takeover=True).status_code, 200)
+        self.assertIsNotNone(token)
+
+    def test_password_change_enforces_origin_and_host_checks(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+
+        for headers, environ in (
+            ({"Origin": "http://evil.test"}, {}),
+            ({}, {"HTTP_HOST": "evil.test"}),
+            ({}, {"REMOTE_ADDR": "203.0.113.8"}),
+        ):
+            with self.subTest(headers=headers, environ=environ):
+                response = self.change_password(client, token, headers=headers, **environ)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.get_json()["error"], "AUTH_TRANSPORT_REJECTED")
+
+    def test_password_change_rejects_malformed_bodies_before_any_attempt_is_counted(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+        headers = {"Origin": "http://127.0.0.1:5173", "X-CSRF-Token": token}
+        environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+
+        for payload in (
+            None,
+            [],
+            {},
+            {"currentPassword": PASSWORD},
+            {"currentPassword": PASSWORD, "newPassword": 7},
+            {"currentPassword": None, "newPassword": self.NEW_PASSWORD},
+            {"currentPassword": PASSWORD, "newPassword": self.NEW_PASSWORD, "extra": "x"},
+        ):
+            with self.subTest(payload=payload):
+                response = client.post(
+                    self.PASSWORD_ROUTE,
+                    data=b"null" if payload is None else None,
+                    json=payload if payload is not None else None,
+                    content_type="application/json",
+                    headers=headers,
+                    environ_overrides=environ,
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json(), {"ok": False, "error": "INVALID_PASSWORD_CHANGE_REQUEST"})
+        not_json = client.post(
+            self.PASSWORD_ROUTE, data=b"x", content_type="text/plain", headers=headers, environ_overrides=environ
+        )
+        self.assertEqual(not_json.status_code, 415)
+        oversized = client.post(
+            self.PASSWORD_ROUTE,
+            json={"currentPassword": "x" * 20000, "newPassword": self.NEW_PASSWORD},
+            headers=headers,
+            environ_overrides=environ,
+        )
+        self.assertEqual(oversized.status_code, 413)
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_password_change_is_atomic_when_the_store_refuses_the_write(self) -> None:
+        client = self.client()
+        token = self.login(client).get_json()["csrfToken"]
+        other = self.add_other_session()
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.executescript(
+                "CREATE TRIGGER refuse_update BEFORE UPDATE ON administrator "
+                "BEGIN SELECT RAISE(ABORT, 'refused'); END;"
+            )
+
+        response = self.change_password(client, token)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "AUTH_STORAGE_UNAVAILABLE")
+        self.assertIsNotNone(self.service.read_session(other))
+        self.assertEqual(client.get("/api/leda/admin/auth/session").status_code, 200)
+        self.assertEqual(self.login_with(self.client(), takeover=True).status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

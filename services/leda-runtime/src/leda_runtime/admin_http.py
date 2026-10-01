@@ -10,7 +10,15 @@ from urllib.parse import urlsplit
 
 from flask import Response, jsonify, request
 
-from .admin_auth import AdminSessionActiveElsewhere, AuthNotConfigured, AuthUnavailable, LoginRateLimited
+from .admin_auth import (
+    MAX_PASSWORD_BYTES,
+    AdminSessionActiveElsewhere,
+    AuthNotConfigured,
+    AuthUnavailable,
+    LoginRateLimited,
+    PasswordChange,
+    PasswordPolicyError,
+)
 from .bot_identity_reservation import TELEGRAM_BOT_IDENTITY_RESERVED
 from .channel_a_lifecycle import LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE, LEDA_CHANNEL_A_UNAUTHORIZED
 from .channel_a_manager import ChannelAManagerError
@@ -31,6 +39,9 @@ MAX_CREDENTIAL_REQUEST_BYTES = (
     MAX_SECRET_BYTES * MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE + MAX_CREDENTIAL_JSON_OVERHEAD_BYTES
 )
 MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
+PASSWORD_CHANGE_ROUTE = "/api/leda/admin/auth/password"
+# Two passwords, each bounded by the policy ceiling; six bytes covers JSON's longest single-byte escape.
+MAX_PASSWORD_CHANGE_REQUEST_BYTES = 2 * MAX_PASSWORD_BYTES * MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE + 1024
 # Shared HMI configuration. Public reads live outside the admin prefix because the
 # session cookie is scoped to COOKIE_PATH and must never reach them; the write is
 # mounted under the admin prefix so that cookie (and CSRF) authorize it.
@@ -564,6 +575,47 @@ class AdminHttpBoundary:
                 return self._error("CSRF_VALIDATION_FAILED", 403)
             response = Response(status=204)
             self._expire_session_cookie(response)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+        @app.post(PASSWORD_CHANGE_ROUTE)
+        def admin_auth_password():
+            """The administrator changes their own password; the calling session stays valid."""
+            rejected = self._allow(require_origin=True)
+            if rejected:
+                return rejected
+            session, rejected = self._authorized_session(require_csrf=True)
+            if rejected:
+                return rejected
+            if not request.is_json:
+                return self._error("JSON_REQUIRED", 415)
+            if request.content_length is None or request.content_length > MAX_PASSWORD_CHANGE_REQUEST_BYTES:
+                return self._error("PASSWORD_CHANGE_REQUEST_TOO_LARGE", 413)
+            payload = request.get_json(silent=True)
+            if (
+                not isinstance(payload, dict)
+                or set(payload) != {"currentPassword", "newPassword"}
+                or not isinstance(payload["currentPassword"], str)
+                or not isinstance(payload["newPassword"], str)
+            ):
+                return self._error("INVALID_PASSWORD_CHANGE_REQUEST", 400)
+            try:
+                outcome = self.auth_service.change_password(
+                    session.session_id, payload["currentPassword"], payload["newPassword"], request.remote_addr or ""
+                )
+            except PasswordPolicyError as error:
+                return self._error(str(error), 400)
+            except LoginRateLimited:
+                return self._error("LOGIN_RATE_LIMITED", 429)
+            except AuthNotConfigured:
+                return self._error("AUTH_NOT_CONFIGURED", 503)
+            except AuthUnavailable:
+                return self._error("AUTH_STORAGE_UNAVAILABLE", 503)
+            if outcome is PasswordChange.WRONG_CURRENT_PASSWORD:
+                return self._error("INVALID_CURRENT_PASSWORD", 401)
+            if outcome is PasswordChange.SESSION_ENDED:
+                return self._error("AUTHENTICATION_REQUIRED", 401)
+            response = jsonify({"ok": True})
             response.headers["Cache-Control"] = "no-store"
             return response
 

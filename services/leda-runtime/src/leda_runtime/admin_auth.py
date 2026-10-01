@@ -22,6 +22,9 @@ FAILURE_WINDOW_SECONDS = 15 * 60
 ACCOUNT_FAILURE_LIMIT = 5
 SOURCE_FAILURE_LIMIT = 20
 MAX_FAILURE_ROWS = 100
+# Password policy, mirrored by hmi-app/src/domain/adminPasswordPolicy.ts (pinned by a test there).
+MIN_PASSWORD_CHARACTERS = 15
+MAX_PASSWORD_BYTES = 1024
 # Markers left for displaced sessions (see replaced_sessions); bounded so the table cannot grow.
 MAX_REPLACED_ROWS = 64
 # Single definition of the marker table: schema init creates it, and the takeover write path
@@ -62,6 +65,12 @@ class AdminSessionActiveElsewhere(RuntimeError):
     """Raised after a verified password when another live session exists and no takeover was requested."""
 
 
+class PasswordChange(Enum):
+    CHANGED = "changed"
+    WRONG_CURRENT_PASSWORD = "wrong_current_password"
+    SESSION_ENDED = "session_ended"
+
+
 class SessionCreation(Enum):
     CREATED = "created"
     STALE_CREDENTIAL = "stale_credential"
@@ -78,18 +87,27 @@ class AuthSession:
     absolute_expires_at: float
 
 
+def password_bytes(password: str, *, provisioning: bool) -> bytes:
+    """Single password policy: used by provisioning, the CLI reset and the in-app change.
+
+    ``provisioning`` adds the minimum length that only applies to a password being set;
+    verifying an existing password only enforces the byte ceiling.
+    """
+    if not isinstance(password, str):
+        raise PasswordPolicyError("PASSWORD_INVALID")
+    encoded = password.encode("utf-8")
+    if len(encoded) > MAX_PASSWORD_BYTES or (provisioning and len(password) < MIN_PASSWORD_CHARACTERS):
+        raise PasswordPolicyError("PASSWORD_POLICY_REJECTED")
+    return encoded
+
+
 class ScryptPasswordHasher:
     def __init__(self, scrypt_fn: Callable | None = hashlib.scrypt):
         self._scrypt = scrypt_fn
 
     @staticmethod
     def _password_bytes(password: str, *, provisioning: bool) -> bytes:
-        if not isinstance(password, str):
-            raise PasswordPolicyError("PASSWORD_INVALID")
-        encoded = password.encode("utf-8")
-        if len(encoded) > 1024 or (provisioning and len(password) < 15):
-            raise PasswordPolicyError("PASSWORD_POLICY_REJECTED")
-        return encoded
+        return password_bytes(password, provisioning=provisioning)
 
     def _derive(self, password: bytes, salt: bytes) -> bytes:
         if self._scrypt is None:
@@ -259,6 +277,45 @@ class AdminAuthRepository:
                 connection.execute("DELETE FROM login_failures")
 
         self._translate_database_error(write)
+
+    def change_admin_password(
+        self,
+        credential_version: int,
+        password_record: dict,
+        keep_session_id: str,
+        *,
+        now: float,
+        idle_seconds: int,
+        account_key: str,
+        source: str,
+    ) -> bool:
+        """Store a new password and revoke every session except the caller's, atomically.
+
+        Returns False (changing nothing) when the credential moved since it was verified or the
+        calling session is no longer live: a concurrent reset or logout wins over this change.
+        """
+
+        def write() -> bool:
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute("SELECT credential_version FROM administrator WHERE singleton = 1").fetchone()
+                if row is None or row[0] != credential_version:
+                    return False
+                keep_hash = digest_token(keep_session_id)
+                caller = connection.execute(
+                    "SELECT * FROM admin_sessions WHERE session_id_hash = ?", (keep_hash,)
+                ).fetchone()
+                if caller is None or not _is_live_session(caller, now, idle_seconds):
+                    return False
+                connection.execute(
+                    "UPDATE administrator SET password_record = ?, credential_version = credential_version + 1, updated_at = ? WHERE singleton = 1",
+                    (json.dumps(password_record, sort_keys=True, separators=(",", ":")), now),
+                )
+                connection.execute("DELETE FROM admin_sessions WHERE session_id_hash != ?", (keep_hash,))
+                connection.execute("DELETE FROM login_failures WHERE account_key = ? AND source = ?", (account_key, source))
+                return True
+
+        return self._translate_database_error(write)
 
     def reserve_login_attempt(self, username: str, source: str, *, now: float) -> bool:
         def reserve() -> bool:
@@ -460,6 +517,43 @@ class AdminAuthService:
             if outcome is SessionCreation.ACTIVE_ELSEWHERE:
                 raise AdminSessionActiveElsewhere("ADMIN_SESSION_ACTIVE_ELSEWHERE")
             return session if outcome is SessionCreation.CREATED else None
+        finally:
+            self._hash_slot.release()
+
+    def change_password(self, session_id: str, current_password: str, new_password: str, source: str) -> PasswordChange:
+        """Change the administrator password for the calling session.
+
+        The new password is checked against the shared policy first, so a policy refusal says nothing
+        about the current password and spends no attempt. The current password then goes through the
+        login budget like a login does. Other sessions end without a replaced marker: they were not
+        displaced by another login.
+        """
+        password_bytes(new_password, provisioning=True)
+        if new_password == current_password:
+            raise PasswordPolicyError("PASSWORD_UNCHANGED")
+        if not self._hash_slot.acquire(blocking=False):
+            raise LoginRateLimited("LOGIN_RATE_LIMITED")
+        try:
+            now = self.now()
+            username, password_record, credential_version = self.repository.login_snapshot()
+            if not self.repository.reserve_login_attempt(username, source, now=now):
+                raise LoginRateLimited("LOGIN_RATE_LIMITED")
+            try:
+                current_ok = self.hasher.verify_password(current_password, password_record)
+            except PasswordPolicyError:
+                current_ok = False
+            if not current_ok:
+                return PasswordChange.WRONG_CURRENT_PASSWORD
+            changed = self.repository.change_admin_password(
+                credential_version,
+                self.hasher.hash_password(new_password),
+                session_id,
+                now=now,
+                idle_seconds=self.idle_seconds,
+                account_key=digest_token(username.strip().casefold()),
+                source=source,
+            )
+            return PasswordChange.CHANGED if changed else PasswordChange.SESSION_ENDED
         finally:
             self._hash_slot.release()
 
