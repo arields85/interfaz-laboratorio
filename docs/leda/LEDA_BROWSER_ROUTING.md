@@ -160,7 +160,12 @@ The IT host must expose the same browser routes and forward them to the correspo
 - HTTP methods, request bodies, status codes, and response headers;
 - query strings without decoding and re-encoding them;
 - cancellation and timeout propagation; and
-- progressive, unbuffered response delivery for `/api/leda/tts/live`.
+- progressive, unbuffered response delivery for `/api/leda/tts/live`; and
+- the real client address, sent as `X-Real-IP` with `proxy_set_header X-Real-IP $remote_addr;`. The proxy
+  must overwrite any client-supplied value; `X-Forwarded-For` is not used. The runtime keys the login and
+  password-change failure budgets on that address only when the TCP peer is loopback,
+  `LEDA_PUBLIC_ORIGIN` is configured and valid, and the header is exactly one IPv4/IPv6 address;
+  otherwise it uses the peer address (development through Vite is unchanged).
 
 The SPA fallback must never answer these API routes. A missing or unavailable upstream must remain an API failure rather than returning `index.html`.
 

@@ -147,6 +147,7 @@ Reglas que el proxy debe cumplir:
 2. **Conservar** método, cuerpo, código de estado, cabeceras de respuesta y la cadena de consulta sin recodificar. Cabeceras que deben llegar al backend: `X-Leda-Session-Capability`, `Cookie` (`leda_admin_session`, con alcance `/api/leda/admin`), `X-CSRF-Token`, `Origin`, `Content-Type`; y de vuelta `Set-Cookie`, `Cache-Control: no-store`.
 3. En las rutas `admin/*`, `hmi-config*` y `health` se **elimina** `X-Leda-Session-Capability` hacia el backend (igual que el proxy de desarrollo): la autoridad de administración es solo cookie + CSRF.
 4. `Host` debe ser el host público (`proxy_set_header Host $host`) y el par TCP debe ser loopback (nginx en el mismo contenedor).
+   Además, nginx debe enviar `proxy_set_header X-Real-IP $remote_addr;` en las rutas `/api/leda/`: el limitador de inicio de sesión usa esa cabecera como IP del cliente. `proxy_set_header` **sobrescribe** cualquier `X-Real-IP` enviado por el cliente; sin esa directiva el valor del cliente llegaría intacto y permitiría evadir el limitador. El backend **no** usa `X-Forwarded-For`.
 5. **SSE** (`/api/leda/events/stream`, keep-alive cada 15 s) y **PCM** (`/api/leda/tts/live`): `proxy_buffering off`, `proxy_http_version 1.1`, `Connection ""` y `proxy_read_timeout` largo. El backend ya envía `X-Accel-Buffering: no`.
 6. Tamaños: el snapshot admite hasta 1 MiB y la escritura de `admin/hmi-config` hasta 16 MiB por petición: `client_max_body_size` debe ser al menos 17m.
 7. Todo lo demás cae a la SPA: `try_files $uri /index.html` (la app usa `createBrowserRouter`).
@@ -183,6 +184,8 @@ server {
     # leda-proxy.conf:
     #   proxy_set_header Connection "";
     #   proxy_set_header Host $host;             # imprescindible para TransportPolicy
+    #   proxy_set_header X-Real-IP $remote_addr; # IP real del cliente para el limitador de login;
+    #                                            # SOBRESCRIBE cualquier valor del cliente (no use $proxy_add_x_forwarded_for)
 
     # --- Rutas con reescritura hacia :5057 ---------------------------------
     location = /api/leda/session            { proxy_pass http://leda_presentation/hmi/session; }
@@ -319,6 +322,8 @@ Ejecute con el usuario fijo y con `LEDA_RUNTIME_STATE_DIR` y `LEDA_CREDENTIAL_MA
 4. Abra `https://hmi.example.com/` (visor). Los íconos de usuarios y Leda están ocultos: **`Ctrl+Alt+A`** los revela (o la ruta `/acceso`).
 5. Inicie sesión de administrador; el cambio de contraseña y el guardado de configuración deben completar sin `403 AUTH_TRANSPORT_REJECTED` (si aparece, revise `Host`, `Origin` y `LEDA_PUBLIC_ORIGIN`).
 6. Confirme que `/api/leda/events/stream` permanece abierto (sin cortes por buffering/timeout) y que `docker logs` no muestra `AUTH_STORAGE_PERMISSIONS_INVALID`.
+7. Verifique que nginx sobrescribe `X-Real-IP`: desde un mismo equipo envíe seis inicios de sesión con contraseña incorrecta, cambiando en cada uno una cabecera falsa (`curl -sS -o /dev/null -w '%{http_code}
+' -X POST -H 'Content-Type: application/json' -H 'Origin: https://hmi.example.com' -H "X-Real-IP: 203.0.113.$i" -d '{"username":"admin","password":"contraseña-incorrecta-de-prueba"}' https://hmi.example.com/api/leda/admin/auth/login`, con `i` de 1 a 6). El sexto intento debe responder `429 LOGIN_RATE_LIMITED`; si todos responden `401`, la cabecera del cliente no se está sobrescribiendo. Los fallos de la prueba expiran a los 15 minutos; el inicio de sesión correcto desde ese equipo los limpia.
 
 Errores frecuentes: `503 AUTH_CONFIGURATION_INVALID` (origen mal formado), `403 AUTH_TRANSPORT_REJECTED` (host/origen/par no loopback), `AUTH_STORAGE_PERMISSIONS_INVALID` (UID, modos o enlaces simbólicos), `CREDENTIAL_STORAGE_UNAVAILABLE` (clave ausente, inaccesible o no coincide con la base).
 
@@ -328,7 +333,7 @@ Errores frecuentes: `503 AUTH_CONFIGURATION_INVALID` (origen mal formado), `403 
 
 - **Servidor de desarrollo de Flask**: no hay servidor WSGI en `requirements`; ambos procesos usan `app.run(threaded=True)`. El servicio de voz debe ser de **un solo proceso** (`WEB_CONCURRENCY > 1` o el *reloader* abortan el arranque) y no se admiten múltiples réplicas ni workers.
 - **Límite de sesiones**: el registro de sesiones de documento admite 64 simultáneas; al excederse, la creación responde `503 LEDA_SESSION_CAPACITY`.
-- **Limitador de inicio de sesión**: se calcula por la IP de origen que ve el backend; detrás de nginx todos los clientes aparecen como `127.0.0.1` (no hay `X-Forwarded-For` en el código). El presupuesto de intentos fallidos es compartido.
+- **Limitador de inicio de sesión**: el presupuesto de intentos fallidos se lleva por IP de cliente (hasta 5 fallos por cuenta y origen, y 20 por origen, en 15 minutos); un origen agotado no bloquea a otro. El backend toma la IP de `X-Real-IP` solo si el par TCP es loopback, `LEDA_PUBLIC_ORIGIN` está definido y válido, y la cabecera contiene exactamente una dirección IPv4/IPv6 válida; en cualquier otro caso usa la dirección del par TCP. Si nginx no sobrescribe `X-Real-IP` (§ ejemplo), un cliente podría fijar su propia IP y evadir el límite. Existe además un tope global de 100 filas de fallos vigentes que protege el almacenamiento: un atacante que rote entre muchas direcciones (por ejemplo, un bloque IPv6 propio) puede agotarlo y bloquear temporalmente todos los inicios de sesión hasta que expire la ventana; no se mitiga en la aplicación (use limitación por IP en nginx o el cortafuegos si lo considera necesario).
 - **Cierre**: el código no instala manejador de `SIGTERM`; una parada abrupta no ejecuta la limpieza (`finally`) de los gestores de Telegram. Use un `stop_grace_period` corto y no espere un cierre ordenado.
 - **Repositorio**: aún no hay Dockerfile, CI ni configuración de nginx; son entregables de IT.
 - **Scripts de operaciones** (`services/leda-runtime/operations/*.ps1`, `npm run dev`): son de desarrollo en Windows; no se usan en el servidor.
