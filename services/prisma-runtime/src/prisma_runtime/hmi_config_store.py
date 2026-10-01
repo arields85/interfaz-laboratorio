@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping
 
 MAX_KEY_LENGTH = 128
-MAX_VALUE_BYTES = 1024 * 1024
-MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
+MAX_VALUE_BYTES = 4 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
 MAX_BATCH_OPERATIONS = 200
 MAX_KEYS = 512
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9:._-]+$")
@@ -56,20 +57,31 @@ class HmiConfigStore:
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
+        self._schema_ready = False
+        self._schema_lock = threading.Lock()
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with closing(sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)) as connection:
-                connection.executescript(
-                    "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
-                    "CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL);"
-                    "INSERT OR IGNORE INTO meta (id, revision) VALUES (1, 0);"
-                )
+            with closing(self._open()) as connection:
                 yield connection
         except (sqlite3.Error, OSError) as error:
             raise HmiConfigUnavailable("HMI_CONFIG_UNAVAILABLE") from error
+
+    def _open(self) -> sqlite3.Connection:
+        """Open a connection; the schema is created and seeded once, so reads stay pure reads."""
+        if not self._schema_ready:
+            with self._schema_lock:
+                if not self._schema_ready:
+                    self.path.parent.mkdir(parents=True, exist_ok=True)
+                    with closing(sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)) as setup:
+                        setup.executescript(
+                            "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+                            "CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL);"
+                            "INSERT OR IGNORE INTO meta (id, revision) VALUES (1, 0);"
+                        )
+                    self._schema_ready = True
+        return sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)
 
     def read_revision(self) -> int:
         with self._connection() as connection:

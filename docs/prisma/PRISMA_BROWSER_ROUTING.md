@@ -46,8 +46,9 @@ runtime state dir; it never reaches the plant or Node-RED.
   `X-CSRF-Token` header and the same Origin/Host checks as the credential routes.
 - The write is mounted under `/api/prisma/admin` on purpose: the session cookie is scoped to that path
   and would not be sent to `/api/prisma/hmi-config`. The public reads stay outside the admin prefix.
-- Bounds: key 1-128 characters of `[A-Za-z0-9:._-]`; value a string up to 1 MiB (UTF-8); at most 200
-  operations per batch, 512 keys and 8 MiB in the whole document. Stable failures: `401
+- Bounds: key 1-128 characters of `[A-Za-z0-9:._-]`; value a string up to 4 MiB (UTF-8); at most 200
+  operations and 16 MiB of request body per batch, 512 keys and 32 MiB in the whole document. The browser
+  adapter splits its outgoing batches to respect the operation and request bounds. Stable failures: `401
   AUTHENTICATION_REQUIRED`, `403 CSRF_VALIDATION_FAILED` / `AUTH_TRANSPORT_REJECTED`, `415 JSON_REQUIRED`,
   `400 HMI_CONFIG_INVALID_REQUEST`, `413 HMI_CONFIG_VALUE_TOO_LARGE` / `HMI_CONFIG_DOCUMENT_TOO_LARGE` /
   `HMI_CONFIG_REQUEST_TOO_LARGE`, and `503 HMI_CONFIG_UNAVAILABLE`. Every response is `Cache-Control: no-store`.

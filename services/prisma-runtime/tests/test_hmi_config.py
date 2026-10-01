@@ -1,14 +1,19 @@
+import json
+import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+
+from werkzeug.test import EnvironBuilder, run_wsgi_app
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
-from prisma_runtime.admin_http import AdminHttpBoundary
+from prisma_runtime import hmi_config_store
+from prisma_runtime.admin_http import MAX_HMI_CONFIG_REQUEST_BYTES, AdminHttpBoundary
 from prisma_runtime.hmi_config_store import (
     MAX_DOCUMENT_BYTES,
     MAX_VALUE_BYTES,
@@ -74,6 +79,23 @@ class HmiConfigStoreTests(unittest.TestCase):
         with self.assertRaises(HmiConfigTooLarge):
             self.store.apply_batch({"hmi:overflow": "x"}, [])
         self.assertEqual(self.store.read_revision(), revision)
+
+    def test_bounds_are_coherent(self) -> None:
+        self.assertEqual(MAX_VALUE_BYTES, 4 * 1024 * 1024)
+        self.assertEqual(MAX_DOCUMENT_BYTES, 32 * 1024 * 1024)
+        self.assertGreaterEqual(MAX_HMI_CONFIG_REQUEST_BYTES, 4 * MAX_VALUE_BYTES)
+        self.assertGreaterEqual(MAX_DOCUMENT_BYTES, 2 * MAX_HMI_CONFIG_REQUEST_BYTES)
+        self.store.apply_batch({"hmi:max": "x" * MAX_VALUE_BYTES}, [])
+
+    def test_reads_do_not_take_the_write_lock_once_initialized(self) -> None:
+        self.store.apply_batch({"hmi:a": "1"}, [])
+        locker = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(locker.close)
+        locker.execute("BEGIN IMMEDIATE")
+        self.addCleanup(lambda: locker.execute("ROLLBACK"))
+        with patch.object(hmi_config_store, "BUSY_TIMEOUT_SECONDS", 0.05):
+            self.assertEqual(self.store.read_revision(), 1)
+            self.assertEqual(self.store.read_document(), (1, {"hmi:a": "1"}))
 
 
 class HmiConfigHttpTests(unittest.TestCase):
@@ -185,6 +207,69 @@ class HmiConfigHttpTests(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(invalid.get_json()["error"], "HMI_CONFIG_INVALID_REQUEST")
+
+    def test_request_too_large_is_rejected_with_413(self) -> None:
+        oversized = b'{"set":{"hmi:a":"' + b"x" * MAX_HMI_CONFIG_REQUEST_BYTES + b'"}}'
+        response = self.client.put(
+            WRITE_ROUTE,
+            data=oversized,
+            content_type="application/json",
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "HMI_CONFIG_REQUEST_TOO_LARGE"})
+        self.assertEqual(self.store.read_revision(), 0)
+
+    def test_missing_content_length_is_rejected_with_413(self) -> None:
+        builder = EnvironBuilder(
+            WRITE_ROUTE,
+            method="PUT",
+            data=b'{"set":{"hmi:a":"1"}}',
+            content_type="application/json",
+            headers={**self.headers, "Cookie": "prisma_admin_session=session-id"},
+            environ_overrides=self.environ,
+        )
+        environ = builder.get_environ()
+        environ.pop("CONTENT_LENGTH", None)
+        body, status, _ = run_wsgi_app(self.client.application.wsgi_app, environ)
+        self.assertTrue(status.startswith("413"), status)
+        self.assertEqual(json.loads(b"".join(body)), {"ok": False, "error": "HMI_CONFIG_REQUEST_TOO_LARGE"})
+        self.assertEqual(self.store.read_revision(), 0)
+
+    def test_document_too_large_is_rejected_with_413_and_rolled_back(self) -> None:
+        chunk = "x" * MAX_VALUE_BYTES
+        for index in range(MAX_DOCUMENT_BYTES // MAX_VALUE_BYTES):
+            self.assertEqual(self.write({"set": {"hmi:chunk%d" % index: chunk}}).status_code, 200)
+        revision = self.store.read_revision()
+        response = self.write({"set": {"hmi:overflow": "x"}})
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "HMI_CONFIG_DOCUMENT_TOO_LARGE"})
+        self.assertEqual(self.store.read_revision(), revision)
+
+    def test_unavailable_store_reports_503_on_write_and_reads(self) -> None:
+        blocker = self.root / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+        broken = AdminHttpBoundary(self.auth, hmi_config_store=HmiConfigStore(blocker / "hmi-config.sqlite3"))
+        client = create_app(
+            JsonFileStore(self.root / "snapshot3.json"), VoiceEventStore(), None, admin_http=broken
+        ).test_client()
+        client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        written = client.put(WRITE_ROUTE, json={"set": {"hmi:a": "1"}}, headers=self.headers, environ_overrides=self.environ)
+        self.assertEqual(written.status_code, 503)
+        self.assertEqual(written.get_json(), {"ok": False, "error": "HMI_CONFIG_UNAVAILABLE"})
+        for route in (READ_ROUTE, REVISION_ROUTE):
+            self.assertEqual(client.get(route, environ_overrides=self.environ).status_code, 503)
+
+    def test_missing_store_write_reports_unavailable(self) -> None:
+        boundary = AdminHttpBoundary(self.auth)
+        client = create_app(
+            JsonFileStore(self.root / "snapshot4.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("prisma_admin_session", "session-id", path="/api/prisma/admin")
+        response = client.put(WRITE_ROUTE, json={"set": {"hmi:a": "1"}}, headers=self.headers, environ_overrides=self.environ)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "HMI_CONFIG_UNAVAILABLE")
 
     def test_missing_store_reports_unavailable(self) -> None:
         boundary = AdminHttpBoundary(self.auth)
