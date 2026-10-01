@@ -531,6 +531,27 @@ and a secret-free configuration template. The virtual environment, caches,
 generated audio, snapshots, pairing state, credentials, backups, benchmark
 artifacts, VPN scripts, and Server launchers are intentionally excluded.
 
+## One-time migration from the Prisma names
+
+The assistant was renamed from Prisma to Leda. `start-local.ps1` and
+`bootstrap-local.ps1` call `Invoke-LedaLegacyLocalMigration`
+(`operations/runtime-environment.ps1`) before any read of the state or the key:
+
+- If `%LOCALAPPDATA%\CoreAnalytics\Leda` does not exist and `...\Prisma` does, the old
+  directory is **copied** (never moved, modified or deleted) except its `run\` folder
+  (stale process manifest and locks). Files whose names contain `prisma` are renamed inside
+  the copy (for example `prisma_voice_config.json` becomes `leda_voice_config.json`).
+  It is skipped when `LEDA_RUNTIME_STATE_DIR` is set.
+- If `...\LedaCredentialKey\master.key` does not exist and `...\PrismaCredentialKey\master.key`
+  does, the key is copied byte for byte. The credential store is encrypted with it.
+- An existing new directory or key is never overwritten, a repeated run does nothing, and
+  each migration prints what it did.
+- The shared HMI configuration keys `hmi:prisma-hmi-name` and `hmi:prisma-orb-visual-config`
+  are renamed to `hmi:leda-*` once, when `hmi_config_store` opens its database (the revision
+  is bumped once). The browser migrates its own `hmi:prisma-*` localStorage keys at boot.
+- There is no fallback for the old `PRISMA_*` environment variables or `/api/prisma/*` routes:
+  rename them in any external configuration.
+
 ## Legacy installation retired
 
 The legacy installation `C:\hmi_tts` was retired on 2026-09-29 by explicit user

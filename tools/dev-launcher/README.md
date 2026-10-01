@@ -46,7 +46,7 @@ either `.cmd` file:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LEDA_CREDENTIAL_MASTER_KEY_FILE` | `%LOCALAPPDATA%\CoreAnalytics\LedaCredentialKey\master.key` | Same default the previous Desktop launcher used. |
+| `LEDA_CREDENTIAL_MASTER_KEY_FILE` | `%LOCALAPPDATA%\CoreAnalytics\LedaCredentialKey\master.key` | Same default the previous Desktop launcher used. The first start copies the key from the old `PrismaCredentialKey` folder when the new one is missing (see the runtime README). |
 | `LEDA_DEV_CHROME_PATH` | `%ProgramFiles%\Google\Chrome\Application\chrome.exe` | Path to the Chrome executable. Override for a per-user install (typically under `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`) or a non-standard location. |
 | `LEDA_DEV_CHROME_USER_DATA_DIR` | `%LOCALAPPDATA%\CoreAnalytics\ChromeControl` | The CONTROL Chrome's own profile directory. |
 | `LEDA_DEV_CHROME_DEBUG_PORT` | `9222` | The localhost-only remote debugging port. |

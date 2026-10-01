@@ -202,7 +202,7 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 
 ## Status
 
-T1–T8 are complete. T8 (single administrator session) was added on 2026-10-01 at the user's request; its review fixups J1-J8 are applied and the fixup commits await a re-check. Merging into main and pushing are the user's decisions. Next: the Leda → Leda rename (a separate feature, branched from here).
+T1–T8 are complete. T8 (single administrator session) was added on 2026-10-01 at the user's request; its review fixups J1-J8 are applied and the fixup commits await a re-check. Merging into main and pushing are the user's decisions. Next: the assistant rename to Leda (a separate feature, branched from here).
 - 2026-10-01 T8 reviews:
   - `5129ef9..e8448cb`: four lenses, approved and acknowledged (`review-e07ac098cab5f6fc`). Its warnings were fixed as J1–J8.
   - `e8448cb..56b9840`: four lenses, approved and acknowledged (`review-e8cfd33175ef797b`). Reviewed boundary `56b9840`.
