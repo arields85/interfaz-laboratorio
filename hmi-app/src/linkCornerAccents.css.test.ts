@@ -21,8 +21,8 @@ describe('link corner accents tokens', () => {
 
     it('declares the offset (4px) and the Contorno accent values as tokens', () => {
         expect(root).toContain('--link-accent-offset: 4px;');
-        expect(root).toContain('--link-accent-length-rest: 12px;');
-        expect(root).toContain('--link-accent-length-hover: 6px;');
+        expect(root).toContain('--link-accent-length-rest: 30px;');
+        expect(root).toContain('--link-accent-length-hover: 22px;');
         expect(root).toContain('--link-accent-thickness-rest: 1px;');
         expect(root).toContain('--link-accent-thickness-hover: 1px;');
         expect(root).toContain('--link-accent-color-rest: #ffffff;');
@@ -38,7 +38,10 @@ describe('link corner accents layer', () => {
 
         expect(body).toContain('position: absolute;');
         expect(body).toContain('pointer-events: none;');
-        expect(body).toContain('border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));');
+        // Auto (frame radius + offset) unless the Tema radius slider writes `--link-accent-radius` on the root.
+        expect(body).toContain(
+            'border-radius: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));',
+        );
     });
 
     it('starts from the rest tokens on the registered accent properties', () => {
@@ -67,13 +70,13 @@ describe('link corner accents layer', () => {
         );
     });
 
-    it('measures the length from where the corner arc ends: each corner square is radius + offset + length', () => {
+    it('sizes each visible corner square by the length, from the corner of the layer (0 = nothing visible)', () => {
         const body = rule('.hmi-link-accents');
-        const along = 'calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length))';
 
-        expect(body).toContain(`--link-accent-reach: ${along};`);
-        expect(body).toContain('-webkit-mask-size: var(--link-accent-reach) var(--link-accent-reach);');
-        expect(body).toContain('mask-size: var(--link-accent-reach) var(--link-accent-reach);');
+        expect(body).toContain('-webkit-mask-size: var(--frame-accent-length) var(--frame-accent-length);');
+        expect(body).toContain('mask-size: var(--frame-accent-length) var(--frame-accent-length);');
+        expect(body).not.toContain('--link-accent-reach');
+        expect(body).not.toContain('--link-accent-corner');
     });
 
     it('switches to the hover tokens while the viewer item is hovered', () => {

@@ -29,11 +29,11 @@ describe('link corner accent lengths', () => {
         vi.restoreAllMocks();
     });
 
-    it('defaults equal the index.css tokens (12 px rest, 6 px hover) and the range is 0-40 px, step 1', () => {
-        expect(DEFAULT_LINK_ACCENT_LENGTHS).toEqual({ restPx: 12, hoverPx: 6 });
-        expect(indexCss).toMatch(/--link-accent-length-rest: 12px;/);
-        expect(indexCss).toMatch(/--link-accent-length-hover: 6px;/);
-        expect(LINK_ACCENT_LENGTH_LIMITS).toEqual({ min: 0, max: 40, step: 1 });
+    it('defaults equal the index.css tokens (30 px rest, 22 px hover) and the range is 0-60 px, step 1', () => {
+        expect(DEFAULT_LINK_ACCENT_LENGTHS).toEqual({ restPx: 30, hoverPx: 22 });
+        expect(indexCss).toMatch(/--link-accent-length-rest: 30px;/);
+        expect(indexCss).toMatch(/--link-accent-length-hover: 22px;/);
+        expect(LINK_ACCENT_LENGTH_LIMITS).toEqual({ min: 0, max: 60, step: 1 });
     });
 
     it('reads the defaults on a fresh install', () => {
@@ -41,20 +41,20 @@ describe('link corner accent lengths', () => {
     });
 
     it('stores only the overrides and removes the key when nothing differs', () => {
-        writeStoredLinkAccentLengths({ restPx: 24, hoverPx: 6 });
+        writeStoredLinkAccentLengths({ restPx: 24, hoverPx: 22 });
         expect(JSON.parse(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY) ?? '')).toEqual({ restPx: 24 });
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 24, hoverPx: 6 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 24, hoverPx: 22 });
 
-        writeStoredLinkAccentLengths({ restPx: 12, hoverPx: 6 });
+        writeStoredLinkAccentLengths({ restPx: 30, hoverPx: 22 });
         expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
     });
 
     it('clamps out-of-range numbers and snaps off-step ones', () => {
         localStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify({ restPx: 99, hoverPx: -5 }));
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 40, hoverPx: 0 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 60, hoverPx: 0 });
 
         localStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify({ restPx: 15.4 }));
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 15, hoverPx: 6 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 15, hoverPx: 22 });
     });
 
     it.each(['', 'nope', 'null', '5', '[1]', '{"restPx":"9"}', '{"restPx":null,"hoverPx":{}}'])(
@@ -69,7 +69,7 @@ describe('link corner accent lengths', () => {
     it('keeps the valid field when the other one is invalid', () => {
         localStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify({ restPx: 'x', hoverPx: 12 }));
 
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 12, hoverPx: 12 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 30, hoverPx: 12 });
     });
 
     it('survives unavailable storage on read and write', () => {
@@ -83,7 +83,7 @@ describe('link corner accent lengths', () => {
     });
 
     it('writes the root custom properties only for overridden values', () => {
-        applyLinkAccentLengthsToDocument({ restPx: 24, hoverPx: 6 });
+        applyLinkAccentLengthsToDocument({ restPx: 24, hoverPx: 22 });
 
         expect(root().getPropertyValue('--link-accent-length-rest')).toBe('24px');
         expect(root().getPropertyValue('--link-accent-length-hover')).toBe('');
@@ -102,11 +102,11 @@ describe('link corner accent lengths', () => {
     });
 
     it('re-applies the stored overrides at boot', () => {
-        writeStoredLinkAccentLengths({ restPx: 30, hoverPx: 4 });
+        writeStoredLinkAccentLengths({ restPx: 36, hoverPx: 4 });
 
         applyLinkAccentLengthsOverride();
 
-        expect(root().getPropertyValue('--link-accent-length-rest')).toBe('30px');
+        expect(root().getPropertyValue('--link-accent-length-rest')).toBe('36px');
         expect(root().getPropertyValue('--link-accent-length-hover')).toBe('4px');
     });
 });

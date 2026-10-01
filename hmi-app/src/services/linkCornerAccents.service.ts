@@ -1,4 +1,4 @@
-import type { LinkAccentLengths } from '../domain/linkCornerAccents.types';
+import type { LinkAccentGeometry, LinkAccentLengths } from '../domain/linkCornerAccents.types';
 import { useLinkCornerAccentsStore } from '../store/linkCornerAccents.store';
 import { normalizeStepValue } from '../utils/normalizeStepValue';
 
@@ -67,9 +67,9 @@ export function applyLinkCornerAccentsOverride(): void {
 export const LINK_ACCENT_LENGTHS_STORAGE_KEY = 'hmi-link-corner-accent-lengths';
 
 /** Keep equal to `--link-accent-length-rest` / `-hover` in `index.css` (a test pins it). */
-export const DEFAULT_LINK_ACCENT_LENGTHS: LinkAccentLengths = { restPx: 12, hoverPx: 6 };
+export const DEFAULT_LINK_ACCENT_LENGTHS: LinkAccentLengths = { restPx: 30, hoverPx: 22 };
 
-export const LINK_ACCENT_LENGTH_LIMITS = { min: 0, max: 40, step: 1 } as const;
+export const LINK_ACCENT_LENGTH_LIMITS = { min: 0, max: 60, step: 1 } as const;
 
 const LENGTH_PROPERTIES: Record<keyof LinkAccentLengths, string> = {
     restPx: '--link-accent-length-rest',
@@ -140,4 +140,96 @@ export function resetLinkAccentLengthsOnDocument(target: HTMLElement = document.
 /** Boot re-apply of the stored overrides. Call once from `main.tsx` before the app renders. */
 export function applyLinkAccentLengthsOverride(): void {
     applyLinkAccentLengthsToDocument(readStoredLinkAccentLengths());
+}
+
+// -----------------------------------------------------------------------------
+// Geometry of the accent frame (distance to the widget frame and corner radius)
+//
+// "Distancia al marco" is `--link-accent-offset` (default 4 px in `index.css`); "Radio de las esquinas"
+// is `--link-accent-radius`, absent = automatic (frame radius + distance, resolved by the CSS rule).
+// Same pattern as the lengths: only overrides are stored, and a value at its default removes the
+// root property.
+// -----------------------------------------------------------------------------
+export const LINK_ACCENT_GEOMETRY_STORAGE_KEY = 'hmi-link-corner-accent-geometry';
+
+/** Keep `offsetPx` equal to `--link-accent-offset` in `index.css`; `null` radius = automatic. */
+export const DEFAULT_LINK_ACCENT_GEOMETRY: LinkAccentGeometry = { offsetPx: 4, radiusPx: null };
+
+export const LINK_ACCENT_OFFSET_LIMITS = { min: 0, max: 16, step: 1 } as const;
+export const LINK_ACCENT_RADIUS_LIMITS = { min: 0, max: 48, step: 1 } as const;
+
+const OFFSET_PROPERTY = '--link-accent-offset';
+const RADIUS_PROPERTY = '--link-accent-radius';
+
+function snap(value: number, limits: { min: number; max: number; step: number }): number {
+    return normalizeStepValue(value, limits.min, limits.max, limits.step);
+}
+
+/** Defaults plus any valid stored override (out-of-range numbers are clamped, off-step ones snapped, anything else ignored). */
+export function readStoredLinkAccentGeometry(): LinkAccentGeometry {
+    const geometry: LinkAccentGeometry = { ...DEFAULT_LINK_ACCENT_GEOMETRY };
+    try {
+        const raw = localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY);
+        const parsed: unknown = raw ? JSON.parse(raw) : null;
+        if (!parsed || typeof parsed !== 'object') {
+            return geometry;
+        }
+
+        const { offsetPx, radiusPx } = parsed as Record<string, unknown>;
+        if (typeof offsetPx === 'number' && Number.isFinite(offsetPx)) {
+            geometry.offsetPx = snap(offsetPx, LINK_ACCENT_OFFSET_LIMITS);
+        }
+        if (typeof radiusPx === 'number' && Number.isFinite(radiusPx)) {
+            geometry.radiusPx = snap(radiusPx, LINK_ACCENT_RADIUS_LIMITS);
+        }
+    } catch { /* ignore unavailable or corrupt storage */ }
+
+    return geometry;
+}
+
+/** Persists only the values that differ from the defaults; nothing to store removes the key. */
+export function writeStoredLinkAccentGeometry(geometry: LinkAccentGeometry): void {
+    const overrides: Partial<LinkAccentGeometry> = {};
+    if (geometry.offsetPx !== DEFAULT_LINK_ACCENT_GEOMETRY.offsetPx) {
+        overrides.offsetPx = geometry.offsetPx;
+    }
+    if (geometry.radiusPx !== null) {
+        overrides.radiusPx = geometry.radiusPx;
+    }
+
+    try {
+        if (Object.keys(overrides).length === 0) {
+            localStorage.removeItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY);
+        } else {
+            localStorage.setItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY, JSON.stringify(overrides));
+        }
+    } catch { /* ignore unavailable storage */ }
+}
+
+/** Makes `geometry` live on the document root; a default value removes its property. */
+export function applyLinkAccentGeometryToDocument(
+    geometry: LinkAccentGeometry,
+    target: HTMLElement = document.documentElement,
+): void {
+    if (geometry.offsetPx === DEFAULT_LINK_ACCENT_GEOMETRY.offsetPx) {
+        target.style.removeProperty(OFFSET_PROPERTY);
+    } else {
+        target.style.setProperty(OFFSET_PROPERTY, `${geometry.offsetPx}px`);
+    }
+
+    if (geometry.radiusPx === null) {
+        target.style.removeProperty(RADIUS_PROPERTY);
+    } else {
+        target.style.setProperty(RADIUS_PROPERTY, `${geometry.radiusPx}px`);
+    }
+}
+
+/** Removes both custom properties, restoring the `index.css` defaults. */
+export function resetLinkAccentGeometryOnDocument(target: HTMLElement = document.documentElement): void {
+    applyLinkAccentGeometryToDocument(DEFAULT_LINK_ACCENT_GEOMETRY, target);
+}
+
+/** Boot re-apply of the stored overrides. Call once from `main.tsx` before the app renders. */
+export function applyLinkAccentGeometryOverride(): void {
+    applyLinkAccentGeometryToDocument(readStoredLinkAccentGeometry());
 }
