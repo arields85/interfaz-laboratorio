@@ -203,4 +203,12 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 ## Status
 
 T1–T8 are complete. T8 (single administrator session) was added on 2026-10-01 at the user's request; its review fixups J1-J8 are applied and the fixup commits await a re-check. Merging into main and pushing are the user's decisions. Next: the Prisma → Leda rename (a separate feature, branched from here).
+- 2026-10-01 T8 reviews:
+  - `5129ef9..e8448cb`: four lenses, approved and acknowledged (`review-e07ac098cab5f6fc`). Its warnings were fixed as J1–J8.
+  - `e8448cb..56b9840`: four lenses, approved and acknowledged (`review-e8cfd33175ef797b`). Reviewed boundary `56b9840`.
+  - Remaining non-blocking follow-ups:
+    - A lookup failure degrades to a plain 401 without logging (`R4-silent-lookup-degradation`).
+    - The test clock offsets are unexplained.
+    - The missing-table detection matches SQLite's "no such table" wording.
+    - The "replaced" notice can be lost if the client aborts the request that receives it, because the cookie is already expired. The user then sees a plain signed-out state instead of the notice. This is accepted.
 
