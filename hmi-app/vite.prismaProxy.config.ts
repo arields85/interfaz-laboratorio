@@ -82,6 +82,11 @@ export const PRISMA_PROXY_ROUTES: readonly PrismaProxyRoute[] = Object.freeze([
     createRoute('/api/prisma/admin/credentials/telegram_channel_a/status', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram_channel_a/status', ['GET'], true),
     createRoute('/api/prisma/admin/credentials/telegram_channel_a/apply', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram_channel_a/apply', ['POST'], true),
     createRoute('/api/prisma/admin/credentials/telegram_channel_a/verify', 'http://127.0.0.1:5057', '/api/prisma/admin/credentials/telegram_channel_a/verify', ['POST'], true),
+    // Shared HMI configuration: public reads (the session cookie is scoped to /api/prisma/admin
+    // and never reaches them) and the admin-only write under the admin prefix.
+    createRoute('/api/prisma/hmi-config', 'http://127.0.0.1:5057', '/api/prisma/hmi-config', ['GET'], true),
+    createRoute('/api/prisma/hmi-config/revision', 'http://127.0.0.1:5057', '/api/prisma/hmi-config/revision', ['GET'], true),
+    createRoute('/api/prisma/admin/hmi-config', 'http://127.0.0.1:5057', '/api/prisma/admin/hmi-config', ['PUT'], true),
     createRoute('/api/prisma/health', 'http://127.0.0.1:5057', '/health', ['GET'], true),
 ]);
 

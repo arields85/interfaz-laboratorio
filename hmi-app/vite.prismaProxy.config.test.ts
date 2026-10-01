@@ -94,6 +94,9 @@ describe('Prisma Vite proxy configuration', () => {
         ['/api/prisma/admin/credentials/telegram/apply', '/api/prisma/admin/credentials/telegram/apply', ['POST']],
         ['/api/prisma/admin/credentials/telegram/verify', '/api/prisma/admin/credentials/telegram/verify', ['POST']],
         ['/api/prisma/admin/credentials/telegram_channel_a/verify', '/api/prisma/admin/credentials/telegram_channel_a/verify', ['POST']],
+        ['/api/prisma/hmi-config', '/api/prisma/hmi-config', ['GET']],
+        ['/api/prisma/hmi-config/revision', '/api/prisma/hmi-config/revision', ['GET']],
+        ['/api/prisma/admin/hmi-config', '/api/prisma/admin/hmi-config', ['PUT']],
         ['/api/prisma/health', '/health', ['GET']],
     ])('declares the exact admin route %s with its method allowlist', (browserPath, upstreamPath, methods) => {
         const route = PRISMA_PROXY_ROUTES.find((candidate) => candidate.browserPath === browserPath);
@@ -107,6 +110,12 @@ describe('Prisma Vite proxy configuration', () => {
         '/api/prisma/snapshot%2Fextra',
         '/api/prisma%2Fsnapshot',
         '/api/prisma/unknown',
+        '/api/prisma/hmi-config/',
+        '/api/prisma/hmi-config/revision/',
+        '/api/prisma/hmi-config/extra',
+        '/api/prisma/hmi-config%2Frevision',
+        '/api/prisma/admin/hmi-config/',
+        '/api/prisma/admin/hmi-config/extra',
         '/api/prisma/admin/credentials/telegram_channel_a/',
         '/api/prisma/admin/credentials/telegram_channel_a/extra',
         '/api/prisma/admin/credentials/telegram_channel_a%2Fextra',

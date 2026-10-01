@@ -26,7 +26,31 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/prisma/admin/credentials/telegram/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Telegram (Canal B) bot token verification |
 | `/api/prisma/admin/credentials/telegram_channel_a` | `PUT`, `DELETE` | Same path on `http://127.0.0.1:5057` | Channel A credential save (applies/restarts the bot with the new token in the same request) and deletion (stops the bot) |
 | `/api/prisma/admin/credentials/telegram_channel_a/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Channel A bot token verification |
+| `/api/prisma/hmi-config` | `GET` | Same path on `http://127.0.0.1:5057` | Shared HMI configuration document (public read) |
+| `/api/prisma/hmi-config/revision` | `GET` | Same path on `http://127.0.0.1:5057` | Shared configuration revision (cheap poll, public read) |
+| `/api/prisma/admin/hmi-config` | `PUT` | Same path on `http://127.0.0.1:5057` | Admin-only batch write of the shared configuration |
 | `/api/prisma/health` | `GET` | `http://127.0.0.1:5057/health` | Passive runtime diagnostics |
+
+## Shared HMI configuration
+
+The shared configuration is the HMI's own settings (what an administrator configures in one browser
+and every other browser must show). It is stored by the runtime in its own SQLite file under the
+runtime state dir; it never reaches the plant or Node-RED.
+
+- `GET /api/prisma/hmi-config` returns `{"ok": true, "revision": <int>, "items": {<key>: <JSON string>}}`.
+  No login: every viewer reads it.
+- `GET /api/prisma/hmi-config/revision` returns `{"ok": true, "revision": <int>}`; this is the cheap poll.
+- `PUT /api/prisma/admin/hmi-config` writes a batch: `{"set": {<key>: <string>}, "delete": [<key>]}` (both
+  members optional, at least one non-empty, no key in both). It returns `{"ok": true, "revision": <int>}`
+  with the revision incremented once per batch. It requires the administrator session cookie plus the
+  `X-CSRF-Token` header and the same Origin/Host checks as the credential routes.
+- The write is mounted under `/api/prisma/admin` on purpose: the session cookie is scoped to that path
+  and would not be sent to `/api/prisma/hmi-config`. The public reads stay outside the admin prefix.
+- Bounds: key 1-128 characters of `[A-Za-z0-9:._-]`; value a string up to 1 MiB (UTF-8); at most 200
+  operations per batch, 512 keys and 8 MiB in the whole document. Stable failures: `401
+  AUTHENTICATION_REQUIRED`, `403 CSRF_VALIDATION_FAILED` / `AUTH_TRANSPORT_REJECTED`, `415 JSON_REQUIRED`,
+  `400 HMI_CONFIG_INVALID_REQUEST`, `413 HMI_CONFIG_VALUE_TOO_LARGE` / `HMI_CONFIG_DOCUMENT_TOO_LARGE` /
+  `HMI_CONFIG_REQUEST_TOO_LARGE`, and `503 HMI_CONFIG_UNAVAILABLE`. Every response is `Cache-Control: no-store`.
 
 Browser constants live in `hmi-app/src/config/prismaAssistant.config.ts`. Development-only targets and rewrite rules live in `hmi-app/vite.prismaProxy.config.ts` and must not be imported by browser modules.
 
