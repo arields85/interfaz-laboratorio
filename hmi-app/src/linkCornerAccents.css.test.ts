@@ -33,12 +33,15 @@ describe('link corner accents tokens', () => {
 });
 
 describe('link corner accents layer', () => {
-    it('is an inert absolute layer that follows the frame radius plus the offset', () => {
+    it('is an inert absolute layer with SQUARE corners, so the brackets are never clipped away', () => {
         const body = rule('.hmi-link-accents');
 
         expect(body).toContain('position: absolute;');
         expect(body).toContain('pointer-events: none;');
-        expect(body).toContain('border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));');
+        // A background is clipped to its own rounded border box: with a rounded layer (frame radius + offset, e.g.
+        // 16 px) the 8 px brackets sit entirely inside the rounded-off corners and are never painted.
+        expect(body).not.toMatch(/border-radius:\s*calc/);
+        expect(body).toContain('border-radius: 0;');
     });
 
     it('starts from the rest tokens on the registered accent properties', () => {

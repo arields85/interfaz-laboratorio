@@ -1592,9 +1592,11 @@ h1, h2, h3, h4, h5, h6 {
   /* Esquinas en widgets con enlace: capa hermana del widget en la superficie del ítem del visor
    * (fuera del marco, que recorta su desborde). Mismas propiedades registradas, mismo dibujo y
    * misma transición que el acento de `.glass-panel::after`; el hover es el del ítem del visor. */
+  /* Square corners on purpose: a background is clipped to its own rounded border box, so a rounded layer would
+   * hide the brackets inside its rounded-off corners. The brackets frame the widget's outer box like a viewfinder. */
   .hmi-link-accents {
     position: absolute;
-    border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));
+    border-radius: 0;
     pointer-events: none;
     --frame-accent-length: var(--link-accent-length-rest);
     --frame-accent-thickness: var(--link-accent-thickness-rest);

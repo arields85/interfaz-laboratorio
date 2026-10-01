@@ -89,6 +89,23 @@ describe('DashboardViewer link corner accents', () => {
         expect(screen.getByTestId('dashboard-viewer-item-a').className).toContain('hmi-link-accents-host');
     });
 
+    it('reserves a gutter inside the viewer so the accents of the outer widgets are never clipped by the page', () => {
+        renderViewer([makeWidget({ id: 'a', navigationTargetDashboardId: 'dash-2' })]);
+
+        // The grid fits the root's content box (padding excluded), so the brackets drawn outside the outer frames
+        // land in this gutter instead of on the clipping edge of the viewer and the page containers.
+        const root = screen.getByTestId('dashboard-viewer-root');
+        expect(root.className).toContain('overflow-hidden');
+        expect(root.style.padding).toBe('calc(var(--link-accent-offset) + var(--link-accent-thickness-hover))');
+    });
+
+    it('keeps the viewer edge-to-edge (no gutter) when the accents are off', () => {
+        previewLinkCornerAccents(false);
+        renderViewer([makeWidget({ id: 'a', navigationTargetDashboardId: 'dash-2' })]);
+
+        expect(screen.getByTestId('dashboard-viewer-root').style.padding).toBe('');
+    });
+
     it('positions the layer at the surface inset minus the offset token', () => {
         renderViewer([makeWidget({ id: 'a', navigationTargetDashboardId: 'dash-2' })]);
 

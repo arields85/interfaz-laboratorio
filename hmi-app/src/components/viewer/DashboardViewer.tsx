@@ -24,6 +24,15 @@ import { getWidgetFrameOption } from '../../utils/headerWidgets';
 import { resolveWidgetFrameVisible } from '../../utils/widgetFrameVisibility';
 
 /**
+ * Gutter the viewer keeps around the grid while the link corner accents are on: the grid fits the root's
+ * content box, so the brackets drawn just outside the outer frames land here instead of on the clipping edge of
+ * the viewer and of the page containers around it.
+ */
+const LINK_ACCENTS_GUTTER_STYLE: CSSProperties = {
+    padding: 'calc(var(--link-accent-offset) + var(--link-accent-thickness-hover))',
+};
+
+/**
  * Whether a grid widget draws a frame the entrance flash and outline can decorate: a text title
  * never has one, and a widget whose "Mostrar fondo y marco" option is off has none either.
  */
@@ -152,6 +161,7 @@ export default function DashboardViewer({
             ref={containerRef}
             data-testid="dashboard-viewer-root"
             className="flex h-full w-full items-center justify-center overflow-hidden"
+            style={linkAccentsActive ? LINK_ACCENTS_GUTTER_STYLE : undefined}
         >
             {hasFirstValidMeasurement ? (
                 <div
