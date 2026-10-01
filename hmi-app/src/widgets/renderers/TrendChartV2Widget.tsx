@@ -62,6 +62,7 @@ import {
     smoothPath,
 } from '../../utils/chartHelpers';
 import TrendChartV2InteractionLayer from '../../components/ui/TrendChartV2InteractionLayer';
+import { resolveTrendChartV2Title } from '../../utils/trendChartTitle';
 import { getNearestTimestampPoint } from '../../utils/trendChartV2Interaction';
 import ChartTooltip from '../../components/ui/ChartTooltip';
 import WidgetChartLayout from '../../components/ui/WidgetChartLayout';
@@ -357,13 +358,14 @@ function TrendChartV2PresentationRenderer({ widget, className, renderContext, pr
     const showLoading = presentationData.isLoadingData || (presentationData.isLoading && !hasData);
     const runtimeState = showLoading ? 'loading' : presentationData.runtimeState;
     const shouldShowState = showLoading || presentationData.isNoData || !hasData;
+    const frameTitle = resolveTrendChartV2Title(widget.title);
     const header = (
-        <WidgetHeader title={widget.title || 'Trend Chart V2'} icon={resolveHeaderIcon(widget.displayOptions?.icon) ?? TrendingUp} iconColor={TOKEN.icon} iconPosition="left" iconTestId="trend-chart-v2-header-icon" dataMode={resolveWidgetDataMode(widget) ?? undefined} dataModeTestId="trend-chart-v2-widget-data-mode" className={WIDGET_CHART_HEADER_CLASS} trailing={(
+        <WidgetHeader title={frameTitle} icon={resolveHeaderIcon(widget.displayOptions?.icon) ?? TrendingUp} iconColor={TOKEN.icon} iconPosition="left" iconTestId="trend-chart-v2-header-icon" dataMode={resolveWidgetDataMode(widget) ?? undefined} dataModeTestId="trend-chart-v2-widget-data-mode" className={WIDGET_CHART_HEADER_CLASS} trailing={(
             <div className="flex items-center gap-2"><WidgetHeaderTemporalControls variant="pill" testId="trend-chart-v2-widget-runtime-controls" indicatorTestId="trend-chart-v2-widget-runtime-control-indicator" groups={[{ testId: 'trend-chart-v2-widget-runtime-range-selector', options: RANGE_OPTIONS, selectedValue: displayedRange === 'custom' ? '24h' : displayedRange, onSelect: (value) => { presentationData.onRangeChange(value as Exclude<HistoryRangeV2, 'custom'>); presentationData.onCustomWindowChange(null); } }]} />{displayedCustomWindow && <button type="button" onClick={() => presentationData.onCustomWindowChange(null)} className="rounded-md border border-admin-accent/30 bg-admin-accent/10 px-2.5 py-1 uppercase text-admin-accent">Back to preset</button>}</div>
         )} />
     );
 
-    return <WidgetFrame widgetType={widget.type} title={widget.title || 'Trend Chart V2'} frameClassName="glass-panel" className="group relative p-5 overflow-hidden w-full h-full flex flex-col" outerClassName={className} data-prefetch-history-widget="true" data-resize-surface={renderContext?.surface ?? 'viewer'}>
+    return <WidgetFrame widgetType={widget.type} title={frameTitle} frameClassName="glass-panel" className="group relative p-5 overflow-hidden w-full h-full flex flex-col" outerClassName={className} data-prefetch-history-widget="true" data-resize-surface={renderContext?.surface ?? 'viewer'}>
         {header}
         <div ref={chartShellRef} className={WIDGET_CHART_CONTAINER_CLASS} data-testid="trend-chart-v2-chart-shell">
             {presentationData.isShowingRefreshFailedSnapshot && <HistoricalChartNotice variant="stale" testId="trend-chart-v2-historical-notice" />}
@@ -1180,11 +1182,13 @@ function LegacyTrendChartV2Widget({
         };
     }, []);
 
+    const frameTitle = resolveTrendChartV2Title(widget.title);
+
     return (
         <WidgetFrame
             ref={widgetRootRef}
             widgetType={widget.type}
-            title={widget.title || 'Trend Chart V2'}
+            title={frameTitle}
             frameClassName="glass-panel"
             className="group relative p-5 overflow-hidden w-full h-full flex flex-col"
             outerClassName={className}
@@ -1197,7 +1201,7 @@ function LegacyTrendChartV2Widget({
             data-render-height={String(renderDimensions.height)}
         >
             <WidgetHeader
-                title={widget.title || 'Trend Chart V2'}
+                title={frameTitle}
                 icon={HeaderIcon ?? undefined}
                 iconColor={TOKEN.icon}
                 iconPosition="left"

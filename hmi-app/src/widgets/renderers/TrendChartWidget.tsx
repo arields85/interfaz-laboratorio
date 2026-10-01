@@ -33,6 +33,7 @@ import {
     WIDGET_CHART_HEADER_CLASS,
 } from '../../components/ui/WidgetChartLayout.shared';
 import { isDataHistoryConnectionError } from '../../services/dataHistory.service';
+import { resolveTrendChartTitle } from '../../utils/trendChartTitle';
 import { resolveWidgetDataMode } from '../../utils/widgetDataMode';
 import TrendChartLegacyInteractionLayer from './TrendChartLegacyInteractionLayer';
 import {
@@ -492,9 +493,10 @@ function TrendChartPresentationRenderer({ widget, isLoadingData = false, classNa
     className?: string;
     presentationData: TrendChartPresentationData;
 }) {
+    const frameTitle = resolveTrendChartTitle(widget.title);
     const header = (
         <WidgetHeader
-            title={widget.title ?? 'Trend Chart'}
+            title={frameTitle}
             icon={TrendingUp}
             iconColor={TOKEN.icon}
             iconPosition="left"
@@ -521,7 +523,7 @@ function TrendChartPresentationRenderer({ widget, isLoadingData = false, classNa
         return (
             <WidgetFrame
                 widgetType={widget.type}
-                title={widget.title ?? 'Trend Chart'}
+                title={frameTitle}
                 frameClassName="glass-panel"
                 className="group p-5 w-full h-full flex flex-col"
                 outerClassName={className}
@@ -535,7 +537,7 @@ function TrendChartPresentationRenderer({ widget, isLoadingData = false, classNa
     return (
         <WidgetFrame
             widgetType={widget.type}
-            title={widget.title ?? 'Trend Chart'}
+            title={frameTitle}
             frameClassName="glass-panel"
             className="group relative p-5 overflow-hidden w-full h-full flex flex-col"
             outerClassName={className}
@@ -695,9 +697,10 @@ function LegacyTrendChartWidget({
     const lineStrokeWidth = clampLineStrokeWidth(displayOptions?.lineStrokeWidth);
     const lineGlowBlur = clampLineGlowBlur(displayOptions?.lineGlowBlur);
     const dataMode = resolveWidgetDataMode(widget) ?? undefined;
+    const frameTitle = resolveTrendChartTitle(widget.title);
     const header = (
         <WidgetHeader
-            title={widget.title ?? 'Trend Chart'}
+            title={frameTitle}
             icon={TrendingUp}
             iconColor={TOKEN.icon}
             iconPosition="left"
@@ -731,7 +734,7 @@ function LegacyTrendChartWidget({
         return (
             <WidgetFrame
                 widgetType={widget.type}
-                title={widget.title ?? 'Trend Chart'}
+                title={frameTitle}
                 frameClassName="glass-panel"
                 className="group p-5 w-full h-full flex flex-col"
                 outerClassName={className}
@@ -745,7 +748,7 @@ function LegacyTrendChartWidget({
     return (
         <WidgetFrame
             widgetType={widget.type}
-            title={widget.title ?? 'Trend Chart'}
+            title={frameTitle}
             frameClassName="glass-panel"
             className="group relative p-5 overflow-hidden w-full h-full flex flex-col"
             outerClassName={className}
