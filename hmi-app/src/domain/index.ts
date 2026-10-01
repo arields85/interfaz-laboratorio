@@ -16,3 +16,4 @@ export * from './auth';
 export * from './adminCredential.types';
 export type { CatalogVariable } from './variableCatalog.types';
 export * from './themeStyle.types';
+export * from './sharedConfig.types';

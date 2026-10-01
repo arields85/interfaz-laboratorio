@@ -518,6 +518,41 @@ describe('AdminAuthClient', () => {
         expect(fetcher.mock.calls[4]?.[1]?.body).toBe('{}');
     });
 
+    it('writes the shared HMI configuration batch with the session CSRF token', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(jsonResponse(SESSION))
+            .mockResolvedValueOnce(jsonResponse({ ok: true, revision: 7 }))
+            .mockResolvedValueOnce(jsonResponse({ ok: true, revision: 'x' }))
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: 'HMI_CONFIG_DOCUMENT_TOO_LARGE' }, 413));
+        const client = new AdminAuthClient(fetcher);
+        await client.session();
+        const batch = { set: { 'hmi:a': '1' }, delete: ['hmi:b'] };
+
+        await expect(client.writeSharedConfig(batch)).resolves.toEqual({ revision: 7 });
+        const [path, init] = fetcher.mock.calls[1] ?? [];
+        expect(path).toBe('/api/prisma/admin/hmi-config');
+        expect(init?.method).toBe('PUT');
+        expect(init?.body).toBe(JSON.stringify(batch));
+        expect(init?.headers).toEqual(expect.objectContaining({
+            'X-CSRF-Token': SESSION.csrfToken,
+            'Content-Type': 'application/json',
+        }));
+        await expect(client.writeSharedConfig(batch)).rejects.toMatchObject({ code: 'ADMIN_CREDENTIAL_RESPONSE_INVALID' });
+        await expect(client.writeSharedConfig(batch)).rejects.toMatchObject({
+            code: 'HMI_CONFIG_DOCUMENT_TOO_LARGE', status: 413,
+        });
+    });
+
+    it('refuses a shared configuration write without a session CSRF token', async () => {
+        const fetcher = vi.fn<typeof fetch>();
+        const client = new AdminAuthClient(fetcher);
+
+        await expect(client.writeSharedConfig({ set: {}, delete: ['hmi:a'] })).rejects.toMatchObject({
+            code: 'CSRF_TOKEN_UNAVAILABLE',
+        });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
     it('fences protected response bodies after logout invalidates the auth generation', async () => {
         let releaseMetadata!: (response: Response) => void;
         const pendingMetadata = new Promise<Response>((resolve) => { releaseMetadata = resolve; });

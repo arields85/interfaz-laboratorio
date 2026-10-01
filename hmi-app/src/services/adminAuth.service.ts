@@ -4,6 +4,7 @@ import {
     parseCredentialMetadata,
     parseCredentialMutation,
     parseGeminiVerificationResult,
+    parseSharedConfigWriteResult,
     parseTelegramAdministrationStatus,
     parseTelegramPassiveHealth,
     parseTelegramVerificationResult,
@@ -15,6 +16,8 @@ import {
     type CredentialMutationResult,
     type CredentialProvider,
     type GeminiCredentialProviderMetadata,
+    type SharedConfigBatch,
+    type SharedConfigWriteResult,
     type TelegramAdministrationStatus,
     type TelegramFamilyCredentialProviderMetadata,
     type TelegramPassiveHealth,
@@ -26,6 +29,7 @@ const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/
 const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
 const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
 const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
+const SHARED_CONFIG_WRITE_ROUTE = '/api/prisma/admin/hmi-config';
 const CSRF_TOKEN_LENGTH = 43;
 const PUBLIC_ERROR_CODES = new Set([
     'ADMIN_CREDENTIAL_BLANK',
@@ -41,6 +45,11 @@ const PUBLIC_ERROR_CODES = new Set([
     'CSRF_VALIDATION_FAILED',
     'GEMINI_VERIFICATION_IN_PROGRESS',
     'GEMINI_VERIFICATION_UNAVAILABLE',
+    'HMI_CONFIG_DOCUMENT_TOO_LARGE',
+    'HMI_CONFIG_INVALID_REQUEST',
+    'HMI_CONFIG_REQUEST_TOO_LARGE',
+    'HMI_CONFIG_UNAVAILABLE',
+    'HMI_CONFIG_VALUE_TOO_LARGE',
     'INVALID_CREDENTIALS',
     'INVALID_CREDENTIAL_REQUEST',
     'INVALID_LOGIN_REQUEST',
@@ -264,6 +273,20 @@ export class AdminAuthClient {
                 }
                 throw error;
             }
+        });
+    }
+
+    // Shared HMI configuration: the HMI's own settings, written to its own server
+    // (never to the plant). Same session cookie and CSRF contract as the credential routes.
+    async writeSharedConfig(batch: SharedConfigBatch, signal?: AbortSignal): Promise<SharedConfigWriteResult> {
+        return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
+            const response = await this.request(SHARED_CONFIG_WRITE_ROUTE, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: JSON.stringify(batch),
+                signal: requestSignal,
+            });
+            return this.parseResponse(response, parseSharedConfigWriteResult);
         });
     }
 
