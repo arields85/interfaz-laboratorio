@@ -105,6 +105,24 @@ Configuración general → Tema → "Calado del ícono" (interruptor, apagado po
 
 El anillo usa el color del borde del marco (`--frame-border`) y, en alerta, el color del estado (35 % en reposo, 55 % en hover). Margen 6 px, borde duro y anillo activado son la elección del laboratorio de estilo (2026-09-30); hoy son tokens, no controles de la interfaz.
 
+## Esquinas en widgets con enlace
+
+Configuración general → Tema → "Esquinas en widgets con enlace" (interruptor, apagado por defecto) lleva a **Clásico** el acento de esquinas del tema Contorno, pero solo para los widgets que abren otro dashboard y dibujado **unos píxeles por fuera del borde** del widget, no sobre él.
+
+- **Cuándo aplica:** solo en el **visor** (en el builder los enlaces no navegan), con el tema **Clásico**, el ajuste activado y un widget del grid con **destino de navegación efectivo** (`resolveEffectiveNavigationTarget`: el propio o el heredado de su grupo bloqueado, es decir, exactamente los widgets que navegan al hacer clic) y con marco. No lo reciben los widgets sin enlace, los de header-slot, los sin marco (`text-title`, "Mostrar fondo y marco" apagado) ni el builder. Otros temas conservan sus propios acentos sin cambios. Funciona con las dos formas de marco: las esquinas rodean la caja exterior del widget. La sección del Tema avisa ("Ahora no se aplica") con otro tema seleccionado; el interruptor sigue visible.
+- **Persistencia:** solo el override (`hmi-link-corner-accents` = `true`; apagado elimina la clave). Vive en `store/linkCornerAccents.store.ts` y `services/linkCornerAccents.service.ts`; entra en el flujo sucio / Guardar / Descartar de la pestaña Tema y se reaplica al arrancar (`main.tsx`). `hooks/useLinkCornerAccentsActive.ts` decide ajuste + Clásico; el visor decide por widget.
+- **Mecanismo:** el marco recorta su desborde (`overflow: clip`), así que las esquinas no pueden vivir dentro del widget. `ViewerLinkCornerAccents` es una capa decorativa hermana del widget en la superficie del ítem (como las capas de la entrada animada): `aria-hidden`, `pointer-events: none`, posicionada en el inset de la superficie menos `--link-accent-offset`. `.hmi-link-accents` dibuja las cuatro esquinas con las mismas propiedades registradas (`--frame-accent-*`), el mismo dibujo y la misma transición (0,2 s, `ease`) que `.glass-panel::after`; el hover es el del ítem del visor (`.hmi-link-accents-host:hover`), con lo que también reacciona sobre la franja de separación del widget. Sigue el radio del marco más el desplazamiento. Con `prefers-reduced-motion` la transición se desactiva como la de los demás acentos.
+
+| Token | Valor inicial | Uso |
+|-------|---------------|-----|
+| `--link-accent-offset` | `4px` | Separación entre el borde del marco y las esquinas |
+| `--link-accent-length-rest` / `-hover` | `18px` / `8px` | Largo de cada brazo |
+| `--link-accent-thickness-rest` / `-hover` | `1px` / `1px` | Grosor de cada brazo |
+| `--link-accent-color-rest` / `-hover` | `#ffffff` | Color de las esquinas |
+| `--link-accent-opacity-rest` / `-hover` | `0%` / `40%` | Opacidad (ocultas en reposo) |
+
+Los valores de reposo y hover replican el acento de marco de Contorno.
+
 ## Entrada animada del visor
 
 Al entrar a un dashboard o cambiar de vista, el visor arma la pantalla con movimiento: los marcos aparecen en orden aleatorio, los indicadores (barra y aro) se llenan hasta su valor y los gráficos SVG se revelan de izquierda a derecha. Es CSS puro, no retrasa ni condiciona la carga de datos, no se reproduce con el refresco periódico y queda desactivada con `prefers-reduced-motion`. Solo aplica bajo el marco del visor (`[data-viewer-entrance='true']`): el builder nunca anima.
