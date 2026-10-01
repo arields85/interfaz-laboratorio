@@ -5,6 +5,7 @@ type-derived categories, genuine HTTP status validation, polling-only success
 timestamps, privacy canaries, safe projection for mocks, and coherent snapshots.
 """
 
+import copy
 import io
 import json
 import sys
@@ -32,8 +33,11 @@ from leda_runtime.telegram_config import TelegramConfig
 from leda_runtime.telegram_lifecycle import (
     TelegramLifecycleError,
     TelegramLifecycleManager,
+    TelegramStateRepository,
     TelegramStateUnavailable,
+    empty_telegram_state,
     project_telegram_diagnostic,
+    validate_telegram_state,
 )
 
 CANARY = "CANARY-telegram-diagnostic-secret"
@@ -46,17 +50,23 @@ ADMIN_TELEGRAM_FIELDS = {
 }
 
 
-class MemoryStateStore:
+class MemoryStateStore(TelegramStateRepository):
+    """In-memory repository: the real operations (update, add_pending, set_status, set_offset...) over a dict."""
+
     def __init__(self, value=None):
+        super().__init__(Path("memory-state-store.json"))
         self.value = value
         self.writes = []
 
     def read(self):
-        return self.value
+        if self.value is None or (isinstance(self.value, dict) and "schemaVersion" not in self.value):
+            return empty_telegram_state()
+        return validate_telegram_state(copy.deepcopy(self.value))
 
     def write(self, value):
-        self.value = value
-        self.writes.append(value)
+        validated = validate_telegram_state(value)
+        self.value = validated
+        self.writes.append(validated)
 
 
 class FailingWriteStateStore(MemoryStateStore):
@@ -408,7 +418,7 @@ class TelegramDiagnosticsTests(unittest.TestCase):
     def test_state_read_failure_maps_storage_error_to_state(self):
         bot = self.prepared_bot()
         bot.stop_event = FirstFailureStopEvent()
-        bot._state = None
+        bot.state_store.read = Mock(side_effect=TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE"))
 
         bot.run()
 

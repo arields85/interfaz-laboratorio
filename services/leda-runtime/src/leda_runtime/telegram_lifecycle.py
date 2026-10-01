@@ -181,7 +181,12 @@ class TelegramStateRepository:
                     and all(not isinstance(value, bool) and isinstance(value, int) for value in decoded["allowedChatIds"])
                 ):
                     return empty_telegram_state()
-                return validate_telegram_state(decoded)
+                validated = validate_telegram_state(decoded)
+                if decoded.get("schemaVersion") == LEGACY_PAIRED_SCHEMA_VERSION:
+                    # Persist the migration right away: the migrated records carry a
+                    # timestamp, so leaving the file at v2 would stamp a new one on every read.
+                    self.write(validated)
+                return validated
             except (UnicodeError, json.JSONDecodeError, TelegramStateUnavailable):
                 raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE") from None
 

@@ -48,7 +48,7 @@ from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
 from .telegram_credentials import TelegramCredentialResolver
-from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, empty_telegram_state, project_telegram_diagnostic, validate_telegram_state
+from .telegram_lifecycle import TelegramLifecycleManager, TelegramStateRepository, TelegramStateUnavailable, project_telegram_diagnostic
 from .telegram_verification import TelegramTokenVerificationService
 from .voice_events import (
     VOICE_EVENT_KIND_CANCEL,
@@ -140,6 +140,16 @@ CHANNEL_B_VOICE_REPLY_TIMEOUT_SECONDS = 45
 # chat at once; a newer question arriving once the bound is reached still
 # gets its text answer, just no voice note (logged, silent to the user).
 CHANNEL_B_VOICE_QUEUE_MAX_PENDING = 3
+
+# Channel B admission: at most this many chats may wait for approval at once,
+# so a spammer cannot fill the state file with access requests.
+MAX_PENDING_ACCESS_REQUESTS = 20
+ACCESS_REQUESTED_REPLY = "Su solicitud de acceso quedó registrada. Se le avisará cuando un administrador la apruebe."
+ACCESS_REQUESTS_FULL_REPLY = "En este momento no es posible registrar nuevas solicitudes. Intente más tarde."
+ACCESS_REQUEST_HINT_REPLY = "Para solicitar acceso, envíe /start."
+ACCESS_PENDING_REPLY = "Su solicitud de acceso está pendiente de aprobación."
+ACCESS_DENIED_REPLY = "No tiene acceso a este asistente."
+ACCESS_APPROVED_REPLY = "Su acceso fue aprobado. Ya puede realizar sus consultas."
 
 # PW-013: bounds the presentation -> voice process call for a voice-note
 # QUESTION's transcription (both channels). Unlike CHANNEL_B_VOICE_REPLY_
@@ -705,7 +715,6 @@ class TelegramLocalBot:
         self._channel_b_voice_queues: dict[int, deque] = {}
         self.stop_event, self.thread = threading.Event(), None
         self.last_error, self.bot_username, self.bot_id = None, None, None
-        self._state = None
         self._diagnostic_lock = threading.Lock()
         self._diagnostic = {"stage": None, "category": None, "httpStatus": None, "failureAt": None, "lastSuccessAt": None}
         self._diagnostic_stage = None
@@ -767,9 +776,9 @@ class TelegramLocalBot:
 
     @property
     def paired_chat_ids(self) -> set[int]:
-        if self.bot_id is None or self._state is None:
+        if self.bot_id is None:
             return set()
-        return {int(chat_id) for chat_id, chat in self._record()["chats"].items() if chat["status"] == "approved"}
+        return {chat["chatId"] for chat in self.state_store.list_chats(self.bot_id) if chat["status"] == "approved"}
 
     def _call(self, method, *, timeout=35, **kwargs):
         response = self.session.post(f"{self.api_base}/bot{self.token}/{method}", timeout=timeout, **kwargs)
@@ -814,20 +823,14 @@ class TelegramLocalBot:
         ).start()
         return answered
 
-    def _load_state(self):
-        value = self.state_store.read()
-        if value is None or (isinstance(value, dict) and "schemaVersion" not in value):
-            self._state = empty_telegram_state()
-            return
-        self._state = validate_telegram_state(value)
-
     def _record(self):
-        if self._state is None or self.bot_id is None:
+        """Read this bot's record fresh: admin decisions are written by another thread, so nothing is cached."""
+        if self.bot_id is None:
             raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
-        return self._state["bots"][str(self.bot_id)]
-
-    def _persist(self):
-        self.state_store.write(self._state)
+        record = self.state_store.read()["bots"].get(str(self.bot_id))
+        if record is None:
+            raise TelegramStateUnavailable("TELEGRAM_STATE_UNAVAILABLE")
+        return record
 
     def observe_identity(self) -> TelegramBotIdentity:
         """Return the identity Telegram reports for this token, with no effect.
@@ -922,17 +925,14 @@ class TelegramLocalBot:
                     self.bot_id, self.bot_username = identity.bot_id, identity.username
                 self._call("deleteWebhook", timeout=20, data={"drop_pending_updates": "false"})
                 self._check_active_locked()
-                self._load_state()
                 key = str(self.bot_id)
-                if key not in self._state["bots"]:
+                if key not in self.state_store.read()["bots"]:
                     self._check_active_locked()
-                    self._state["bots"][key] = {
-                        "chats": {},
-                        "nextUpdateOffset": None,
-                        "migrationActive": True,
-                    }
-                    self._check_active_locked()
-                    self._persist()
+                    self.state_store.update(
+                        lambda state: state["bots"].setdefault(
+                            key, {"chats": {}, "nextUpdateOffset": None, "migrationActive": True}
+                        )
+                    )
                 self._check_active_locked()
                 self._prepared = True
             except Exception as error:
@@ -950,32 +950,52 @@ class TelegramLocalBot:
                 if failed or self._stopping or self._stopped:
                     self._settle_locked()
 
-    def _pair(self, chat_id):
-        chats = self._record()["chats"]
-        key = str(chat_id)
-        if key not in chats:
-            now = utc_now_iso()
-            chats[key] = {"status": "approved", "displayName": "", "username": None, "requestedAt": now, "decidedAt": now}
-            try:
-                self._persist()
-            except Exception:
-                del chats[key]
-                raise
+    @staticmethod
+    def _requester_identity(message, chat):
+        """Telegram display name (first and optional last name, trimmed) and username of the sender."""
+        sender = message.get("from") if isinstance(message.get("from"), dict) else {}
+        source = chat if isinstance(chat.get("first_name"), str) else sender
+        parts = [source.get(key).strip() for key in ("first_name", "last_name") if isinstance(source.get(key), str)]
+        username = source.get("username") if isinstance(source.get("username"), str) and source.get("username") else None
+        return " ".join(part for part in parts if part), username
+
+    def _reply_to_unapproved(self, chat_id, status, message, chat, *, is_start):
+        """Fixed replies for a chat without access; nothing else is ever done for it."""
+        if status == "pending":
+            self.send_message(chat_id, ACCESS_PENDING_REPLY)
+        elif status in ("rejected", "revoked"):
+            self.send_message(chat_id, ACCESS_DENIED_REPLY)
+        elif not is_start:
+            self.send_message(chat_id, ACCESS_REQUEST_HINT_REPLY)
+        elif sum(1 for known in self.state_store.list_chats(self.bot_id) if known["status"] == "pending") >= MAX_PENDING_ACCESS_REQUESTS:
+            self.send_message(chat_id, ACCESS_REQUESTS_FULL_REPLY)
+        else:
+            display_name, username = self._requester_identity(message, chat)
+            self.state_store.add_pending(self.bot_id, chat_id, display_name, username)
+            self.send_message(chat_id, ACCESS_REQUESTED_REPLY)
+
+    def send_approval_notice(self, chat_id) -> bool:
+        """Tell a chat its access was approved; only ever sent while the chat is currently approved."""
+        if self.bot_id is None or self.state_store.status_of(self.bot_id, chat_id) != "approved":
+            return False
+        self.send_message(chat_id, ACCESS_APPROVED_REPLY)
+        return True
 
     def _handle_message(self, message, *, migration_active=False):
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}; chat_id = chat.get("id")
         text, voice = message.get("text"), message.get("voice")
         has_text, has_voice = isinstance(text, str), isinstance(voice, dict) and not isinstance(text, str)
         if chat.get("type") != "private" or isinstance(chat_id, bool) or not isinstance(chat_id, int) or not (has_text or has_voice): return
-        command, paired = normalize(text.split()[0]) if has_text and text.strip() else "", self.paired_chat_ids
-        if command.startswith("/start"):
-            if migration_active:
-                self.send_message(chat_id, "Envíe /start nuevamente cuando finalice la migración.")
-            elif not paired and self.bot_id is not None: self._pair(chat_id); self.send_message(chat_id, "Leda quedó vinculada a este chat. Ya puede hacer sus consultas.")
-            elif chat_id in paired: self.send_message(chat_id, "Leda está lista para responder sus consultas.")
-            else: self.send_message(chat_id, "Este bot ya está vinculado a otro chat.")
-            return
-        if chat_id not in paired: self.send_message(chat_id, "Envíe /start para vincular este bot."); return
+        command = normalize(text.split()[0]) if has_text and text.strip() else ""
+        is_start = command.startswith("/start")
+        if is_start and migration_active:
+            self.send_message(chat_id, "Envíe /start nuevamente cuando finalice la migración."); return
+        # Read on every message, never cached: an admin revocation must apply to the very next one.
+        status = self.state_store.status_of(self.bot_id, chat_id)
+        if status != "approved":
+            self._reply_to_unapproved(chat_id, status, message, chat, is_start=is_start); return
+        if is_start:
+            self.send_message(chat_id, "Leda está lista para responder sus consultas."); return
         # Live test 2026-09-25 (F6): "typing…" while this paired chat's
         # question (text or voice note) is processed, non-blocking, marked
         # answered in `finally` right after the reply for this exact
@@ -1210,12 +1230,7 @@ class TelegramLocalBot:
                         # not let a late empty payload complete the migration.
                         break
                     self._note_stage("persist")
-                    record["migrationActive"] = False
-                    try:
-                        self._persist()
-                    except Exception:
-                        record["migrationActive"] = True
-                        raise
+                    self.state_store.update(lambda state: state["bots"][str(self.bot_id)].update(migrationActive=False))
                     self.last_error = None
                     self._note_poll_success()
                     continue
@@ -1228,10 +1243,11 @@ class TelegramLocalBot:
                         raise RuntimeError("TELEGRAM_UPDATE_INVALID")
                     validated_updates.append((update_id, update))
                 seen = set()
+                current_offset = offset
                 for update_id, update in sorted(validated_updates, key=lambda item: item[0]):
                     if self.stop_event.is_set():
                         break
-                    if update_id in seen or (record["nextUpdateOffset"] is not None and update_id < record["nextUpdateOffset"]):
+                    if update_id in seen or (current_offset is not None and update_id < current_offset):
                         continue
                     seen.add(update_id)
                     message = update.get("message")
@@ -1239,13 +1255,8 @@ class TelegramLocalBot:
                         self._note_stage("handle")
                         self._handle_message(message, migration_active=migration_active)
                     self._note_stage("persist")
-                    previous_offset = record["nextUpdateOffset"]
-                    record["nextUpdateOffset"] = update_id + 1
-                    try:
-                        self._persist()
-                    except Exception:
-                        record["nextUpdateOffset"] = previous_offset
-                        raise
+                    self.state_store.set_offset(self.bot_id, update_id + 1)
+                    current_offset = update_id + 1
                 self.last_error = None
                 self._note_poll_success()
             except Exception as error:

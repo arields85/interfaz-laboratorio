@@ -1,3 +1,4 @@
+import copy
 import io
 import json
 import os
@@ -23,6 +24,7 @@ from leda_runtime.bot_identity_reservation import (
 from leda_runtime.hmi_sessions import HmiSessionRegistry
 from leda_runtime.local_presentation import (
     CHANNEL_B_VOICE_QUEUE_MAX_PENDING,
+    MAX_PENDING_ACCESS_REQUESTS,
     TELEGRAM_STOPPING,
     TelegramLocalBot,
     build_telegram_bot,
@@ -34,6 +36,7 @@ from leda_runtime.telegram_lifecycle import (
     TelegramLifecycleManager,
     TelegramStateRepository,
     TelegramStateUnavailable,
+    empty_telegram_state,
     validate_telegram_state,
 )
 from leda_runtime.voice_events import VoiceEventStore
@@ -45,17 +48,23 @@ from leda_runtime.voice_transcription import (
 )
 
 
-class MemoryStateStore:
+class MemoryStateStore(TelegramStateRepository):
+    """In-memory repository: the real operations (update, add_pending, set_status, set_offset...) over a dict."""
+
     def __init__(self, value=None):
+        super().__init__(Path("memory-state-store.json"))
         self.value = value
         self.writes = []
 
     def read(self):
-        return self.value
+        if self.value is None or (isinstance(self.value, dict) and "schemaVersion" not in self.value):
+            return empty_telegram_state()
+        return validate_telegram_state(copy.deepcopy(self.value))
 
     def write(self, value):
-        self.value = value
-        self.writes.append(value)
+        validated = validate_telegram_state(value)
+        self.value = validated
+        self.writes.append(validated)
 
 
 class FailingStateStore(MemoryStateStore):
@@ -467,14 +476,6 @@ class TelegramLifecycleTests(unittest.TestCase):
         self.assertNotIn("offset", poll_payloads[1])
         self.assertNotIn("secret-token", str(bot.last_error))
 
-    def test_first_pairing_reply_never_mentions_a_screen_or_presentation_mode(self):
-        bot = self.prepared_bot()
-        bot.send_message = Mock()
-
-        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
-
-        bot.send_message.assert_called_once_with(7, "Leda quedó vinculada a este chat. Ya puede hacer sus consultas.")
-
     def test_ready_reply_for_an_already_paired_chat_never_mentions_a_screen(self):
         state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
         bot = self.prepared_bot(state)
@@ -484,13 +485,15 @@ class TelegramLifecycleTests(unittest.TestCase):
 
         bot.send_message.assert_called_once_with(7, "Leda está lista para responder sus consultas.")
 
-    def test_unidentified_bot_start_reply_drops_local_wording(self):
+    def test_unidentified_bot_fails_closed_instead_of_answering_anyone(self):
         bot = self.build_bot()
         bot.send_message = Mock()
 
-        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
+        with self.assertRaises(TelegramStateUnavailable):
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
 
-        bot.send_message.assert_called_once_with(7, "Este bot ya está vinculado a otro chat.")
+        bot.send_message.assert_not_called()
+        self.assertEqual(bot.state_store.writes, [])
 
     def test_status_reply_never_mentions_a_snapshot_or_presentation(self):
         state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": None, "migrationActive": False}}}
@@ -515,21 +518,21 @@ class TelegramLifecycleTests(unittest.TestCase):
     def test_legacy_allowlists_do_not_authorize_first_migrating_bot(self):
         state = {"allowedChatIds": [7]}
         with patch.dict(os.environ, {"LEDA_LOCAL_ALLOWED_CHAT_IDS": "7"}, clear=True):
-            bot = self.build_bot(state)
+            bot = self.prepared_bot(state)
             bot.send_message = Mock()
             bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/status"})
 
-        self.assertEqual(bot.state_store.writes, [])
-        bot.send_message.assert_called_once_with(7, "Envíe /start para vincular este bot.")
+        self.assertIsNone(bot.state_store.status_of(123, 7))
+        bot.send_message.assert_called_once_with(7, "Para solicitar acceso, envíe /start.")
 
-    def test_migration_fence_drains_multiple_backlog_batches_before_pairing(self):
+    def test_migration_fence_drains_multiple_backlog_batches_before_requesting_access(self):
         bot = self.build_bot()
         bot.stop_event = ImmediateStopEvent()
         sent = []
 
         def send(chat_id, text):
             sent.append((chat_id, text))
-            if "quedó vinculada" in text:
+            if "solicitud de acceso quedó registrada" in text:
                 bot.stop_event.set()
 
         bot.send_message = send
@@ -551,7 +554,7 @@ class TelegramLifecycleTests(unittest.TestCase):
         bot.run()
 
         record = bot.state_store.value["bots"]["123"]
-        self.assertEqual({chat_id: chat["status"] for chat_id, chat in record["chats"].items()}, {"7": "approved"})
+        self.assertEqual({chat_id: chat["status"] for chat_id, chat in record["chats"].items()}, {"7": "pending"})
         self.assertNotIn("pairedPrivateChatIds", record)
         self.assertEqual(record["nextUpdateOffset"], 4)
         self.assertFalse(record["migrationActive"])
@@ -612,7 +615,8 @@ class TelegramLifecycleTests(unittest.TestCase):
             bot.prepare()
 
             persisted = repository.read()
-        self.assertEqual(bot.paired_chat_ids, set())
+            paired = bot.paired_chat_ids
+        self.assertEqual(paired, set())
         self.assertTrue(persisted["bots"]["123"]["migrationActive"])
 
     def test_same_bot_rotation_and_process_restart_retain_only_its_state(self):
@@ -627,8 +631,7 @@ class TelegramLifecycleTests(unittest.TestCase):
                 return bot
 
             first = rotate("old-token", 123, reservation)
-            first._record().update({"chats": {"7": approved_chat()}, "nextUpdateOffset": 44, "migrationActive": False})
-            first._persist()
+            repository.write(v3_state({"7": approved_chat()}, offset=44))
             # A confirmed stop is what frees the identity for the same channel;
             # a replacement object then sees the retained state.
             self.assertTrue(first.stop())
@@ -637,11 +640,12 @@ class TelegramLifecycleTests(unittest.TestCase):
             # A process restart starts from an empty registry, not from authority reuse.
             restored = rotate("restored-token", 123, BotIdentityReservation())
 
-        self.assertEqual(rotated.paired_chat_ids, {7})
-        self.assertEqual(rotated._record()["nextUpdateOffset"], 44)
-        self.assertEqual(different.paired_chat_ids, set())
-        self.assertTrue(different._record()["migrationActive"])
-        self.assertEqual(restored.paired_chat_ids, {7})
+            # The bot reads its state fresh, so the checks run while the file exists.
+            self.assertEqual(rotated.paired_chat_ids, {7})
+            self.assertEqual(rotated._record()["nextUpdateOffset"], 44)
+            self.assertEqual(different.paired_chat_ids, set())
+            self.assertTrue(different._record()["migrationActive"])
+            self.assertEqual(restored.paired_chat_ids, {7})
 
     # --- Cooperative bot identity exclusion ---------------------------------
 
@@ -1611,7 +1615,7 @@ class ChannelBVoiceNoteQuestionTests(unittest.TestCase):
         with patch.object(bot.session, "get") as session_get:
             bot._handle_message(voice_note_message(7, 41))
 
-        bot.send_message.assert_called_once_with(7, "Envíe /start para vincular este bot.")
+        bot.send_message.assert_called_once_with(7, "Para solicitar acceso, envíe /start.")
         session_get.assert_not_called()
 
     def test_a_voice_note_over_the_duration_cap_is_rejected_before_any_download(self):
@@ -1905,7 +1909,7 @@ class ChannelBTypingIndicatorTests(unittest.TestCase):
         with patch.object(bot, "_typing") as typing:
             bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "¿Cuál es el OEE?"})
         typing.assert_not_called()
-        bot.send_message.assert_called_once_with(7, "Envíe /start para vincular este bot.")
+        bot.send_message.assert_called_once_with(7, "Para solicitar acceso, envíe /start.")
 
     def test_typing_wraps_voice_note_processing_too(self):
         bot = self.build_bot()
@@ -2001,18 +2005,37 @@ class TelegramStateRepositoryOperationsTests(unittest.TestCase):
         self.repository = TelegramStateRepository(self.path)
         self.repository.write(v3_state())
 
-    def test_reading_a_v2_file_migrates_and_the_next_write_persists_v3(self):
+    def test_reading_a_v2_file_migrates_and_persists_v3_on_the_first_read(self):
         self.path.write_text(
             '{"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": 3, "migrationActive": false}}}',
             encoding="utf-8",
         )
         self.assertEqual(self.repository.status_of(123, 7), "approved")
-        self.assertIn("pairedPrivateChatIds", self.path.read_text(encoding="utf-8"))
         self.repository.set_offset(123, 4)
         persisted = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(persisted["schemaVersion"], 3)
         self.assertEqual(persisted["bots"]["123"]["chats"]["7"]["status"], "approved")
         self.assertEqual(persisted["bots"]["123"]["nextUpdateOffset"], 4)
+
+    def test_two_consecutive_reads_of_a_v2_file_return_identical_records(self):
+        self.path.write_text(
+            '{"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7, 8], "nextUpdateOffset": 3, "migrationActive": false}}}',
+            encoding="utf-8",
+        )
+        first = self.repository.read()
+        second = self.repository.read()
+        self.assertEqual(first, second)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), first)
+        chats = first["bots"]["123"]["chats"]
+        self.assertEqual(chats["7"]["requestedAt"], chats["8"]["requestedAt"])
+
+    def test_timestamps_stamped_by_default_survive_a_reload(self):
+        self.repository.add_pending(123, 7, "Ana", "ana")
+        self.repository.set_status(123, 7, "approved")
+        reloaded = TelegramStateRepository(self.path).list_chats(123)[0]
+        self.assertEqual(reloaded["status"], "approved")
+        self.assertTrue(reloaded["requestedAt"].endswith("Z"))
+        self.assertTrue(reloaded["decidedAt"].endswith("Z"))
 
     def test_add_pending_records_the_request_once(self):
         self.assertTrue(self.repository.add_pending(123, 7, "Ana", "ana", now=STAMP))
@@ -2103,34 +2126,236 @@ class TelegramStateRepositoryOperationsTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in self.path.parent.iterdir()), ["chat-state.json"])
 
 
-class ChannelBApprovedChatsTests(unittest.TestCase):
-    def build_bot(self, state):
-        bot = TelegramLocalBot("secret-token", Mock(), MemoryStateStore(state), Mock(), reservation=BotIdentityReservation())
+def private_message(chat_id, text="/start", *, first_name="Ana", last_name=None, username=None, **extra):
+    chat = {"id": chat_id, "type": "private", "first_name": first_name}
+    if last_name is not None:
+        chat["last_name"] = last_name
+    if username is not None:
+        chat["username"] = username
+    return {"chat": chat, "message_id": 1, "text": text, **extra}
+
+
+class ChannelBAdmissionTests(unittest.TestCase):
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, chats=None, *, offset=None, state_store=None, typing_enabled=False):
+        state = v3_state(chats, offset=offset)
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), state_store if state_store is not None else MemoryStateStore(state), Mock(),
+            reservation=BotIdentityReservation(), typing_enabled=typing_enabled,
+        )
         bot._call = identity_transport(username="bot")
         bot.prepare()
+        bot.send_message = Mock()
         return bot
 
     def test_only_approved_chats_count_as_paired(self):
         chats = {"1": approved_chat(), "2": pending_chat(), "3": approved_chat(status="rejected"), "4": approved_chat(status="revoked")}
-        self.assertEqual(self.build_bot(v3_state(chats)).paired_chat_ids, {1})
+        self.assertEqual(self.build_bot(chats).paired_chat_ids, {1})
 
-    def test_start_pairs_the_first_chat_as_an_approved_record(self):
-        bot = self.build_bot(v3_state())
-        bot.send_message = Mock()
-        bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
-        chat = bot.state_store.value["bots"]["123"]["chats"]["7"]
-        self.assertEqual(chat["status"], "approved")
-        self.assertEqual(chat["requestedAt"], chat["decidedAt"])
-        self.assertEqual(bot.paired_chat_ids, {7})
-        bot.send_message.assert_called_once_with(7, "Leda quedó vinculada a este chat. Ya puede hacer sus consultas.")
+    def test_start_from_an_unknown_chat_registers_a_pending_request_with_the_telegram_name(self):
+        bot = self.build_bot()
+        bot._handle_message(private_message(7, first_name=" Ana ", last_name="Pérez ", username="ana_p"))
+        chat = bot.state_store.list_chats(123)[0]
+        self.assertEqual((chat["chatId"], chat["status"], chat["displayName"], chat["username"]), (7, "pending", "Ana Pérez", "ana_p"))
+        self.assertIsNone(chat["decidedAt"])
+        bot.send_message.assert_called_once_with(7, "Su solicitud de acceso quedó registrada. Se le avisará cuando un administrador la apruebe.")
 
-    def test_a_failed_pairing_write_rolls_the_chat_back(self):
-        bot = self.build_bot(v3_state())
+    def test_a_request_without_username_or_last_name_stores_none_and_the_first_name(self):
+        bot = self.build_bot()
+        bot._handle_message(private_message(7, first_name="Ana"))
+        chat = bot.state_store.list_chats(123)[0]
+        self.assertEqual((chat["displayName"], chat["username"]), ("Ana", None))
+
+    def test_the_stored_request_validates_on_reload(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = TelegramStateRepository(Path(temporary) / "chat-state.json")
+            bot = self.build_bot(state_store=repository)
+            bot._handle_message(private_message(7))
+            reloaded = TelegramStateRepository(repository.path).read()
+        self.assertEqual(reloaded["bots"]["123"]["chats"]["7"]["status"], "pending")
+
+    def test_pending_requests_are_capped_with_a_fixed_reply(self):
+        self.assertEqual(MAX_PENDING_ACCESS_REQUESTS, 20)
+        chats = {str(100 + index): pending_chat() for index in range(MAX_PENDING_ACCESS_REQUESTS)}
+        chats["5"] = approved_chat()
+        bot = self.build_bot(chats)
+        bot._handle_message(private_message(7))
+        self.assertIsNone(bot.state_store.status_of(123, 7))
+        bot.send_message.assert_called_once_with(7, "En este momento no es posible registrar nuevas solicitudes. Intente más tarde.")
+
+    def test_decided_chats_do_not_count_against_the_pending_cap(self):
+        chats = {str(100 + index): approved_chat(status="rejected") for index in range(MAX_PENDING_ACCESS_REQUESTS + 5)}
+        bot = self.build_bot(chats)
+        bot._handle_message(private_message(7))
+        self.assertEqual(bot.state_store.status_of(123, 7), "pending")
+
+    def test_unknown_chat_messages_other_than_start_get_the_request_hint_only(self):
+        bot = self.build_bot()
+        bot._handle_message(private_message(7, "¿Cuál es el OEE?"))
+        bot._handle_message(private_message(7, "/status"))
+        bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 2, "voice": {"file_id": "f", "duration": 2}})
+        self.assertEqual(
+            [call.args for call in bot.send_message.call_args_list],
+            [(7, "Para solicitar acceso, envíe /start.")] * 3,
+        )
+        self.assertIsNone(bot.state_store.status_of(123, 7))
+
+    def test_pending_chat_gets_the_waiting_reply_and_is_not_added_again(self):
+        bot = self.build_bot({"7": pending_chat()})
+        bot._handle_message(private_message(7, "/start", first_name="Otro"))
+        bot._handle_message(private_message(7, "hola"))
+        self.assertEqual(
+            [call.args for call in bot.send_message.call_args_list],
+            [(7, "Su solicitud de acceso está pendiente de aprobación.")] * 2,
+        )
+        self.assertEqual(bot.state_store.list_chats(123), [{"chatId": 7, **pending_chat()}])
+
+    def test_rejected_and_revoked_chats_get_the_denial_and_cannot_re_request(self):
+        for status in ("rejected", "revoked"):
+            with self.subTest(status):
+                bot = self.build_bot({"7": approved_chat(status=status)})
+                bot._handle_message(private_message(7, "/start"))
+                bot._handle_message(private_message(7, "hola"))
+                self.assertEqual(
+                    [call.args for call in bot.send_message.call_args_list],
+                    [(7, "No tiene acceso a este asistente.")] * 2,
+                )
+                self.assertEqual(bot.state_store.status_of(123, 7), status)
+
+    def test_approved_chat_start_gets_the_ready_reply(self):
+        bot = self.build_bot({"7": approved_chat()})
+        bot._handle_message(private_message(7, "/start"))
+        bot.send_message.assert_called_once_with(7, "Leda está lista para responder sus consultas.")
+
+    def test_start_is_deferred_during_the_migration_fence_and_registers_nothing(self):
+        bot = self.build_bot()
+        bot._handle_message(private_message(7, "/start"), migration_active=True)
+        bot.send_message.assert_called_once_with(7, "Envíe /start nuevamente cuando finalice la migración.")
+        self.assertIsNone(bot.state_store.status_of(123, 7))
+
+    def test_groups_stay_ignored(self):
+        bot = self.build_bot()
+        bot._handle_message({"chat": {"id": -100, "type": "group"}, "text": "/start"})
+        bot.send_message.assert_not_called()
+        self.assertEqual(bot.state_store.list_chats(123), [])
+
+    def test_non_approved_chats_get_no_typing_download_or_answer(self):
+        for status in (None, "pending", "rejected", "revoked"):
+            with self.subTest(status):
+                if status is None:
+                    chats = {}
+                elif status == "pending":
+                    chats = {"7": pending_chat()}
+                else:
+                    chats = {"7": approved_chat(status=status)}
+                bot = self.build_bot(chats, typing_enabled=True)
+                bot.session = Mock()
+                with patch.object(bot, "_typing") as typing, patch.object(bot, "_active_snapshot") as snapshot, \
+                        patch.object(bot, "_transcribe_voice_note") as transcribe:
+                    bot._handle_message(private_message(7, "¿Cuál es el OEE?"))
+                    bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 3, "voice": {"file_id": "f", "duration": 2}})
+                typing.assert_not_called()
+                snapshot.assert_not_called()
+                transcribe.assert_not_called()
+                bot.session.get.assert_not_called()
+                bot.session.post.assert_not_called()
+                self.assertEqual(bot.send_message.call_count, 2)
+
+    def test_a_revocation_applies_to_the_very_next_message(self):
+        bot = self.build_bot({"7": approved_chat()})
+        bot.snapshot_store.read = Mock(return_value={"timestamp": "2026-09-23T10:00:00Z"})
+        bot._handle_message(private_message(7, "/status"))
+        bot.state_store.set_status(123, 7, "revoked", now="2026-10-02T00:00:00Z")
+        bot._handle_message(private_message(7, "/status"))
+        self.assertEqual(
+            [call.args[1] for call in bot.send_message.call_args_list],
+            ["Leda está activa. Última actualización de datos: 2026-09-23T10:00:00Z.", "No tiene acceso a este asistente."],
+        )
+
+    def test_an_approval_applies_to_the_very_next_message(self):
+        bot = self.build_bot({"7": pending_chat()})
+        bot._handle_message(private_message(7, "/start"))
+        bot.state_store.set_status(123, 7, "approved", now="2026-10-02T00:00:00Z")
+        bot._handle_message(private_message(7, "/start"))
+        self.assertEqual(
+            [call.args[1] for call in bot.send_message.call_args_list],
+            ["Su solicitud de acceso está pendiente de aprobación.", "Leda está lista para responder sus consultas."],
+        )
+
+    def test_a_failed_request_write_surfaces_and_registers_nothing(self):
+        bot = self.build_bot()
         bot.state_store = FailingStateStore(bot.state_store.value, failures=1)
-        bot.send_message = Mock()
         with self.assertRaises(TelegramStateUnavailable):
-            bot._handle_message({"chat": {"id": 7, "type": "private"}, "text": "/start"})
-        self.assertEqual(bot.paired_chat_ids, set())
+            bot._handle_message(private_message(7, "/start"))
+        bot.send_message.assert_not_called()
+        self.assertIsNone(bot.state_store.status_of(123, 7))
+
+    def test_approval_notice_is_sent_only_to_a_currently_approved_chat(self):
+        text = "Su acceso fue aprobado. Ya puede realizar sus consultas."
+        bot = self.build_bot({"1": approved_chat(), "2": pending_chat(), "3": approved_chat(status="rejected"), "4": approved_chat(status="revoked")})
+        self.assertTrue(bot.send_approval_notice(1))
+        for chat_id in (2, 3, 4, 99):
+            self.assertFalse(bot.send_approval_notice(chat_id))
+        bot.send_message.assert_called_once_with(1, text)
+
+    def test_the_bot_persists_the_offset_without_a_whole_state_write_of_its_own_copy(self):
+        store = MemoryStateStore(v3_state({"7": approved_chat()}, offset=5))
+        bot = self.build_bot(state_store=store)
+        bot.stop_event = ImmediateStopEvent()
+        calls = 0
+
+        def call(_method, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"ok": True, "result": [{"update_id": 5, "message": private_message(7, "/status")}]}
+            bot.stop_event.set()
+            return {"ok": True, "result": []}
+
+        bot.snapshot_store.read = Mock(return_value=None)
+        bot._call = call
+        bot.run()
+        self.assertEqual(store.value["bots"]["123"]["nextUpdateOffset"], 6)
+        self.assertFalse(hasattr(bot, "_state"))
+        self.assertFalse(hasattr(bot, "_persist"))
+
+    def test_an_admin_decision_between_two_updates_survives_the_next_offset_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = TelegramStateRepository(Path(temporary) / "chat-state.json")
+            repository.write(v3_state({"7": approved_chat(), "8": pending_chat()}))
+            bot = self.build_bot(state_store=repository)
+            bot.snapshot_store.read = Mock(return_value=None)
+            bot.stop_event = ImmediateStopEvent()
+            decided = []
+
+            def send(chat_id, text):
+                # The admin decides while the bot is handling the first update.
+                if not decided:
+                    decided.append(repository.set_status(123, 8, "approved", now="2026-10-02T00:00:00Z"))
+                    repository.set_status(123, 7, "revoked", now="2026-10-02T00:00:00Z")
+
+            bot.send_message = send
+            calls = 0
+
+            def call(_method, **_kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    return {"ok": True, "result": [
+                        {"update_id": 1, "message": private_message(7, "/status")},
+                        {"update_id": 2, "message": private_message(8, "/start")},
+                    ]}
+                bot.stop_event.set()
+                return {"ok": True, "result": []}
+
+            bot._call = call
+            bot.run()
+            record = repository.read()["bots"]["123"]
+        self.assertEqual(decided, [True])
+        self.assertEqual(record["nextUpdateOffset"], 3)
+        self.assertEqual((record["chats"]["7"]["status"], record["chats"]["8"]["status"]), ("revoked", "approved"))
 
 
 if __name__ == "__main__":
