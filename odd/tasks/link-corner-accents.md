@@ -71,6 +71,7 @@ registered accent custom properties.
   - Decisions: hover host is the whole viewer item, so the accents also react over the gutter between widgets (needed so they do not flicker when the pointer is on them); builder is untouched (the layer is only rendered by `DashboardViewer`); works with both frame shapes (outer box).
   - Verification (hmi-app): `npx tsc -b`: clean; `npm run lint`: clean; `npm run build`: built; `npm test`: 3566 passed, 1 failed (known flaky Topbar "continues admin navigation immediately when runtime short is disabled", passes in isolation, 16/16).
   - Needs the browser: pixel check of the brackets 4 px outside the border (rounded corner clipping, both frame shapes, group container with link, inherited member link, reduced motion).
+- 2026-09-30 (review): native review of 6fb69eb..868fa89 (28 files / 1181 lines) APPROVED, lineage review-5133e19ceb066437; suggestions R3-link-accents-tab-shape-unproved and R3-cutout-glass-panel-guard-removed covered by 26ac07b (test-only characterization tests, no RED expected).
 
 ## Next step
 
