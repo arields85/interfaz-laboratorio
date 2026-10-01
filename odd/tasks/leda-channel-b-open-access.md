@@ -46,7 +46,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 ## Tasks
 
 - [x] B1 — Runtime: state schema v3 with migration from v2 and a locked writer. Route: delegated (state module + tests).
-- [ ] B2 — Runtime: admission flow in the bot (request on `/start`, status replies, pending cap, approval notice). Route: delegated.
+- [x] B2 — Runtime: admission flow in the bot (request on `/start`, status replies, pending cap, approval notice). Route: delegated.
 - [ ] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
 - [ ] B4 — Runtime: admin HTTP routes to list, approve, reject and revoke chats. Route: delegated.
 - [ ] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
@@ -75,6 +75,7 @@ Strict mode ON (source: global user configuration). Runners:
   - Parent spot check: `test_telegram_lifecycle.py` re-run, 94 OK.
   - Native review (slice `a15ac95..d362da4`, medium, `slice_budget_reached`): granted under standing consent, one reliability lens, **approved** and acknowledged (lineage `review-b6f8a7aa524fd8a4`, authority burned). The next reviewed boundary is `d362da4`.
   - Advisory findings, non-blocking, folded into B2: `R3-pair-timestamp-roundtrip` (`local_presentation.py:955-956`) and `R3-v2-migration-clock-unstable` (`telegram_lifecycle.py:108`, the v2 migration stamps a new time on every read until the first write).
+- 2026-10-01: B2 done in `3fd64e6` (delegated writer). RED: 15 of 32 tests in the new `ChannelBAdmissionTests` and the repository operations tests failed (no admission replies, no pending cap, no approval notice, the bot still wrote whole-state, v2 reads re-stamped times). GREEN: full runtime suite 1938 tests OK (clean env, temp `LEDA_RUNTIME_STATE_DIR`). The bot now reads admission fresh on every message, persists only through `add_pending`, `update` and `set_offset`, and exposes `send_approval_notice(chat_id) -> bool` for B4. The v2 migration is persisted on the first read (R3 findings folded in). Test doubles are now `TelegramStateRepository` subclasses over a dict.
 
 ## Acceptance criteria
 
