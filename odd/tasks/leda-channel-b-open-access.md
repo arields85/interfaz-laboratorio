@@ -49,7 +49,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - [x] B2 — Runtime: admission flow in the bot (request on `/start`, status replies, pending cap, approval notice). Route: delegated.
 - [x] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
 - [x] B4 — Runtime: admin HTTP routes to list, approve, reject and revoke chats. Route: delegated.
-- [ ] B4b — Runtime: review follow-ups. Guard every use of the shared Telegram session (not only `sendMessage`) against the HTTP-thread notice, test the `create_app` Channel B access wiring, and keep limiter counts on eviction where cheap. Route: delegated.
+- [ ] B4b — Runtime: review follow-ups. Guard every use of the shared Telegram session (not only `sendMessage`) against the HTTP-thread notice, test the `create_app` Channel B access wiring, and keep limiter counts on eviction where cheap. HMI: clear the bell decision feedback and share the in-flight guard between the bell and the Leda tab. Route: delegated.
 - [x] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
 - [x] B5b — HMI: enable the topbar bell (`Topbar.tsx:198-206`, today a disabled placeholder) as a notification panel that lists pending Channel B requests, with approve and reject actions and a pending-count badge. It is only active with an admin session (`shouldShowAdminActions`). Other viewers keep today's disabled bell, so requester names are never shown to them. It polls only while the admin session is active. Route: delegated.
 - [ ] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
@@ -103,6 +103,12 @@ Strict mode ON (source: global user configuration). Runners:
   - Route evidence: B5b delegated (writer for several non-trivial files).
   - Pre-commit review (GGA) first rejected two points, both fixed: the decision subset is now derived from the domain (`allowedChannelBAccessDecisions('pending')`), and the badge uses the `text-xs` token instead of `text-[10px]`.
   - Omitted on purpose: the "Ver todas" link. `GlobalSettingsDialog` is mounted only in `AdminLayout` with local open and tab state; the viewer topbar has no way to open it on the Leda tab, and adding global plumbing was out of scope.
+
+- 2026-10-01: parent spot check of B5/B5b: 7 suites, 118 tests OK. Native review (slice `42c6d1e..77c7674`, medium, 1717 lines): granted under standing consent, one reliability lens, **approved** and acknowledged (lineage `review-294a392cbb6401bc`). The next reviewed boundary is `77c7674`.
+  - Advisory findings, handled in B4b:
+    - `R3-bell-feedback-never-cleared` (`NotificationBell.tsx:37`): the decision feedback is never cleared.
+    - `R3-inflight-guard-per-instance` (`useChannelBAccess.ts:57-58`): the in-flight guard is per hook instance, so the bell and the Leda tab can decide the same chat twice. The backend answers 409 for the second one.
+  - Writer notes kept as defaults: dates use the browser locale like the rest of the HMI; the parsers reuse `ADMIN_CREDENTIAL_RESPONSE_INVALID`. "Ver todas" in the bell was left out because `GlobalSettingsDialog` cannot be opened on a tab from the viewer topbar.
 
 ## Acceptance criteria
 
