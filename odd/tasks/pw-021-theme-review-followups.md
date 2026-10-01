@@ -35,7 +35,7 @@ Findings never expand scope by themselves; they were parked so the features coul
 
 ## Tasks
 
-- [ ] T1 — Test hardening (route: delegated writer, 2+ non-trivial test files)
+- [x] T1 — Test hardening (route: delegated writer, 2+ non-trivial test files)
   - A1: a test that proves the link accent grid fits the viewer content box, not the padded box (`DashboardViewer.linkAccents.test.tsx`).
   - A3: a test that moving the radius slider to exactly its default (5) removes the stored override, unless `linkCornerAccentGeometry.service.test.ts` already covers it.
   - B1: `iconCutout.css.test.ts` splits selector lists only on commas at paren depth 0, using a helper.
@@ -43,9 +43,9 @@ Findings never expand scope by themselves; they were parked so the features coul
   - C7: the inline `offsetWidth.mockRestore()` calls in `WidgetFrame.test.tsx` move to `afterEach` / `vi.restoreAllMocks()`.
   - C8: re-measure tests for `useTabFrameIconPlacement` and `useTabFrameHeight` (with a mocked ResizeObserver), only where they are missing.
   - D1: a test that the hidden-title sentinel (-1) passes through the reporter and ghosts without drawing.
-- [ ] T2 — C9: sync the style lab Instrumento preset with the app (`tools/style-lab/style-lab.html`, radius 5 and its hint text, plus any other stale values). Route: inline.
-- [ ] T3 — D3: extract the frame title resolution shared by trend-chart and trend-chart-v2 into one tested helper, with no behavior change. Route: delegated writer.
-- [ ] T4 — C2: document that `parseCssLengthPx` supports only px and rem, and pin that limit with a test. Route: delegated writer.
+- [x] T2 — C9: sync the style lab Instrumento preset with the app (`tools/style-lab/style-lab.html`, radius 5 and its hint text, plus any other stale values). Route: inline.
+- [x] T3 — D3: extract the frame title resolution shared by trend-chart and trend-chart-v2 into one tested helper, with no behavior change. Route: delegated writer.
+- [x] T4 — C2: document that `parseCssLengthPx` supports only px and rem, and pin that limit with a test. Route: delegated writer.
 - [ ] T5 — A2: a locked group with a link but no frame. Waiting on the user's decision.
 - [ ] T6 — Native review of the slice `e1a8cb7..HEAD`, which includes the tail `6d0c56f` + `f27d55e`. Then close PW-021 in `docs/PENDING_WORK.md` and Engram.
 
@@ -71,3 +71,17 @@ Findings never expand scope by themselves; they were parked so the features coul
 ## Progress
 
 - 2026-10-01: PW-020 discarded by the user (`c1b3c57`). Triage done. The tail assessment is medium, 195 lines, `under_budget`, so it stays pending in this slice.
+
+- 2026-10-01 (writer) T1-T4 done; strict TDD, delegated writer.
+  - T1 (`532ae70`, `495684a`, `45db72a`, `d15c2ea`, `432f23a`, `d6b1442`):
+    - A1 + A3 (`532ae70`): the link accents suite proves the grid follows the observer content box (800x450 content vs 820x470 border box); mutation (hook reading `borderBoxSize`) gave RED 1 failed / 16 passed, restored 17 passed. A3: `linkCornerAccentGeometry.service.test.ts` has no UI path for it, so a Tema test was added (radius moved to 5 clears the root property, disables Restablecer, save removes the key); mutation of the default check in `linkCornerAccents.service.ts` gave RED (the new test and 4 neighbours failed), restored 29 passed.
+    - B1 (`495684a`): `splitTopLevel` helper (also used by the specificity helper, which now takes one nested paren level). RED: `npx vitest run src/iconCutout.css.test.ts` 2 failed / 16 passed (fixture `.glass-panel:is(.a, [data-icon-cutout])` wrongly accepted; helper missing); GREEN 18 passed.
+    - C5 (`45db72a`): `hardcodedHexColors` helper over the comment-stripped block, only the `color-mix(in srgb, #fff` base allowed; stale test title fixed. RED: `npx vitest run src/tabFrame.css.test.ts` 1 failed / 24 passed (`#ff0000 var(--x)` accepted by the old `(?!\s*var)`); GREEN 25 passed.
+    - C7 (`d15c2ea`): the three inline `mockRestore()` calls moved to an `afterEach` `vi.restoreAllMocks()` in the width reporting describe; 57 passed (refactor, no RED).
+    - C8 (`432f23a`): `useTabFrameWidths`-style hook suites added for `useTabFrameIconPlacement` and `useTabFrameHeight` (document style mutation re-measure, tab height change, inactive null). Mutation (removing the `MutationObserver.observe` in both) gave RED 2 failed / 5 passed; restored 7 passed. Skipped: the ResizeObserver re-measure of `useTabFrameHeight`, already covered by `WidgetFrame.test.tsx` "re-caps live when the widget is resized".
+    - D1 (`d6b1442`): ghosts and selection frame already covered the sentinel (`ViewerEntranceFrameOverlays.tabFrame.test.tsx`, `GridSelectionFrame.tabFrame.test.tsx`, `WidgetFrame.trailing.test.tsx`); the gap was the reporter, so a `useTabFrameWidths` test keeps -1 as a present entry. Mutation (reporter dropping negative widths) gave RED 1 failed / 7 passed; restored 8 passed.
+  - T2 (`e9baeb4`): lab Instrumento frame preset synced to the app: rest radius 3 to 5, border 8 to 12, accent length 20 to 25; hover radius 3 to 5. Button, icon, tag and group values already matched. No hint text mentions the radius (the ~1233 hint is about the tab), so none changed. Lab only; no test applies.
+  - T3 (`b282557`): `utils/trendChartTitle.ts` (`resolveTrendChartTitle` keeps `??`, `resolveTrendChartV2Title` keeps `||`) used by both renderers. RED: `npx vitest run src/utils/trendChartTitle.test.ts` import failed (module missing); GREEN 5 passed; trend chart suites 98 passed. Tooltip series names (`widget.title ?? ...`) left as they were: a different rule, so no behavior change.
+  - T4 (`06719ad`): doc comment states that em, %, vw, vh, ch and others read as 0; a test pins it. Mutation (adding `em` to the regex) gave RED 1 failed / 28 passed; restored 29 passed.
+  - Gate (hmi-app): `npx tsc -b` clean; `npm run lint` clean; `npm test` 274 files / 3640 passed; `npm run build` built.
+
