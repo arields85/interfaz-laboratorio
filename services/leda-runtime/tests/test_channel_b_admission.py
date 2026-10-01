@@ -97,6 +97,29 @@ class ChatMessageLimiterTests(unittest.TestCase):
             self.clock.advance(0.01)
         self.assertLessEqual(limiter.tracked_chats, 50)
 
+    def test_overflow_evicts_an_expired_chat_before_an_active_one_so_counts_survive(self):
+        limiter = ChatMessageLimiter(clock=self.clock, limit=1, max_tracked=2)
+        limiter.admit("old")  # stamped at t0, then only re-attempted: it stays recent in the order but its window expires first
+        self.clock.advance(10)
+        self.assertEqual(limiter.admit("active"), MessageVerdict.ALLOWED)
+        self.clock.advance(20)
+        self.assertEqual(limiter.admit("old"), MessageVerdict.LIMITED_NOTIFY)
+        self.clock.advance(35)  # "old" expired (65 s), "active" still inside its window (55 s)
+        self.assertEqual(limiter.admit("new"), MessageVerdict.ALLOWED)
+        self.assertEqual(limiter.tracked_chats, 2)
+        # The active chat kept its window: evicting it would have let this message through.
+        self.assertEqual(limiter.admit("active"), MessageVerdict.LIMITED_NOTIFY)
+
+    def test_when_every_tracked_chat_is_active_the_least_recent_one_is_evicted(self):
+        limiter = ChatMessageLimiter(clock=self.clock, limit=1, max_tracked=2)
+        limiter.admit("first")
+        self.clock.advance(1)
+        limiter.admit("second")
+        self.clock.advance(1)
+        limiter.admit("third")
+        self.assertEqual(limiter.tracked_chats, 2)
+        self.assertEqual(limiter.admit("second"), MessageVerdict.LIMITED_NOTIFY)
+
     def test_concurrent_use_never_admits_more_than_the_limit(self):
         results = []
         lock = threading.Lock()

@@ -2480,37 +2480,87 @@ class ChannelBAdmissionTests(unittest.TestCase):
         self.assertIsNone(bot.state_store.status_of(123, 7))
         bot.send_message.assert_called_once_with(7, "En este momento no es posible registrar nuevas solicitudes. Intente más tarde.")
 
-    def test_sends_from_different_threads_never_overlap_on_the_shared_session(self):
-        bot = self.build_bot({"7": approved_chat(), "8": approved_chat()})
+    def notice_ready_bot(self, chats):
+        """A bot with the real transport methods and two inert sessions: the poll one and the notice one."""
+        bot = self.build_bot(chats)
+        bot._call = types.MethodType(TelegramLocalBot._call, bot)
         bot.send_message = types.MethodType(TelegramLocalBot.send_message, bot)
-        in_flight, peak, lock = [0], [0], threading.Lock()
+        ok_response = Mock()
+        ok_response.json.return_value = {"ok": True}
+        bot.session = Mock()
+        bot._notice_session = Mock()
+        bot._notice_session.post.return_value = ok_response
+        return bot
 
-        def slow_call(_method, **_kwargs):
+    def test_an_approval_notice_is_not_blocked_by_a_long_poll_on_the_shared_session(self):
+        bot = self.notice_ready_bot({"8": approved_chat()})
+        poll_started, release_poll = threading.Event(), threading.Event()
+
+        def long_poll(*_args, **_kwargs):
+            poll_started.set()
+            release_poll.wait(5)
+            return Mock()
+
+        bot.session.post.side_effect = long_poll
+        self.addCleanup(release_poll.set)
+        poller = threading.Thread(target=bot._call, args=("getUpdates",), kwargs={"timeout": 35, "data": {}}, daemon=True)
+        poller.start()
+        self.assertTrue(poll_started.wait(2))
+        result = []
+        notifier = threading.Thread(target=lambda: result.append(bot.send_approval_notice(8)), daemon=True)
+        notifier.start()
+        notifier.join(1)
+        self.assertFalse(notifier.is_alive(), "the notice waited for the long poll")
+        self.assertEqual(result, [True])
+        # The notice went out on its own session; the poll session saw only the getUpdates call.
+        self.assertEqual(bot._notice_session.post.call_count, 1)
+        self.assertTrue(bot._notice_session.post.call_args.args[0].endswith("/sendMessage"))
+        self.assertEqual(bot.session.post.call_count, 1)
+
+    def test_concurrent_approval_notices_never_overlap_on_the_notice_session(self):
+        bot = self.notice_ready_bot({"8": approved_chat()})
+        in_flight, peak, lock = [0], [0], threading.Lock()
+        ok_response = bot._notice_session.post.return_value
+
+        def slow_post(*_args, **_kwargs):
             with lock:
                 in_flight[0] += 1
                 peak[0] = max(peak[0], in_flight[0])
             time.sleep(0.02)
             with lock:
                 in_flight[0] -= 1
-            return {"ok": True}
+            return ok_response
 
-        bot._call = slow_call
-        # The poll thread answers a message while the admin HTTP thread sends an approval notice.
-        threads = [threading.Thread(target=bot.send_message, args=(7, "a")) for _ in range(3)]
-        threads += [threading.Thread(target=bot.send_approval_notice, args=(8,)) for _ in range(3)]
+        bot._notice_session.post.side_effect = slow_post
+        threads = [threading.Thread(target=bot.send_approval_notice, args=(8,)) for _ in range(4)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
+        self.assertEqual(bot._notice_session.post.call_count, 4)
         self.assertEqual(peak[0], 1)
+
+    def test_a_stopped_bot_sends_no_approval_notice(self):
+        bot = self.notice_ready_bot({"8": approved_chat()})
+        bot.stop_event.set()
+        with self.assertRaises(RuntimeError):
+            bot.send_approval_notice(8)
+        bot._notice_session.post.assert_not_called()
+
+    def test_stopping_the_bot_closes_the_notice_session_too(self):
+        bot = self.notice_ready_bot({"8": approved_chat()})
+        notice_session = bot._notice_session
+        bot.stop()
+        notice_session.close.assert_called_once_with()
 
     def test_approval_notice_is_sent_only_to_a_currently_approved_chat(self):
         text = "Su acceso fue aprobado. Ya puede realizar sus consultas."
         bot = self.build_bot({"1": approved_chat(), "2": pending_chat(), "3": approved_chat(status="rejected"), "4": approved_chat(status="revoked")})
+        bot._send_notice_message = Mock()
         self.assertTrue(bot.send_approval_notice(1))
         for chat_id in (2, 3, 4, 99):
             self.assertFalse(bot.send_approval_notice(chat_id))
-        bot.send_message.assert_called_once_with(1, text)
+        bot._send_notice_message.assert_called_once_with(1, text)
 
     def test_the_bot_persists_the_offset_without_a_whole_state_write_of_its_own_copy(self):
         store = MemoryStateStore(v3_state({"7": approved_chat()}, offset=5))

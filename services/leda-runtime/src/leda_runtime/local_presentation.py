@@ -701,8 +701,11 @@ class TelegramLocalBot:
         # optional redacted audit log of admission events.
         self.rate_limiter = rate_limiter if rate_limiter is not None else ChatMessageLimiter()
         self.audit_log = audit_log
-        self._send_lock = threading.Lock()
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
+        # The admin HTTP thread's approval notice gets its own session: a lock around the shared one
+        # would make the notice (and the admin request) wait out a 35 s getUpdates long poll. Notices
+        # share this one session among themselves, so they are serialized by their own lock.
+        self._notice_session, self._notice_lock = requests.Session(), threading.Lock()
         # B1: both optional -- a bot built without them (e.g. build_telegram_
         # bot's legacy standalone path) simply never requests a Channel B
         # voice reply; _request_channel_b_voice_reply is a no-op in that case.
@@ -796,7 +799,10 @@ class TelegramLocalBot:
         return {chat["chatId"] for chat in self.state_store.list_chats(self.bot_id) if chat["status"] == "approved"}
 
     def _call(self, method, *, timeout=35, **kwargs):
-        response = self.session.post(f"{self.api_base}/bot{self.token}/{method}", timeout=timeout, **kwargs)
+        return self._post(self.session, method, timeout, **kwargs)
+
+    def _post(self, session, method, timeout, **kwargs):
+        response = session.post(f"{self.api_base}/bot{self.token}/{method}", timeout=timeout, **kwargs)
         try:
             response.raise_for_status()
             payload = response.json()
@@ -809,10 +815,14 @@ class TelegramLocalBot:
     def send_message(self, chat_id, text):
         if self.stop_event.is_set():
             raise RuntimeError("TELEGRAM_UPDATE_CANCELLED")
-        # The poll thread and the admin HTTP thread (approval notice) both send: one send at a
-        # time keeps the shared requests session out of concurrent use for outgoing messages.
-        with self._send_lock:
-            self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
+        self._call("sendMessage", timeout=20, data={"chat_id": chat_id, "text": text})
+
+    def _send_notice_message(self, chat_id, text):
+        """Send from the admin HTTP thread on the notice session, never on the poll thread's one."""
+        if self.stop_event.is_set():
+            raise RuntimeError("TELEGRAM_UPDATE_CANCELLED")
+        with self._notice_lock:
+            self._post(self._notice_session, "sendMessage", 20, data={"chat_id": chat_id, "text": text})
 
     def _send_chat_action(self, chat_id, action):
         self._call("sendChatAction", timeout=5, data={"chat_id": chat_id, "action": action})
@@ -888,6 +898,7 @@ class TelegramLocalBot:
             return True
         try:
             self.session.close()
+            self._notice_session.close()
         except Exception:
             return False
         lease = self._lease
@@ -1012,7 +1023,7 @@ class TelegramLocalBot:
         """Tell a chat its access was approved; only ever sent while the chat is currently approved."""
         if self.bot_id is None or self.state_store.status_of(self.bot_id, chat_id) != "approved":
             return False
-        self.send_message(chat_id, ACCESS_APPROVED_REPLY)
+        self._send_notice_message(chat_id, ACCESS_APPROVED_REPLY)
         return True
 
     def _handle_message(self, message, *, migration_active=False):

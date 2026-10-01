@@ -74,8 +74,19 @@ class ChatMessageLimiter:
             self._chats[chat_id] = (stamps, notified)
             self._chats.move_to_end(chat_id)
             while len(self._chats) > self._max_tracked:
-                self._chats.popitem(last=False)
+                self._evict_one(chat_id, now)
             return verdict
+
+    def _evict_one(self, keep: int, now: float) -> None:
+        """Drop a chat whose window already expired; only if every chat is active, the least recent one.
+
+        Dropping an active chat forgets its count, so that is the last resort.
+        """
+        for chat_id, (stamps, _) in self._chats.items():
+            if chat_id != keep and not (stamps and stamps[-1] > now - self._window):
+                del self._chats[chat_id]
+                return
+        self._chats.popitem(last=False)
 
     def _evict_idle(self, now: float) -> None:
         while self._chats:

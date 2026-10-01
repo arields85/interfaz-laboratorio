@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from leda_runtime.admin_http import AdminHttpBoundary
 from leda_runtime.channel_b_access import ChannelBAccess
+from leda_runtime.channel_b_admission import AdmissionAuditLog
 from leda_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
 from leda_runtime.telegram_lifecycle import TelegramStateRepository, TelegramStateUnavailable
 
@@ -279,3 +281,47 @@ class ChannelBAccessHttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CreateAppChannelBWiringTests(unittest.TestCase):
+    """The default composition of ``create_app`` wires the Channel B routes to the production objects."""
+
+    def test_the_routes_reach_the_running_managers_bot_and_share_the_bots_audit_log(self):
+        import leda_runtime.local_presentation as local_presentation
+
+        audit_logs, boundaries, factories = [], [], []
+
+        def recording_audit_log(*args, **kwargs):
+            audit_logs.append(AdmissionAuditLog(*args, **kwargs))
+            return audit_logs[-1]
+
+        def recording_manager(_configuration, _resolver, _credentials, bot_factory):
+            factories.append(bot_factory)
+            return SimpleNamespace(bot=None, resolver=None)
+
+        def recording_boundary(*_args, **kwargs):
+            boundaries.append(kwargs)
+            return Mock()
+
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True):
+            with patch.object(local_presentation, "AdmissionAuditLog", recording_audit_log), patch.object(
+                local_presentation, "TelegramLifecycleManager", recording_manager
+            ), patch.object(local_presentation, "AdminHttpBoundary", recording_boundary):
+                app = create_app(JsonFileStore(Path(temporary) / "snapshot.json"), VoiceEventStore(), None)
+            manager = app.config["telegram_manager"]
+            access = boundaries[0]["channel_b_access"]
+            # No bot is running yet: the routes see no identity.
+            with self.assertRaises(Exception) as unavailable:
+                access.list_chats()
+            self.assertEqual(str(unavailable.exception), "CHANNEL_B_ACCESS_UNAVAILABLE")
+            # The manager later runs a bot built by the production factory: the routes reach that very bot.
+            bot = factories[0]("123:token")
+            bot.bot_id = 123
+            manager.bot = bot
+            bot.state_store.write(state({"7": chat("pending")}))
+            self.assertIs(access._bot(), bot)
+            self.assertEqual([item["chatId"] for item in access.list_chats()], [7])
+            # One audit log serves both the bot (requests) and the routes (decisions).
+            self.assertEqual(len(audit_logs), 1)
+            self.assertIs(bot.audit_log, audit_logs[0])
+            self.assertIs(access._audit_log, audit_logs[0])
