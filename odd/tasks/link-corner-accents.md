@@ -98,6 +98,8 @@ registered accent custom properties.
   3574 passed, `npm run build` ok. Commit `e101233`. Live after: all four brackets visible around the hovered group
   (screenshot `group-hover-full.png` in the scratchpad).
 
+- 2026-09-30 user: "ahora sí se ve; las esquinas de la animación son rectas y deberían tomar la misma forma que las esquinas de los widgets". Fix (parent inline, TDD): the layer is again rounded (frame radius + offset) but draws a BORDER (follows the arc; a background would be clipped inside it) masked to the four corner squares of side radius + offset + accent length (arc + straight tail), length/opacity still the registered accent properties. RED 2 -> GREEN 23/23; full suite green; live screenshots show curved brackets around the hovered group. Commit after this line.
+
 ## Next step
 
 Live check of the corner accents in the browser (parent), then close the feature.
