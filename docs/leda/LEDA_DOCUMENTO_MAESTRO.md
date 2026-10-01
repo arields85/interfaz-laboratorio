@@ -655,6 +655,39 @@ usa como pista de vocabulario adicional para la transcripción, sin agregar una 
 La transcripción resultante se responde exactamente igual que una pregunta escrita, incluida la nota
 de voz de respuesta (PW-012). Detalle y evidencia: `odd/tasks/pw-013-voice-note-questions.md`.
 
+**Aclaración 2026-10-01 (decisión del usuario, PW-022): admisión por solicitud y aprobación.** Esta
+aclaración reemplaza la limitación de un único chat emparejado de la Aclaración 2.0.12 y la
+validación de chat único mencionada en PW-013. El bot del Canal B deja de pertenecer al primer chat
+que envía `/start`:
+
+- **Solicitud.** Un chat privado desconocido que envía `/start` queda como solicitud **pendiente**,
+  con el nombre visible y el usuario de Telegram. Se admiten hasta 20 solicitudes pendientes a la
+  vez. Los grupos se siguen ignorando.
+- **Estados.** Cada chat está pendiente, aprobado, rechazado o revocado. Solo un chat aprobado
+  recibe respuestas. Los demás reciben un mensaje fijo de usted, sin indicador de escritura, sin
+  descarga de notas de voz, sin transcripción y sin respuesta. Un chat rechazado o revocado no
+  puede volver a solicitar acceso por su cuenta.
+- **Decisión del administrador.** El administrador de la HMI aprueba, rechaza o revoca desde
+  Configuración general → Leda («Acceso al Canal B») y desde la campana de notificaciones de la
+  barra superior, que solo se activa con una sesión de administrador. Al aprobar, el bot avisa a
+  la persona por Telegram. Si ese aviso falla, la aprobación se mantiene. La revocación se aplica
+  desde el siguiente mensaje del chat. Con el bot detenido, las solicitudes no se pueden gestionar.
+- **Límites.** Cada chat admite como máximo 10 mensajes por minuto. Un chat aprobado que supera el
+  límite recibe un único aviso por ventana. Un chat no aprobado deja de recibir respuestas.
+- **Auditoría redactada.** Cada solicitud, aprobación, rechazo y revocación se registra en
+  `leda_channel_b_admission_audit.jsonl`, dentro del directorio de estado del runtime, con fecha,
+  evento, bot, chat y actor. No guarda textos de mensajes, nombres, usuarios ni credenciales.
+- **Migración.** El chat emparejado existente pasa a estar aprobado sin intervención.
+
+**Limitación conocida.** Todas las personas aprobadas consultan la misma fuente provisoria de la
+Aclaración 2026-09-24: la pantalla de la sesión HMI actualizada más recientemente. Por eso la regla
+«impide mezcla de datos entre usuarios, instalaciones y sesiones» todavía no se cumple entre chats
+aprobados. Se resuelve con la fuente de datos autónoma de PW-003.
+
+**Seguimiento.** La descarga y la transcripción de notas de voz siguen ejecutándose en el hilo de
+sondeo del bot, de modo que una nota lenta demora a todos los chats. Detalle y evidencia:
+`odd/tasks/leda-channel-b-open-access.md`.
+
 ### 6.4 Datos reales y presentación
 
 El usuario informa tres máquinas reales visualizables actualmente. La primera entrega
@@ -1604,6 +1637,16 @@ repositorio es `git log -1 --format=%H -- odd/tasks/leda-telegram-poll-diagnosti
 incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
 
 ## 12. Changelog
+
+### 2.0.23 — 2026-10-01
+
+- Canal B abierto por solicitud y aprobación (PW-022, decisión del usuario). Reemplaza la limitación
+  de un único chat emparejado de la Aclaración 2.0.12. Un chat nuevo solicita acceso con `/start`, y
+  el administrador aprueba, rechaza o revoca desde la pestaña Leda y desde la campana de la barra
+  superior. Incluye un límite por chat, auditoría redactada y migración automática del chat
+  existente. Detalle en la Aclaración 2026-10-01 de §6.3.
+- Limitación conocida: los chats aprobados comparten la fuente provisoria de la pantalla más
+  reciente hasta PW-003.
 
 ### 2.0.22 — 2026-09-29
 
