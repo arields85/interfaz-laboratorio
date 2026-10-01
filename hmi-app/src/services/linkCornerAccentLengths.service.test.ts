@@ -29,10 +29,10 @@ describe('link corner accent lengths', () => {
         vi.restoreAllMocks();
     });
 
-    it('defaults equal the index.css tokens (30 px rest, 22 px hover) and the range is 0-60 px, step 1', () => {
-        expect(DEFAULT_LINK_ACCENT_LENGTHS).toEqual({ restPx: 30, hoverPx: 22 });
-        expect(indexCss).toMatch(/--link-accent-length-rest: 30px;/);
-        expect(indexCss).toMatch(/--link-accent-length-hover: 22px;/);
+    it('defaults equal the index.css tokens (34 px rest, 10 px hover) and the range is 0-60 px, step 1', () => {
+        expect(DEFAULT_LINK_ACCENT_LENGTHS).toEqual({ restPx: 34, hoverPx: 10 });
+        expect(indexCss).toMatch(/--link-accent-length-rest: 34px;/);
+        expect(indexCss).toMatch(/--link-accent-length-hover: 10px;/);
         expect(LINK_ACCENT_LENGTH_LIMITS).toEqual({ min: 0, max: 60, step: 1 });
     });
 
@@ -41,11 +41,11 @@ describe('link corner accent lengths', () => {
     });
 
     it('stores only the overrides and removes the key when nothing differs', () => {
-        writeStoredLinkAccentLengths({ restPx: 24, hoverPx: 22 });
+        writeStoredLinkAccentLengths({ restPx: 24, hoverPx: 10 });
         expect(JSON.parse(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY) ?? '')).toEqual({ restPx: 24 });
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 24, hoverPx: 22 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 24, hoverPx: 10 });
 
-        writeStoredLinkAccentLengths({ restPx: 30, hoverPx: 22 });
+        writeStoredLinkAccentLengths({ restPx: 34, hoverPx: 10 });
         expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
     });
 
@@ -54,7 +54,7 @@ describe('link corner accent lengths', () => {
         expect(readStoredLinkAccentLengths()).toEqual({ restPx: 60, hoverPx: 0 });
 
         localStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify({ restPx: 15.4 }));
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 15, hoverPx: 22 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 15, hoverPx: 10 });
     });
 
     it.each(['', 'nope', 'null', '5', '[1]', '{"restPx":"9"}', '{"restPx":null,"hoverPx":{}}'])(
@@ -69,7 +69,7 @@ describe('link corner accent lengths', () => {
     it('keeps the valid field when the other one is invalid', () => {
         localStorage.setItem(LINK_ACCENT_LENGTHS_STORAGE_KEY, JSON.stringify({ restPx: 'x', hoverPx: 12 }));
 
-        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 30, hoverPx: 12 });
+        expect(readStoredLinkAccentLengths()).toEqual({ restPx: 34, hoverPx: 12 });
     });
 
     it('survives unavailable storage on read and write', () => {
@@ -83,7 +83,7 @@ describe('link corner accent lengths', () => {
     });
 
     it('writes the root custom properties only for overridden values', () => {
-        applyLinkAccentLengthsToDocument({ restPx: 24, hoverPx: 22 });
+        applyLinkAccentLengthsToDocument({ restPx: 24, hoverPx: 10 });
 
         expect(root().getPropertyValue('--link-accent-length-rest')).toBe('24px');
         expect(root().getPropertyValue('--link-accent-length-hover')).toBe('');

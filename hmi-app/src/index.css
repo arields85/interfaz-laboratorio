@@ -462,16 +462,17 @@ h1, h2, h3, h4, h5, h6 {
  * El largo es cuánto de la esquina se ve, medido desde el CENTRO del arco (lado del cuadrado = radio x 0,2929 + largo; 0 = nada;
  * al crecer se revela el arco desde su centro hacia afuera y luego los tramos rectos).
  *   --link-accent-offset            separación entre el borde del marco y las esquinas (Tema: "Distancia al marco")
- *   --link-accent-radius            radio de las esquinas; sin definir = radio del marco + separación (Tema: "Radio de las esquinas")
+ *   --link-accent-radius            radio de las esquinas (Tema: "Radio de las esquinas")
  *   --link-accent-length-rest/-hover        lado del cuadrado visible (reposo / hover)
  *   --link-accent-thickness-rest/-hover     grosor de cada brazo
  *   --link-accent-color-rest/-hover         color de las esquinas
  *   --link-accent-opacity-rest/-hover       opacidad (0 % = ocultas en reposo)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
-  --link-accent-offset: 4px;
-  --link-accent-length-rest: 30px;
-  --link-accent-length-hover: 22px;
+  --link-accent-offset: 5px;
+  --link-accent-radius: 5px;
+  --link-accent-length-rest: 34px;
+  --link-accent-length-hover: 10px;
   --link-accent-thickness-rest: 1px;
   --link-accent-thickness-hover: 1px;
   --link-accent-color-rest: #ffffff;
@@ -1595,7 +1596,7 @@ h1, h2, h3, h4, h5, h6 {
    * (fuera del marco, que recorta su desborde). Mismas propiedades registradas, mismo dibujo y
    * misma transición que el acento de `.glass-panel::after`; el hover es el del ítem del visor. */
   /* Each bracket is the corner ARC plus a straight tail, on an invisible outer frame rounded like the widget
-   * (auto: frame radius + offset; the Tema radius slider writes `--link-accent-radius`): a rounded BORDER masked to
+   * (`--link-accent-radius`, 5px by default; the Tema slider writes it on the root): a rounded BORDER masked to
    * the four corner squares. Drawn outside the widget there is no frame border to complete the curve, so straight
    * gradients clipped by the rounding would look cut. The length is the side of each visible corner square measured
    * from the corner of the layer: 0 shows nothing, growing it reveals the arc from its middle outwards and then the
@@ -1606,7 +1607,7 @@ h1, h2, h3, h4, h5, h6 {
     /* Accent radius (auto: frame radius + offset). The length is measured from the MIDDLE of the arc, which sits at
      * r * (1 - 1/sqrt 2) ~= 0.2929 r from the box corner on each axis: 0 shows nothing, any small value reveals a
      * piece of arc centred on the corner whatever the radius, larger values add the straight tails. */
-    --link-accent-r: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));
+    --link-accent-r: var(--link-accent-radius);
     --link-accent-reach: calc(var(--link-accent-r) * 0.2929 + var(--frame-accent-length));
     border-radius: var(--link-accent-r);
     pointer-events: none;

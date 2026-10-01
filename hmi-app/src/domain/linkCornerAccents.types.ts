@@ -1,12 +1,12 @@
-/** Lengths (px) of the link corner accents' straight tail: at rest and while the widget is hovered. */
+/** Lengths (px) of the link corner accents, measured from the middle of the corner arc: at rest and while the widget is hovered. */
 export interface LinkAccentLengths {
     restPx: number;
     hoverPx: number;
 }
 
-/** Geometry of the link corner accents' outer frame: distance to the widget frame and corner radius (null = automatic). */
+/** Geometry of the link corner accents' outer frame: distance to the widget frame and corner radius. */
 export interface LinkAccentGeometry {
     offsetPx: number;
-    /** Absolute radius (px) of the accent frame; `null` = frame radius + distance. */
-    radiusPx: number | null;
+    /** Radius (px) of the accent frame's corners. */
+    radiusPx: number;
 }

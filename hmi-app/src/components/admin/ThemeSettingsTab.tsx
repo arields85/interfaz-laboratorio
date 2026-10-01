@@ -34,6 +34,7 @@ import {
 import {
     applyLinkAccentGeometryToDocument,
     applyLinkAccentLengthsToDocument,
+    DEFAULT_LINK_ACCENT_GEOMETRY,
     LINK_ACCENT_LENGTH_LIMITS,
     LINK_ACCENT_OFFSET_LIMITS,
     LINK_ACCENT_RADIUS_LIMITS,
@@ -338,12 +339,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout, linkAccents, accentLengths, accentGeometry }));
     };
 
-    // "Distancia al marco" and "Radio de las esquinas" are previewed live on the document root too. The
-    // radius is automatic (null) until set; the slider shows the effective value, and a value equal to the
-    // automatic one is "no override", like the frame radius control above.
-    const autoAccentRadiusPx = Math.min(LINK_ACCENT_RADIUS_LIMITS.max, currentRadiusPx + accentGeometry.offsetPx);
-    const currentAccentRadiusPx = accentGeometry.radiusPx ?? autoAccentRadiusPx;
-
+    // "Distancia al marco" and "Radio de las esquinas" are previewed live on the document root too; a value
+    // equal to the default is "no override" (the service removes the property), like the frame radius above.
     const commitAccentGeometry = (next: LinkAccentGeometry) => {
         if (next.offsetPx === accentGeometry.offsetPx && next.radiusPx === accentGeometry.radiusPx) {
             return;
@@ -357,7 +354,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
     // selection is still being previewed on the whole document, the preview
     // must not leak past the tab's lifetime: restore the last saved theme.
-    // `dirtyRef` is updated synchronously by every handler below (select,
+    // `dirtyRef` is updated synchronously by every handler above (select,
     // save, revert), so after an explicit save or revert it is already
     // false and this never double-applies on top of that outcome.
     useEffect(() => {
@@ -646,8 +643,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 </div>
 
                 <p className={`mt-4 mb-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                    La distancia separa las esquinas del marco del widget. El radio redondea las esquinas; sin ajustar,
-                    es el radio del marco más la distancia.
+                    La distancia separa las esquinas del marco del widget. El radio redondea las esquinas. Restablecer
+                    vuelve al radio original ({DEFAULT_LINK_ACCENT_GEOMETRY.radiusPx} px).
                 </p>
                 <div className="flex flex-col gap-4">
                     <DockSliderField
@@ -665,19 +662,19 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                         ariaLabel="Radio de las esquinas"
                         numberInputAriaLabel="Valor de radio de las esquinas"
                         unit="px"
-                        value={currentAccentRadiusPx}
+                        value={accentGeometry.radiusPx}
                         disabled={!linkAccents}
                         {...LINK_ACCENT_RADIUS_LIMITS}
                         onChange={(value) => commitAccentGeometry({
                             ...accentGeometry,
-                            radiusPx: value === autoAccentRadiusPx ? null : value,
+                            radiusPx: value,
                         })}
                     />
                     <div>
                         <AdminActionButton
                             variant="secondary"
-                            disabled={!linkAccents || accentGeometry.radiusPx === null}
-                            onClick={() => commitAccentGeometry({ ...accentGeometry, radiusPx: null })}
+                            disabled={!linkAccents || accentGeometry.radiusPx === DEFAULT_LINK_ACCENT_GEOMETRY.radiusPx}
+                            onClick={() => commitAccentGeometry({ ...accentGeometry, radiusPx: DEFAULT_LINK_ACCENT_GEOMETRY.radiusPx })}
                         >
                             Restablecer
                         </AdminActionButton>

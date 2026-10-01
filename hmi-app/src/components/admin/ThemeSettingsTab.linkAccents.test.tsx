@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeSettingsTab from './ThemeSettingsTab';
-import { CLASSIC_THEME_STYLE_ID, getThemeStylePreset, resetThemeStyleOnDocument } from '../../services/themeStyle.service';
+import { resetThemeStyleOnDocument } from '../../services/themeStyle.service';
 import { resetViewerEntranceSettingsOnDocument } from '../../services/viewerEntranceStyle.service';
 import { resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { resetIconCutoutOnDocument } from '../../services/iconCutout.service';
@@ -186,8 +186,8 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
 
             expect(accentsSection().contains(restSlider())).toBe(true);
             expect(accentsSection().contains(hoverSlider())).toBe(true);
-            expect(restSlider()).toHaveValue('30');
-            expect(hoverSlider()).toHaveValue('22');
+            expect(restSlider()).toHaveValue('34');
+            expect(hoverSlider()).toHaveValue('10');
             expect(accentsSection().textContent ?? '').toMatch(/cuánto de la esquina se ve, desde el centro del arco; 0 = nada/i);
             expect(accentsSection().textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
         });
@@ -252,7 +252,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
                 revertRef.current?.();
             });
 
-            expect(restSlider()).toHaveValue('30');
+            expect(restSlider()).toHaveValue('34');
             expect(rootValue('--link-accent-length-rest')).toBe('');
             expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
@@ -264,7 +264,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
 
             fireEvent.change(restSlider(), { target: { value: '25' } });
-            fireEvent.change(restSlider(), { target: { value: '30' } });
+            fireEvent.change(restSlider(), { target: { value: '34' } });
 
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
         });
@@ -286,7 +286,6 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
         const radiusSlider = () => screen.getByRole('slider', { name: 'Radio de las esquinas' });
         const resetButton = () => within(accentsSection()).getByRole('button', { name: 'Restablecer' });
         const rootValue = (name: string) => document.documentElement.style.getPropertyValue(name);
-        const frameRadius = getThemeStylePreset(CLASSIC_THEME_STYLE_ID).frame.rest.radiusPx;
 
         it('renders both sliders inside the section, disabled while the switch is off', async () => {
             const user = userEvent.setup();
@@ -304,12 +303,12 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             expect(radiusSlider()).toBeEnabled();
         });
 
-        it('shows the default distance and, in automatic mode, the frame radius plus the distance', () => {
+        it('shows the 5 px defaults for the distance and the radius, with a disabled Restablecer', () => {
             writeStoredLinkCornerAccents(true);
             render(<ThemeSettingsTab />);
 
-            expect(distanceSlider()).toHaveValue('4');
-            expect(radiusSlider()).toHaveValue(String(Math.min(48, frameRadius + 4)));
+            expect(distanceSlider()).toHaveValue('5');
+            expect(radiusSlider()).toHaveValue('5');
             expect(resetButton()).toBeDisabled();
         });
 
@@ -324,7 +323,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             expect(resetButton()).toBeEnabled();
         });
 
-        it('previews the distance live on the root, keeping the radius automatic', () => {
+        it('previews the distance live on the root, leaving the radius at its default', () => {
             writeStoredLinkCornerAccents(true);
             const onDirtyChange = vi.fn();
             render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
@@ -333,12 +332,12 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
 
             expect(rootValue('--link-accent-offset')).toBe('10px');
             expect(rootValue('--link-accent-radius')).toBe('');
-            expect(radiusSlider()).toHaveValue(String(Math.min(48, frameRadius + 10)));
+            expect(radiusSlider()).toHaveValue('5');
             expect(onDirtyChange).toHaveBeenCalledWith(true);
             expect(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY)).toBeNull();
         });
 
-        it('sets an absolute radius live and Restablecer returns to automatic', () => {
+        it('sets the radius live and Restablecer returns to the 5 px default', () => {
             writeStoredLinkCornerAccents(true);
             render(<ThemeSettingsTab />);
 
@@ -348,6 +347,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
 
             fireEvent.click(resetButton());
             expect(rootValue('--link-accent-radius')).toBe('');
+            expect(radiusSlider()).toHaveValue('5');
             expect(resetButton()).toBeDisabled();
         });
 
@@ -378,7 +378,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
                 revertRef.current?.();
             });
 
-            expect(distanceSlider()).toHaveValue('4');
+            expect(distanceSlider()).toHaveValue('5');
             expect(rootValue('--link-accent-offset')).toBe('');
             expect(rootValue('--link-accent-radius')).toBe('');
             expect(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY)).toBeNull();
@@ -391,7 +391,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
 
             fireEvent.change(distanceSlider(), { target: { value: '10' } });
-            fireEvent.change(distanceSlider(), { target: { value: '4' } });
+            fireEvent.change(distanceSlider(), { target: { value: '5' } });
 
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
         });

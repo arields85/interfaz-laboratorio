@@ -20,9 +20,10 @@ describe('link corner accents tokens', () => {
     const root = indexCss.match(/:root {([^}]*--link-accent-offset[^}]*)}/)?.[1] ?? '';
 
     it('declares the offset (4px) and the Contorno accent values as tokens', () => {
-        expect(root).toContain('--link-accent-offset: 4px;');
-        expect(root).toContain('--link-accent-length-rest: 30px;');
-        expect(root).toContain('--link-accent-length-hover: 22px;');
+        expect(root).toContain('--link-accent-offset: 5px;');
+        expect(root).toContain('--link-accent-length-rest: 34px;');
+        expect(root).toContain('--link-accent-radius: 5px;');
+        expect(root).toContain('--link-accent-length-hover: 10px;');
         expect(root).toContain('--link-accent-thickness-rest: 1px;');
         expect(root).toContain('--link-accent-thickness-hover: 1px;');
         expect(root).toContain('--link-accent-color-rest: #ffffff;');
@@ -38,9 +39,9 @@ describe('link corner accents layer', () => {
 
         expect(body).toContain('position: absolute;');
         expect(body).toContain('pointer-events: none;');
-        // Auto (frame radius + offset) unless the Tema radius slider writes `--link-accent-radius` on the root.
+        // The radius is the `--link-accent-radius` token (default 5px; the Tema slider writes it on the root).
         expect(body).toContain(
-            '--link-accent-r: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));',
+            '--link-accent-r: var(--link-accent-radius);',
         );
     });
 
@@ -76,7 +77,7 @@ describe('link corner accents layer', () => {
         // Measured from the MIDDLE of the arc, not from the box corner: the arc's middle sits at r * (1 - 1/sqrt 2)
         // ~= 0.2929 r from the corner on each axis, so 0 shows nothing and any small value already reveals a piece of
         // arc whatever the radius (from the corner, a 5 px length showed nothing with a 19 px radius).
-        expect(body).toContain('--link-accent-r: var(--link-accent-radius, calc(var(--frame-radius-rest) + var(--link-accent-offset)));');
+        expect(body).toContain('--link-accent-r: var(--link-accent-radius);');
         expect(body).toContain('border-radius: var(--link-accent-r);');
         expect(body).toContain('--link-accent-reach: calc(var(--link-accent-r) * 0.2929 + var(--frame-accent-length));');
         expect(body).toContain('-webkit-mask-size: var(--link-accent-reach) var(--link-accent-reach);');

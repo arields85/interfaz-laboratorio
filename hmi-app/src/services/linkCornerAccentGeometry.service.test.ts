@@ -25,20 +25,20 @@ describe('link corner accent geometry (distance and radius)', () => {
         vi.restoreAllMocks();
     });
 
-    it('defaults to a 4 px distance and the automatic radius (null), with the documented ranges', () => {
-        expect(DEFAULT_LINK_ACCENT_GEOMETRY).toEqual({ offsetPx: 4, radiusPx: null });
+    it('defaults to a 5 px distance and a 5 px radius, with the documented ranges', () => {
+        expect(DEFAULT_LINK_ACCENT_GEOMETRY).toEqual({ offsetPx: 5, radiusPx: 5 });
         expect(LINK_ACCENT_OFFSET_LIMITS).toEqual({ min: 0, max: 16, step: 1 });
         expect(LINK_ACCENT_RADIUS_LIMITS).toEqual({ min: 0, max: 48, step: 1 });
         expect(readStoredLinkAccentGeometry()).toEqual(DEFAULT_LINK_ACCENT_GEOMETRY);
     });
 
     it('stores only the overrides and removes the key when nothing differs', () => {
-        writeStoredLinkAccentGeometry({ offsetPx: 8, radiusPx: null });
+        writeStoredLinkAccentGeometry({ offsetPx: 8, radiusPx: 5 });
         expect(JSON.parse(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY) ?? '')).toEqual({ offsetPx: 8 });
 
-        writeStoredLinkAccentGeometry({ offsetPx: 4, radiusPx: 20 });
+        writeStoredLinkAccentGeometry({ offsetPx: 5, radiusPx: 20 });
         expect(JSON.parse(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY) ?? '')).toEqual({ radiusPx: 20 });
-        expect(readStoredLinkAccentGeometry()).toEqual({ offsetPx: 4, radiusPx: 20 });
+        expect(readStoredLinkAccentGeometry()).toEqual({ offsetPx: 5, radiusPx: 20 });
 
         writeStoredLinkAccentGeometry(DEFAULT_LINK_ACCENT_GEOMETRY);
         expect(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY)).toBeNull();
@@ -48,8 +48,8 @@ describe('link corner accent geometry (distance and radius)', () => {
         localStorage.setItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY, JSON.stringify({ offsetPx: 99, radiusPx: -3 }));
         expect(readStoredLinkAccentGeometry()).toEqual({ offsetPx: 16, radiusPx: 0 });
 
-        localStorage.setItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY, JSON.stringify({ offsetPx: 5.4, radiusPx: 99 }));
-        expect(readStoredLinkAccentGeometry()).toEqual({ offsetPx: 5, radiusPx: 48 });
+        localStorage.setItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY, JSON.stringify({ offsetPx: 7.4, radiusPx: 99 }));
+        expect(readStoredLinkAccentGeometry()).toEqual({ offsetPx: 7, radiusPx: 48 });
     });
 
     it.each(['', 'nope', 'null', '5', '[1]', '{"offsetPx":"9"}', '{"offsetPx":null,"radiusPx":{}}'])(
@@ -72,11 +72,11 @@ describe('link corner accent geometry (distance and radius)', () => {
     });
 
     it('writes the root custom properties only for overridden values', () => {
-        applyLinkAccentGeometryToDocument({ offsetPx: 8, radiusPx: null });
+        applyLinkAccentGeometryToDocument({ offsetPx: 8, radiusPx: 5 });
         expect(rootValue('--link-accent-offset')).toBe('8px');
         expect(rootValue('--link-accent-radius')).toBe('');
 
-        applyLinkAccentGeometryToDocument({ offsetPx: 4, radiusPx: 0 });
+        applyLinkAccentGeometryToDocument({ offsetPx: 5, radiusPx: 0 });
         expect(rootValue('--link-accent-offset')).toBe('');
         expect(rootValue('--link-accent-radius')).toBe('0px');
     });

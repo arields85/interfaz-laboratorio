@@ -57,7 +57,7 @@ export function applyLinkCornerAccentsOverride(): void {
 }
 
 // -----------------------------------------------------------------------------
-// Lengths of the accent (the straight tail that continues the corner arc)
+// Lengths of the accent (how much of each corner shows, measured from the middle of the corner arc)
 //
 // Two numeric overrides ("Largo en reposo" / "Largo con el cursor"). Same rule as the other visual
 // settings: the `index.css` tokens are the defaults, only the overrides are stored, and the live
@@ -67,7 +67,7 @@ export function applyLinkCornerAccentsOverride(): void {
 export const LINK_ACCENT_LENGTHS_STORAGE_KEY = 'hmi-link-corner-accent-lengths';
 
 /** Keep equal to `--link-accent-length-rest` / `-hover` in `index.css` (a test pins it). */
-export const DEFAULT_LINK_ACCENT_LENGTHS: LinkAccentLengths = { restPx: 30, hoverPx: 22 };
+export const DEFAULT_LINK_ACCENT_LENGTHS: LinkAccentLengths = { restPx: 34, hoverPx: 10 };
 
 export const LINK_ACCENT_LENGTH_LIMITS = { min: 0, max: 60, step: 1 } as const;
 
@@ -145,15 +145,14 @@ export function applyLinkAccentLengthsOverride(): void {
 // -----------------------------------------------------------------------------
 // Geometry of the accent frame (distance to the widget frame and corner radius)
 //
-// "Distancia al marco" is `--link-accent-offset` (default 4 px in `index.css`); "Radio de las esquinas"
-// is `--link-accent-radius`, absent = automatic (frame radius + distance, resolved by the CSS rule).
-// Same pattern as the lengths: only overrides are stored, and a value at its default removes the
-// root property.
+// "Distancia al marco" is `--link-accent-offset` and "Radio de las esquinas" is `--link-accent-radius`
+// (both 5 px in `index.css`). Same pattern as the lengths: only overrides are stored, and a value at
+// its default removes the root property.
 // -----------------------------------------------------------------------------
 export const LINK_ACCENT_GEOMETRY_STORAGE_KEY = 'hmi-link-corner-accent-geometry';
 
-/** Keep `offsetPx` equal to `--link-accent-offset` in `index.css`; `null` radius = automatic. */
-export const DEFAULT_LINK_ACCENT_GEOMETRY: LinkAccentGeometry = { offsetPx: 4, radiusPx: null };
+/** Keep equal to `--link-accent-offset` / `--link-accent-radius` in `index.css` (a test pins it). */
+export const DEFAULT_LINK_ACCENT_GEOMETRY: LinkAccentGeometry = { offsetPx: 5, radiusPx: 5 };
 
 export const LINK_ACCENT_OFFSET_LIMITS = { min: 0, max: 16, step: 1 } as const;
 export const LINK_ACCENT_RADIUS_LIMITS = { min: 0, max: 48, step: 1 } as const;
@@ -193,7 +192,7 @@ export function writeStoredLinkAccentGeometry(geometry: LinkAccentGeometry): voi
     if (geometry.offsetPx !== DEFAULT_LINK_ACCENT_GEOMETRY.offsetPx) {
         overrides.offsetPx = geometry.offsetPx;
     }
-    if (geometry.radiusPx !== null) {
+    if (geometry.radiusPx !== DEFAULT_LINK_ACCENT_GEOMETRY.radiusPx) {
         overrides.radiusPx = geometry.radiusPx;
     }
 
@@ -217,7 +216,7 @@ export function applyLinkAccentGeometryToDocument(
         target.style.setProperty(OFFSET_PROPERTY, `${geometry.offsetPx}px`);
     }
 
-    if (geometry.radiusPx === null) {
+    if (geometry.radiusPx === DEFAULT_LINK_ACCENT_GEOMETRY.radiusPx) {
         target.style.removeProperty(RADIUS_PROPERTY);
     } else {
         target.style.setProperty(RADIUS_PROPERTY, `${geometry.radiusPx}px`);
