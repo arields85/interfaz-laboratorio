@@ -1,10 +1,10 @@
 import '@testing-library/jest-dom/vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeSettingsTab from './ThemeSettingsTab';
-import { resetThemeStyleOnDocument } from '../../services/themeStyle.service';
+import { CLASSIC_THEME_STYLE_ID, getThemeStylePreset, resetThemeStyleOnDocument } from '../../services/themeStyle.service';
 import { resetViewerEntranceSettingsOnDocument } from '../../services/viewerEntranceStyle.service';
 import { resetFrameShapeOnDocument } from '../../services/frameShape.service';
 import { resetIconCutoutOnDocument } from '../../services/iconCutout.service';
@@ -14,8 +14,11 @@ import {
     previewLinkCornerAccents,
     resetLinkCornerAccentsOnDocument,
     writeStoredLinkCornerAccents,
+    LINK_ACCENT_GEOMETRY_STORAGE_KEY,
     LINK_ACCENT_LENGTHS_STORAGE_KEY,
+    resetLinkAccentGeometryOnDocument,
     resetLinkAccentLengthsOnDocument,
+    writeStoredLinkAccentGeometry,
     writeStoredLinkAccentLengths,
 } from '../../services/linkCornerAccents.service';
 
@@ -32,6 +35,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
         resetIconCutoutOnDocument();
         resetLinkCornerAccentsOnDocument();
         resetLinkAccentLengthsOnDocument();
+        resetLinkAccentGeometryOnDocument();
     };
 
     beforeEach(reset);
@@ -182,9 +186,9 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
 
             expect(accentsSection().contains(restSlider())).toBe(true);
             expect(accentsSection().contains(hoverSlider())).toBe(true);
-            expect(restSlider()).toHaveValue('12');
-            expect(hoverSlider()).toHaveValue('6');
-            expect(accentsSection().textContent ?? '').toMatch(/tramo recto visible/i);
+            expect(restSlider()).toHaveValue('30');
+            expect(hoverSlider()).toHaveValue('22');
+            expect(accentsSection().textContent ?? '').toMatch(/cuánto de la esquina se ve, desde la punta; 0 = nada/i);
             expect(accentsSection().textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
         });
 
@@ -248,7 +252,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
                 revertRef.current?.();
             });
 
-            expect(restSlider()).toHaveValue('12');
+            expect(restSlider()).toHaveValue('30');
             expect(rootValue('--link-accent-length-rest')).toBe('');
             expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
@@ -260,7 +264,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
 
             fireEvent.change(restSlider(), { target: { value: '25' } });
-            fireEvent.change(restSlider(), { target: { value: '12' } });
+            fireEvent.change(restSlider(), { target: { value: '30' } });
 
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
         });
@@ -274,6 +278,134 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             unmount();
 
             expect(rootValue('--link-accent-length-rest')).toBe('');
+        });
+    });
+
+    describe('distance and radius', () => {
+        const distanceSlider = () => screen.getByRole('slider', { name: 'Distancia al marco' });
+        const radiusSlider = () => screen.getByRole('slider', { name: 'Radio de las esquinas' });
+        const resetButton = () => within(accentsSection()).getByRole('button', { name: 'Restablecer' });
+        const rootValue = (name: string) => document.documentElement.style.getPropertyValue(name);
+        const frameRadius = getThemeStylePreset(CLASSIC_THEME_STYLE_ID).frame.rest.radiusPx;
+
+        it('renders both sliders inside the section, disabled while the switch is off', async () => {
+            const user = userEvent.setup();
+            render(<ThemeSettingsTab />);
+
+            expect(accentsSection().contains(distanceSlider())).toBe(true);
+            expect(accentsSection().contains(radiusSlider())).toBe(true);
+            expect(distanceSlider()).toBeDisabled();
+            expect(radiusSlider()).toBeDisabled();
+            expect(resetButton()).toBeDisabled();
+
+            await user.click(accentsSwitch());
+
+            expect(distanceSlider()).toBeEnabled();
+            expect(radiusSlider()).toBeEnabled();
+        });
+
+        it('shows the default distance and, in automatic mode, the frame radius plus the distance', () => {
+            writeStoredLinkCornerAccents(true);
+            render(<ThemeSettingsTab />);
+
+            expect(distanceSlider()).toHaveValue('4');
+            expect(radiusSlider()).toHaveValue(String(Math.min(48, frameRadius + 4)));
+            expect(resetButton()).toBeDisabled();
+        });
+
+        it('starts from the persisted overrides', () => {
+            writeStoredLinkCornerAccents(true);
+            writeStoredLinkAccentGeometry({ offsetPx: 9, radiusPx: 20 });
+
+            render(<ThemeSettingsTab />);
+
+            expect(distanceSlider()).toHaveValue('9');
+            expect(radiusSlider()).toHaveValue('20');
+            expect(resetButton()).toBeEnabled();
+        });
+
+        it('previews the distance live on the root, keeping the radius automatic', () => {
+            writeStoredLinkCornerAccents(true);
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(distanceSlider(), { target: { value: '10' } });
+
+            expect(rootValue('--link-accent-offset')).toBe('10px');
+            expect(rootValue('--link-accent-radius')).toBe('');
+            expect(radiusSlider()).toHaveValue(String(Math.min(48, frameRadius + 10)));
+            expect(onDirtyChange).toHaveBeenCalledWith(true);
+            expect(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY)).toBeNull();
+        });
+
+        it('sets an absolute radius live and Restablecer returns to automatic', () => {
+            writeStoredLinkCornerAccents(true);
+            render(<ThemeSettingsTab />);
+
+            fireEvent.change(radiusSlider(), { target: { value: '30' } });
+            expect(rootValue('--link-accent-radius')).toBe('30px');
+            expect(resetButton()).toBeEnabled();
+
+            fireEvent.click(resetButton());
+            expect(rootValue('--link-accent-radius')).toBe('');
+            expect(resetButton()).toBeDisabled();
+        });
+
+        it('persists only the overrides on save and clears dirty', () => {
+            writeStoredLinkCornerAccents(true);
+            const saveRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab saveRef={saveRef} onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(radiusSlider(), { target: { value: '30' } });
+            act(() => {
+                saveRef.current?.();
+            });
+
+            expect(JSON.parse(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY) ?? '')).toEqual({ radiusPx: 30 });
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('restores the saved geometry on revert without persisting', () => {
+            writeStoredLinkCornerAccents(true);
+            const revertRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab revertRef={revertRef} onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(distanceSlider(), { target: { value: '10' } });
+            fireEvent.change(radiusSlider(), { target: { value: '30' } });
+            act(() => {
+                revertRef.current?.();
+            });
+
+            expect(distanceSlider()).toHaveValue('4');
+            expect(rootValue('--link-accent-offset')).toBe('');
+            expect(rootValue('--link-accent-radius')).toBe('');
+            expect(localStorage.getItem(LINK_ACCENT_GEOMETRY_STORAGE_KEY)).toBeNull();
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('clears dirty when the distance returns to the saved value', () => {
+            writeStoredLinkCornerAccents(true);
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(distanceSlider(), { target: { value: '10' } });
+            fireEvent.change(distanceSlider(), { target: { value: '4' } });
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('restores the saved geometry on the document when the tab unmounts with an unsaved preview', () => {
+            writeStoredLinkCornerAccents(true);
+            const { unmount } = render(<ThemeSettingsTab />);
+
+            fireEvent.change(distanceSlider(), { target: { value: '10' } });
+            fireEvent.change(radiusSlider(), { target: { value: '30' } });
+            unmount();
+
+            expect(rootValue('--link-accent-offset')).toBe('');
+            expect(rootValue('--link-accent-radius')).toBe('');
         });
     });
 });

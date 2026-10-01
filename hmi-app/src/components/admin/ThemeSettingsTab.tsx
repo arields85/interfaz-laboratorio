@@ -32,15 +32,20 @@ import {
     writeStoredIconCutout,
 } from '../../services/iconCutout.service';
 import {
+    applyLinkAccentGeometryToDocument,
     applyLinkAccentLengthsToDocument,
     LINK_ACCENT_LENGTH_LIMITS,
+    LINK_ACCENT_OFFSET_LIMITS,
+    LINK_ACCENT_RADIUS_LIMITS,
     previewLinkCornerAccents,
+    readStoredLinkAccentGeometry,
     readStoredLinkAccentLengths,
     readStoredLinkCornerAccents,
+    writeStoredLinkAccentGeometry,
     writeStoredLinkAccentLengths,
     writeStoredLinkCornerAccents,
 } from '../../services/linkCornerAccents.service';
-import type { LinkAccentLengths } from '../../domain/linkCornerAccents.types';
+import type { LinkAccentGeometry, LinkAccentLengths } from '../../domain/linkCornerAccents.types';
 import AdminActionButton from './AdminActionButton';
 import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
@@ -152,6 +157,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const [linkAccents, setLinkAccents] = useState(initialLinkAccents);
     const initialAccentLengths = useMemo(() => readStoredLinkAccentLengths(), []);
     const [accentLengths, setAccentLengths] = useState<LinkAccentLengths>(initialAccentLengths);
+    const initialAccentGeometry = useMemo(() => readStoredLinkAccentGeometry(), []);
+    const [accentGeometry, setAccentGeometry] = useState<LinkAccentGeometry>(initialAccentGeometry);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
@@ -162,6 +169,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const snapshotCutoutRef = useRef(initialCutout);
     const snapshotLinkAccentsRef = useRef(initialLinkAccents);
     const snapshotAccentLengthsRef = useRef(initialAccentLengths);
+    const snapshotAccentGeometryRef = useRef(initialAccentGeometry);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -208,6 +216,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         cutout: boolean;
         linkAccents: boolean;
         accentLengths: LinkAccentLengths;
+        accentGeometry: LinkAccentGeometry;
     }) => next.id !== snapshotIdRef.current
         || !areEntranceSettingsEqual(next.entrance, snapshotEntranceRef.current)
         || next.shape !== snapshotShapeRef.current
@@ -215,7 +224,9 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         || next.cutout !== snapshotCutoutRef.current
         || next.linkAccents !== snapshotLinkAccentsRef.current
         || next.accentLengths.restPx !== snapshotAccentLengthsRef.current.restPx
-        || next.accentLengths.hoverPx !== snapshotAccentLengthsRef.current.hoverPx;
+        || next.accentLengths.hoverPx !== snapshotAccentLengthsRef.current.hoverPx
+        || next.accentGeometry.offsetPx !== snapshotAccentGeometryRef.current.offsetPx
+        || next.accentGeometry.radiusPx !== snapshotAccentGeometryRef.current.radiusPx;
 
     const syncDirty = (isDirty: boolean) => {
         dirtyRef.current = isDirty;
@@ -231,7 +242,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         setSelectedId(id);
         previewThemeStyleOnDocument(id, document.documentElement, radii[getThemeStylePreset(id).id]);
 
-        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout, linkAccents, accentLengths }));
+        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout, linkAccents, accentLengths, accentGeometry }));
     };
 
     // The shape is previewed on the whole document like a theme card: every framed widget of the
@@ -243,7 +254,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setShape(next);
         previewFrameShape(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout, linkAccents, accentLengths }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout, linkAccents, accentLengths, accentGeometry }));
     };
 
     // Moving a slider previews the value on the whole document right away
@@ -256,7 +267,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setEntrance(next);
         applyViewerEntranceSettingsToDocument(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout, linkAccents, accentLengths }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout, linkAccents, accentLengths, accentGeometry }));
     };
 
     // The icon cutout is previewed on the whole document like the shape: framed widgets read it
@@ -268,7 +279,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setCutout(next);
         previewIconCutout(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next, linkAccents, accentLengths }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next, linkAccents, accentLengths, accentGeometry }));
     };
 
     // The link corner accents are previewed on the whole document like the cutout: the viewer reads
@@ -280,7 +291,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setLinkAccents(next);
         previewLinkCornerAccents(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents: next, accentLengths }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents: next, accentLengths, accentGeometry }));
     };
 
     // The lengths are previewed live on the document root (`--link-accent-length-rest` / `-hover`),
@@ -293,7 +304,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setAccentLengths(next);
         applyLinkAccentLengthsToDocument(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents, accentLengths: next }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents, accentLengths: next, accentGeometry }));
     };
 
     // The link corner accents show with Clasico (any frame shape); the section says so while the
@@ -324,7 +335,23 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setRadii(nextRadii);
         previewThemeStyleOnDocument(selectedId, document.documentElement, nextRadii[selectedPreset.id]);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout, linkAccents, accentLengths }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout, linkAccents, accentLengths, accentGeometry }));
+    };
+
+    // "Distancia al marco" and "Radio de las esquinas" are previewed live on the document root too. The
+    // radius is automatic (null) until set; the slider shows the effective value, and a value equal to the
+    // automatic one is "no override", like the frame radius control above.
+    const autoAccentRadiusPx = Math.min(LINK_ACCENT_RADIUS_LIMITS.max, currentRadiusPx + accentGeometry.offsetPx);
+    const currentAccentRadiusPx = accentGeometry.radiusPx ?? autoAccentRadiusPx;
+
+    const commitAccentGeometry = (next: LinkAccentGeometry) => {
+        if (next.offsetPx === accentGeometry.offsetPx && next.radiusPx === accentGeometry.radiusPx) {
+            return;
+        }
+
+        setAccentGeometry(next);
+        applyLinkAccentGeometryToDocument(next);
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents, accentLengths, accentGeometry: next }));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -346,6 +373,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 previewIconCutout(snapshotCutoutRef.current);
                 previewLinkCornerAccents(snapshotLinkAccentsRef.current);
                 applyLinkAccentLengthsToDocument(snapshotAccentLengthsRef.current);
+                applyLinkAccentGeometryToDocument(snapshotAccentGeometryRef.current);
             }
         };
     }, []);
@@ -368,6 +396,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewLinkCornerAccents(linkAccents);
             writeStoredLinkAccentLengths(accentLengths);
             applyLinkAccentLengthsToDocument(accentLengths);
+            writeStoredLinkAccentGeometry(accentGeometry);
+            applyLinkAccentGeometryToDocument(accentGeometry);
             snapshotIdRef.current = selectedId;
             snapshotEntranceRef.current = entrance;
             snapshotShapeRef.current = shape;
@@ -375,6 +405,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             snapshotCutoutRef.current = cutout;
             snapshotLinkAccentsRef.current = linkAccents;
             snapshotAccentLengthsRef.current = accentLengths;
+            snapshotAccentGeometryRef.current = accentGeometry;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -383,7 +414,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [accentLengths, cutout, entrance, linkAccents, onDirtyChange, radii, saveRef, selectedId, shape]);
+    }, [accentGeometry, accentLengths, cutout, entrance, linkAccents, onDirtyChange, radii, saveRef, selectedId, shape]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -409,6 +440,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewLinkCornerAccents(snapshotLinkAccentsRef.current);
             setAccentLengths(snapshotAccentLengthsRef.current);
             applyLinkAccentLengthsToDocument(snapshotAccentLengthsRef.current);
+            setAccentGeometry(snapshotAccentGeometryRef.current);
+            applyLinkAccentGeometryToDocument(snapshotAccentGeometryRef.current);
             dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
@@ -594,7 +627,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
                 {/* Visible with the switch off but inactive, like a dependent control. */}
                 <p className={`mt-4 mb-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                    El largo es el tramo recto visible que continúa el arco de la esquina, medido desde donde termina la curva.
+                    El largo es cuánto de la esquina se ve, desde la punta; 0 = nada. Al crecer se revela el arco y luego el tramo recto.
                 </p>
                 <div className="flex flex-col gap-4">
                     {ACCENT_LENGTH_CONTROLS.map(({ key, label, numberInputAriaLabel }) => (
@@ -610,6 +643,45 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                             onChange={(value) => handleAccentLengthChange(key, value)}
                         />
                     ))}
+                </div>
+
+                <p className={`mt-4 mb-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    La distancia separa las esquinas del marco del widget. El radio redondea las esquinas; sin ajustar,
+                    es el radio del marco más la distancia.
+                </p>
+                <div className="flex flex-col gap-4">
+                    <DockSliderField
+                        label="Distancia al marco"
+                        ariaLabel="Distancia al marco"
+                        numberInputAriaLabel="Valor de distancia al marco"
+                        unit="px"
+                        value={accentGeometry.offsetPx}
+                        disabled={!linkAccents}
+                        {...LINK_ACCENT_OFFSET_LIMITS}
+                        onChange={(value) => commitAccentGeometry({ ...accentGeometry, offsetPx: value })}
+                    />
+                    <DockSliderField
+                        label="Radio de las esquinas"
+                        ariaLabel="Radio de las esquinas"
+                        numberInputAriaLabel="Valor de radio de las esquinas"
+                        unit="px"
+                        value={currentAccentRadiusPx}
+                        disabled={!linkAccents}
+                        {...LINK_ACCENT_RADIUS_LIMITS}
+                        onChange={(value) => commitAccentGeometry({
+                            ...accentGeometry,
+                            radiusPx: value === autoAccentRadiusPx ? null : value,
+                        })}
+                    />
+                    <div>
+                        <AdminActionButton
+                            variant="secondary"
+                            disabled={!linkAccents || accentGeometry.radiusPx === null}
+                            onClick={() => commitAccentGeometry({ ...accentGeometry, radiusPx: null })}
+                        >
+                            Restablecer
+                        </AdminActionButton>
+                    </div>
                 </div>
 
                 {!linkAccentsApply && (

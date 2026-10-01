@@ -683,7 +683,7 @@ describe('ThemeSettingsTab', () => {
     describe('Radio del marco', () => {
         const rootStyle = () => document.documentElement.style;
         const radiusSlider = () => screen.getByRole('slider', { name: 'Radio del marco' });
-        const resetButton = () => screen.getByRole('button', { name: /Restablecer/ });
+        const resetButton = () => within(radiusSlider().closest('section') as HTMLElement).getByRole('button', { name: /Restablecer/ });
 
         it('renders the slider (0-24 px, step 1) at the preset radius and a disabled Restablecer', () => {
             render(<ThemeSettingsTab />);
