@@ -12,7 +12,7 @@ import { hierarchyStorage } from '../../services/HierarchyStorageService';
 import { dashboardStorage } from '../../services/DashboardStorageService';
 import { adminSessionController } from '../../services/adminSession.controller';
 import { TOPBAR_ICON_BUTTON_ACTIVE_CLS, TOPBAR_ICON_BUTTON_CLS } from './topbarIconButtonStyles';
-import PrismaPairingControl from './PrismaPairingControl';
+import LedaPairingControl from './LedaPairingControl';
 import EppiTopbarNavigation from '../viewer/eppi/EppiTopbarNavigation';
 import {
     createEppiEntryState,
@@ -103,7 +103,7 @@ export default function Topbar() {
     const loginOverlayOpen = useLoginOverlayStore((state) => state.open);
     const setLoginOverlayOpen = useLoginOverlayStore((state) => state.setOpen);
     const toggleLoginOverlay = useLoginOverlayStore((state) => state.toggle);
-    // The users icon and the Prisma control only render where the hidden access was revealed.
+    // The users icon and the Leda control only render where the hidden access was revealed.
     const accessRevealed = useHiddenAccess();
     const userButtonRef = useRef<HTMLButtonElement>(null);
     const isHydrated = useAuthStore((state) => state.isHydrated);
@@ -186,7 +186,7 @@ export default function Topbar() {
                                 {navRightItems.map((item) => (
                                     <NavIconLink key={item.path} {...item} />
                                 ))}
-                                {accessRevealed ? <PrismaPairingControl /> : null}
+                                {accessRevealed ? <LedaPairingControl /> : null}
                             </nav>
                         </>
                     )}

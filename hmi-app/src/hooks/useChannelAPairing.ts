@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { ChannelAPairingQr, ChannelAPairingState, ChannelARuntimeUnreachableDetail } from '../domain/channelAPairing.types';
 import {
-    PrismaChannelAPairingError,
-    prismaChannelAPairing,
-} from '../services/prismaChannelAPairing.service';
-import { PrismaStaleSessionResponse, prismaSessionClient } from '../services/prismaSessionClient';
+    LedaChannelAPairingError,
+    ledaChannelAPairing,
+} from '../services/ledaChannelAPairing.service';
+import { LedaStaleSessionResponse, ledaSessionClient } from '../services/ledaSessionClient';
 
 // One routine poll cadence for the whole pairing round: a single GET (plus at most one POST
 // issuance) runs per interval, never concurrently.
@@ -16,7 +16,7 @@ const COUNTDOWN_TICK_INTERVAL_MS = 1000;
 
 // UI-only ephemeral phase for the pairing panel. This is client UI state, not an industrial
 // domain type, so it lives with the hook that owns it. 'unreachable' is distinct from 'error':
-// it means the Prisma runtime itself could not be reached (dev proxy failure), so unlike a
+// it means the Leda runtime itself could not be reached (dev proxy failure), so unlike a
 // generic terminal 'error' the routine poll keeps retrying on its own until the runtime answers.
 export type ChannelAPairingPhase = 'closed' | 'loading' | 'error' | 'unreachable' | ChannelAPairingState;
 
@@ -42,25 +42,25 @@ const CLOSED_RESULT: UseChannelAPairingResult = {
 // already discarded that generation, so they must never surface as pairing errors.
 function isQuietCleanupError(error: unknown): boolean {
     return (error instanceof DOMException && error.name === 'AbortError')
-        || error instanceof PrismaStaleSessionResponse;
+        || error instanceof LedaStaleSessionResponse;
 }
 
 // 409 reaches this hook only as a pairing conflict thrown by the POST issuance; the status GET
 // never conflicts.
 function isPairingConflict(error: unknown): boolean {
-    return error instanceof PrismaChannelAPairingError && error.kind === 'conflict';
+    return error instanceof LedaChannelAPairingError && error.kind === 'conflict';
 }
 
-// A runtime_unreachable error means the Prisma runtime itself could not be reached (fetch
+// A runtime_unreachable error means the Leda runtime itself could not be reached (fetch
 // rejection or the dev proxy's own non-JSON failure response), never a runtime-decided state.
 function isRuntimeUnreachable(error: unknown): boolean {
-    return error instanceof PrismaChannelAPairingError && error.kind === 'runtime_unreachable';
+    return error instanceof LedaChannelAPairingError && error.kind === 'runtime_unreachable';
 }
 
 // Optional detail (currently only port_in_use) the service parsed from the dev proxy's own
 // structured marker; undefined/absent when the runtime was unreachable for no detected reason.
 function runtimeUnreachableDetailOf(error: unknown): ChannelARuntimeUnreachableDetail | null {
-    return error instanceof PrismaChannelAPairingError && error.detail ? error.detail : null;
+    return error instanceof LedaChannelAPairingError && error.detail ? error.detail : null;
 }
 
 export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
@@ -174,7 +174,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
             activeController = controller;
 
             try {
-                const status = await prismaChannelAPairing.status(controller.signal);
+                const status = await ledaChannelAPairing.status(controller.signal);
                 if (!isCurrent(epoch, controller.signal)) return;
 
                 setPhase(status.state);
@@ -197,7 +197,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
 
                 // The countdown deadline is anchored at POST dispatch, never at arrival.
                 const dispatchedAt = performance.now();
-                const issue = await prismaChannelAPairing.issue(controller.signal);
+                const issue = await ledaChannelAPairing.issue(controller.signal);
                 if (!isCurrent(epoch, controller.signal)) return;
 
                 const deadline = dispatchedAt + issue.qr.expiresInSeconds * 1000;
@@ -221,7 +221,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
                     return;
                 }
                 if (isRuntimeUnreachable(error)) {
-                    // The Prisma runtime itself could not be reached (e.g. the dev proxy
+                    // The Leda runtime itself could not be reached (e.g. the dev proxy
                     // answering ECONNREFUSED with its own failure page): unlike a terminal
                     // pairing error, the routine poll keeps running on its own so the popover
                     // recovers automatically once the runtime comes back up. The optional
@@ -252,7 +252,7 @@ export function useChannelAPairing(open: boolean): UseChannelAPairingResult {
             void runRound(true);
         };
 
-        const unsubscribeFromSessionReset = prismaSessionClient.subscribeToReset(handleSessionReset);
+        const unsubscribeFromSessionReset = ledaSessionClient.subscribeToReset(handleSessionReset);
 
         // The fresh-opening canonical state (loading / empty slot) was already applied at render
         // time by the prop-transition adjustment above; the effect only starts the round.

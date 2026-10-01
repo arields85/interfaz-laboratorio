@@ -11,8 +11,8 @@ import { createBrowserOpener } from '../../hmi-app/scripts/dev.mjs'
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = '5173'
 
-const host = process.env.PRISMA_DEV_HOST || DEFAULT_HOST
-const port = process.argv[2] || process.env.PRISMA_DEV_PORT || DEFAULT_PORT
+const host = process.env.LEDA_DEV_HOST || DEFAULT_HOST
+const port = process.argv[2] || process.env.LEDA_DEV_PORT || DEFAULT_PORT
 const url = `http://${host}:${port}/`
 
 createBrowserOpener().open(url)

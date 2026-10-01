@@ -1,0 +1,621 @@
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { VoiceEvent } from '../domain/voice.types';
+import type { LedaVoiceConfig } from '../domain/ledaVoiceConfig';
+import type { LedaVoiceAudioEngineContract, LedaVoiceAudioSource, VoicePlaybackLifecycle } from '../services/ledaVoiceAudioEngine';
+import type { LedaVoiceAudioSourceFactory } from '../services/ledaVoiceTtsAudioSource';
+import { ledaSessionClient } from '../services/ledaSessionClient';
+import { LEDA_BROWSER_METRIC_EVENT } from '../services/ledaVoiceMetrics';
+import type { LedaOrbElement } from '../vendor/leda-orb.js';
+
+// T3/T4: the hook builds a real engine (mocked here) with a browser-backed
+// Configured prebuffer policy (Automatic/Manual, also mocked) when the
+// caller injects no `engine` option -- every other test in this file
+// injects one, so the real `LedaVoiceAudioEngine` constructor path below
+// is only exercised by the dedicated "builds the production engine" tests.
+const {
+    engineConstructorSpy,
+    fakePrebufferPolicy,
+    prebufferPolicyFactorySpy,
+    useLedaVoiceConfigMock,
+} = vi.hoisted(() => {
+    const engineConstructorSpy = vi.fn();
+    const fakePrebufferPolicy = {
+        resolvePrebufferMs: vi.fn(() => ({ prebufferMs: 777, mode: 'automatic' as const })),
+        recordNeededPrebufferMs: vi.fn(),
+    };
+    const prebufferPolicyFactorySpy = vi.fn(() => fakePrebufferPolicy);
+    const useLedaVoiceConfigMock = vi.fn(() => ({
+        data: null,
+        error: null,
+        isEnabled: true,
+        isLoading: false,
+    }));
+    return { engineConstructorSpy, fakePrebufferPolicy, prebufferPolicyFactorySpy, useLedaVoiceConfigMock };
+});
+
+vi.mock('../services/ledaVoiceAudioEngine', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../services/ledaVoiceAudioEngine')>();
+    return {
+        ...actual,
+        LedaVoiceAudioEngine: vi.fn().mockImplementation(function FakeLedaVoiceAudioEngine(dependencies: unknown) {
+            engineConstructorSpy(dependencies);
+            return {
+                play: vi.fn(),
+                warmAudioContext: vi.fn(),
+                stop: vi.fn(),
+                dispose: vi.fn(),
+            } satisfies LedaVoiceAudioEngineContract;
+        }),
+    };
+});
+
+vi.mock('../services/ledaVoicePrebufferController', () => ({
+    createBrowserLedaVoiceConfiguredPrebufferPolicy: prebufferPolicyFactorySpy,
+}));
+
+vi.mock('../queries/useLedaVoiceConfig', () => ({
+    useLedaVoiceConfig: useLedaVoiceConfigMock,
+}));
+
+import {
+    LEDA_ORB_FADE_DURATION_MS,
+    LEDA_ORB_THINKING_SIGNAL_TIMEOUT_MS,
+    LEDA_ORB_THINKING_TIMEOUT_MS,
+    LEDA_ORB_VOICE_EVENT_QUEUE_LIMIT,
+    useLedaOrbPresentation,
+} from './useLedaOrbPresentation';
+
+function collectOrbPhaseRecords(run: () => void): string[] {
+    const phases: string[] = [];
+    const listener = (event: Event) => {
+        const detail = (event as CustomEvent<{ record_type: string; payload: { phase: string } }>).detail;
+        if (detail.record_type === 'orb-phase') {
+            phases.push(detail.payload.phase);
+        }
+    };
+    window.addEventListener(LEDA_BROWSER_METRIC_EVENT, listener);
+    try {
+        run();
+    } finally {
+        window.removeEventListener(LEDA_BROWSER_METRIC_EVENT, listener);
+    }
+    return phases;
+}
+
+const EVENT: VoiceEvent = {
+    id: 'voice-1',
+    timestamp: '2026-08-27T12:00:00.000Z',
+    text: 'Unified response',
+    question: 'Unified question',
+};
+const SOURCE: LedaVoiceAudioSource = { openLive: vi.fn() };
+
+interface FakeOrbAudioTarget { level: number; setSpeaking: ReturnType<typeof vi.fn> }
+
+function createEngine(): {
+    engine: LedaVoiceAudioEngineContract;
+    lifecycles: VoicePlaybackLifecycle[];
+    targets: FakeOrbAudioTarget[];
+} {
+    const lifecycles: VoicePlaybackLifecycle[] = [];
+    const targets: FakeOrbAudioTarget[] = [];
+    const engine: LedaVoiceAudioEngineContract = {
+        play: vi.fn((_source, target, lifecycle) => {
+            lifecycles.push(lifecycle);
+            targets.push(target as unknown as FakeOrbAudioTarget);
+        }),
+        warmAudioContext: vi.fn(),
+        stop: vi.fn(),
+        dispose: vi.fn(),
+    };
+    return { engine, lifecycles, targets };
+}
+
+function attachOrb(result: { current: { orbRef: { current: LedaOrbElement | null } } }): FakeOrbAudioTarget {
+    const orb = { level: 0, setSpeaking: vi.fn() };
+    result.current.orbRef.current = orb as unknown as LedaOrbElement;
+    return orb;
+}
+
+describe('useLedaOrbPresentation', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        useLedaVoiceConfigMock.mockReturnValue({ data: null, error: null, isEnabled: true, isLoading: false });
+    });
+
+    it('creates one progressive source request and enters the thinking phase', () => {
+        const factory = vi.fn<LedaVoiceAudioSourceFactory>(() => SOURCE);
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine: createEngine().engine, audioSourceFactory: factory }));
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        expect(factory).toHaveBeenCalledWith({ eventId: 'voice-1' });
+        expect(result.current.phase).toBe('thinking');
+    });
+
+    it('never forwards Telegram identity or transcript', () => {
+        const factory = vi.fn<LedaVoiceAudioSourceFactory>(() => SOURCE);
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine: createEngine().engine, audioSourceFactory: factory }));
+
+        act(() => result.current.presentVoiceEvent({ ...EVENT, telegramChatId: -100123 }));
+
+        expect(factory).toHaveBeenCalledWith({ eventId: EVENT.id });
+    });
+
+    it('moves to visible once the engine reports playback started', () => {
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        expect(result.current.phase).toBe('thinking');
+
+        act(() => lifecycles[0]?.onStarted?.());
+        expect(result.current.phase).toBe('visible');
+    });
+
+    it('fades once after progressive playback ends', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+        act(() => {
+            lifecycles[0]?.onEnded?.();
+            lifecycles[0]?.onEnded?.();
+        });
+        expect(result.current.phase).toBe('fading');
+        act(() => vi.advanceTimersByTime(LEDA_ORB_FADE_DURATION_MS));
+        expect(result.current.phase).toBe('hidden');
+    });
+
+    it('uses the same fade cleanup after a controlled playback error', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        act(() => lifecycles[0]?.onError?.(new Error('Playback failed')));
+        expect(result.current.phase).toBe('fading');
+        act(() => vi.advanceTimersByTime(LEDA_ORB_FADE_DURATION_MS));
+
+        expect(result.current.phase).toBe('hidden');
+    });
+
+    it('fades out after the bounded thinking timeout when onStarted never fires', () => {
+        vi.useFakeTimers();
+        const { engine } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        expect(result.current.phase).toBe('thinking');
+
+        act(() => vi.advanceTimersByTime(LEDA_ORB_THINKING_TIMEOUT_MS));
+        expect(result.current.phase).toBe('fading');
+
+        act(() => vi.advanceTimersByTime(LEDA_ORB_FADE_DURATION_MS));
+        expect(result.current.phase).toBe('hidden');
+    });
+
+    it('clears the thinking timeout once playback actually starts', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+
+        act(() => vi.advanceTimersByTime(LEDA_ORB_THINKING_TIMEOUT_MS));
+        expect(result.current.phase).toBe('visible');
+    });
+
+    describe('V3 (voice-overlap): overlapping answers queue instead of aborting', () => {
+        it('queues a voice event that arrives while the previous one is still thinking, instead of aborting it', () => {
+            const factory = vi.fn<LedaVoiceAudioSourceFactory>(({ eventId }) => ({ ...SOURCE, id: eventId } as unknown as LedaVoiceAudioSource));
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: factory }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+
+            // The second event never interrupted the first: exactly one
+            // engine.play() call so far, and the first answer's own phase.
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(lifecycles).toHaveLength(1);
+            expect(result.current.phase).toBe('thinking');
+            expect(factory).toHaveBeenCalledTimes(1);
+        });
+
+        it('plays a queued voice event immediately once the previous one finishes, in order', () => {
+            const factory = vi.fn<LedaVoiceAudioSourceFactory>(({ eventId }) => ({ ...SOURCE, id: eventId } as unknown as LedaVoiceAudioSource));
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: factory }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+            act(() => lifecycles[0]?.onStarted?.());
+            act(() => lifecycles[0]?.onEnded?.());
+
+            // The queued second answer starts immediately -- straight back
+            // to "thinking", never visiting "fading"/"hidden" in between,
+            // since the fade is pure cosmetic wind-down with no audio
+            // behind it and would otherwise delay the next answer for
+            // nothing.
+            expect(engine.play).toHaveBeenCalledTimes(2);
+            expect(factory).toHaveBeenNthCalledWith(1, { eventId: 'voice-1' });
+            expect(factory).toHaveBeenNthCalledWith(2, { eventId: 'voice-2' });
+            expect(result.current.phase).toBe('thinking');
+        });
+
+        it('queues a voice event that arrives while the previous one is visibly speaking', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+            expect(result.current.phase).toBe('visible');
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('visible');
+
+            act(() => lifecycles[0]?.onEnded?.());
+            expect(engine.play).toHaveBeenCalledTimes(2);
+            expect(result.current.phase).toBe('thinking');
+        });
+
+        it('drops the newest overflow event once the bounded queue is full, never growing it unbounded', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            // One more than the bound arrives while the first is still active.
+            for (let index = 0; index < LEDA_ORB_VOICE_EVENT_QUEUE_LIMIT + 1; index += 1) {
+                act(() => result.current.presentVoiceEvent({ ...EVENT, id: `queued-${index}` }));
+            }
+
+            // Drain the queue: each onEnded should immediately start the
+            // next queued answer.
+            for (let index = 0; index < LEDA_ORB_VOICE_EVENT_QUEUE_LIMIT; index += 1) {
+                act(() => lifecycles[index]?.onEnded?.());
+            }
+
+            // Exactly 1 (the first) + the bound worth of queued answers
+            // played -- the one that overflowed the bound never did.
+            expect(engine.play).toHaveBeenCalledTimes(1 + LEDA_ORB_VOICE_EVENT_QUEUE_LIMIT);
+        });
+    });
+
+    it('restarts at thinking when a new event arrives while the previous answer is fading', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+        act(() => lifecycles[0]?.onEnded?.());
+        expect(result.current.phase).toBe('fading');
+
+        act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2' }));
+        expect(result.current.phase).toBe('thinking');
+
+        // The superseded fade timer must not fire "hidden" for the new request.
+        act(() => vi.advanceTimersByTime(LEDA_ORB_FADE_DURATION_MS));
+        expect(result.current.phase).toBe('thinking');
+    });
+
+    it('disposes the engine on unmount', () => {
+        const { engine } = createEngine();
+        const { unmount } = renderHook(() => useLedaOrbPresentation({ engine }));
+
+        unmount();
+
+        expect(engine.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops buffered playback when the local document session resets', () => {
+        const { engine } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        act(() => ledaSessionClient.reset({ close: false }));
+
+        expect(engine.stop).toHaveBeenCalledTimes(1);
+        expect(result.current.phase).toBe('hidden');
+    });
+
+    it('records a T16 orb-phase timeline entry for a full thinking-to-hidden lifecycle', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        const phases = collectOrbPhaseRecords(() => {
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+            act(() => lifecycles[0]?.onEnded?.());
+            act(() => vi.advanceTimersByTime(LEDA_ORB_FADE_DURATION_MS));
+        });
+
+        expect(phases).toEqual(['thinking', 'visible', 'fading', 'hidden']);
+    });
+
+    it('records thinking then fading then hidden when playback ends without ever starting', () => {
+        vi.useFakeTimers();
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        const phases = collectOrbPhaseRecords(() => {
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onError?.(new Error('never started')));
+            act(() => vi.advanceTimersByTime(LEDA_ORB_FADE_DURATION_MS));
+        });
+
+        expect(phases).toEqual(['thinking', 'fading', 'hidden']);
+    });
+
+    it('records a hidden orb-phase entry when the session resets mid-playback', () => {
+        const { engine } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        const phases = collectOrbPhaseRecords(() => {
+            act(() => ledaSessionClient.reset({ close: false }));
+        });
+
+        expect(phases).toEqual(['hidden']);
+    });
+
+    it('keeps the engine speaking contract untouched: play still receives exactly the three lifecycle callbacks', () => {
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+
+        expect(engine.play).toHaveBeenCalledTimes(1);
+        expect(Object.keys(lifecycles[0] ?? {}).sort()).toEqual(['onEnded', 'onError', 'onStarted']);
+    });
+
+    it('never calls setSpeaking itself; that stays the engine\'s responsibility', () => {
+        const { engine, lifecycles } = createEngine();
+        const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+        const orb = attachOrb(result);
+
+        act(() => result.current.presentVoiceEvent(EVENT));
+        act(() => lifecycles[0]?.onStarted?.());
+        act(() => lifecycles[0]?.onEnded?.());
+
+        expect(orb.setSpeaking).not.toHaveBeenCalled();
+    });
+
+    describe('T21: decoupled from the orb overlay mount', () => {
+        it('starts the engine synchronously on event receipt even when the orb has not mounted yet', () => {
+            const { engine } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            // Deliberately no attachOrb(result) -- orbRef.current stays null.
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('thinking');
+        });
+
+        it('buffers level/speaking updates on the deferred target and replays them once the orb mounts', () => {
+            const { engine, targets } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            const target = targets[0];
+            expect(target).toBeDefined();
+
+            // The engine drives the target exactly as it would a real orb,
+            // before any orb DOM node exists.
+            target.setSpeaking(true);
+            target.level = 0.42;
+
+            const orb = attachOrb(result);
+
+            expect(orb.setSpeaking).toHaveBeenCalledWith(true);
+            expect(orb.level).toBe(0.42);
+        });
+
+        it('forwards further updates live once the orb has attached', () => {
+            const { engine, targets } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            const orb = attachOrb(result);
+            const target = targets[0];
+
+            target.setSpeaking(true);
+            target.level = 0.9;
+
+            expect(orb.setSpeaking).toHaveBeenLastCalledWith(true);
+            expect(orb.level).toBe(0.9);
+        });
+
+        it('attaches immediately when the orb is already mounted from a previous answer', () => {
+            const { engine, targets } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            const orb = attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            targets[0].setSpeaking(true);
+
+            expect(orb.setSpeaking).toHaveBeenCalledWith(true);
+        });
+    });
+
+    it('T3/T4: builds the production engine with a browser-backed Configured prebuffer policy when no engine is injected', () => {
+        const factory = vi.fn<LedaVoiceAudioSourceFactory>(() => SOURCE);
+
+        renderHook(() => useLedaOrbPresentation({ audioSourceFactory: factory }));
+
+        expect(prebufferPolicyFactorySpy).toHaveBeenCalledTimes(1);
+        expect(prebufferPolicyFactorySpy).toHaveBeenCalledWith(expect.any(Function));
+        expect(engineConstructorSpy).toHaveBeenCalledWith({ prebufferPolicy: fakePrebufferPolicy });
+    });
+
+    it('T4: the getter passed to the Configured policy factory reads the current voice config playbackBuffer', () => {
+        prebufferPolicyFactorySpy.mockClear();
+        const factory = vi.fn<LedaVoiceAudioSourceFactory>(() => SOURCE);
+        const config = {
+            playbackBuffer: { mode: 'manual', manualSeconds: 0.9 },
+        } as unknown as LedaVoiceConfig;
+        useLedaVoiceConfigMock.mockReturnValue({ data: config, error: null, isEnabled: true, isLoading: false });
+
+        renderHook(() => useLedaOrbPresentation({ audioSourceFactory: factory }));
+
+        const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
+        expect(getPlaybackBuffer()).toEqual({ mode: 'manual', manualSeconds: 0.9 });
+    });
+
+    it('T4: the getter reflects a later voice config value without rebuilding the engine (no engine rebuild on config change)', () => {
+        prebufferPolicyFactorySpy.mockClear();
+        engineConstructorSpy.mockClear();
+        const factory = vi.fn<LedaVoiceAudioSourceFactory>(() => SOURCE);
+        useLedaVoiceConfigMock.mockReturnValue({ data: null, error: null, isEnabled: true, isLoading: false });
+
+        const { rerender } = renderHook(() => useLedaOrbPresentation({ audioSourceFactory: factory }));
+        const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
+        expect(getPlaybackBuffer()).toBeNull();
+
+        const config = {
+            playbackBuffer: { mode: 'manual', manualSeconds: 0.5 },
+        } as unknown as LedaVoiceConfig;
+        useLedaVoiceConfigMock.mockReturnValue({ data: config, error: null, isEnabled: true, isLoading: false });
+        rerender();
+
+        expect(getPlaybackBuffer()).toEqual({ mode: 'manual', manualSeconds: 0.5 });
+        // The engine (and so the policy factory) was built exactly once,
+        // across both renders -- only the getter's resolved value changed.
+        expect(prebufferPolicyFactorySpy).toHaveBeenCalledTimes(1);
+        expect(engineConstructorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('T4: falls back to null (Automatic) while the voice config is unavailable', () => {
+        prebufferPolicyFactorySpy.mockClear();
+        const factory = vi.fn<LedaVoiceAudioSourceFactory>(() => SOURCE);
+        useLedaVoiceConfigMock.mockReturnValue({ data: null, error: new Error('failed'), isEnabled: true, isLoading: false });
+
+        renderHook(() => useLedaOrbPresentation({ audioSourceFactory: factory }));
+
+        const getPlaybackBuffer = prebufferPolicyFactorySpy.mock.calls.at(-1)?.[0] as () => unknown;
+        expect(getPlaybackBuffer()).toBeNull();
+    });
+
+    describe('voice-ux U1: orb "thinking" signal events (no playback)', () => {
+        it('shows the thinking phase without starting playback for a thinking-kind event', () => {
+            const { engine } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+
+            expect(result.current.phase).toBe('thinking');
+            expect(engine.play).not.toHaveBeenCalled();
+        });
+
+        it('starts playback normally once the real answer event follows a thinking signal', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+            act(() => result.current.presentVoiceEvent(EVENT));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('thinking');
+            act(() => lifecycles[0]?.onStarted?.());
+            expect(result.current.phase).toBe('visible');
+        });
+
+        it('returns to hidden after the bounded thinking-signal timeout when no answer ever follows', () => {
+            vi.useFakeTimers();
+            const { engine } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+            expect(result.current.phase).toBe('thinking');
+
+            act(() => vi.advanceTimersByTime(LEDA_ORB_THINKING_SIGNAL_TIMEOUT_MS));
+
+            expect(result.current.phase).toBe('hidden');
+            expect(engine.play).not.toHaveBeenCalled();
+        });
+
+        it('hides immediately on an explicit cancel signal while awaiting an answer', () => {
+            vi.useFakeTimers();
+            const { engine } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'thinking' }));
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'cancel' }));
+
+            expect(result.current.phase).toBe('hidden');
+            expect(engine.play).not.toHaveBeenCalled();
+
+            // The now-cleared timeout must never fire a stray transition later.
+            act(() => vi.advanceTimersByTime(LEDA_ORB_THINKING_SIGNAL_TIMEOUT_MS));
+            expect(result.current.phase).toBe('hidden');
+        });
+
+        it('a cancel signal with nothing awaited is a no-op', () => {
+            const { engine } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, kind: 'cancel' }));
+
+            expect(result.current.phase).toBe('hidden');
+            expect(engine.play).not.toHaveBeenCalled();
+        });
+
+        it('a thinking signal never aborts an answer currently playing', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+            expect(result.current.phase).toBe('visible');
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2', kind: 'thinking' }));
+
+            expect(engine.play).toHaveBeenCalledTimes(1);
+            expect(result.current.phase).toBe('visible');
+        });
+
+        it('a cancel signal never hides an answer currently playing', () => {
+            const { engine, lifecycles } = createEngine();
+            const { result } = renderHook(() => useLedaOrbPresentation({ engine, audioSourceFactory: () => SOURCE }));
+            attachOrb(result);
+
+            act(() => result.current.presentVoiceEvent(EVENT));
+            act(() => lifecycles[0]?.onStarted?.());
+
+            act(() => result.current.presentVoiceEvent({ ...EVENT, id: 'voice-2', kind: 'cancel' }));
+
+            expect(result.current.phase).toBe('visible');
+        });
+    });
+});

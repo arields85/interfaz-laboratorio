@@ -48,7 +48,7 @@ function createNoopPortGuard() {
 }
 
 describe('development orchestration', () => {
-  it('acquires Prisma before forwarding Vite arguments exactly and releases once on exit', async () => {
+  it('acquires Leda before forwarding Vite arguments exactly and releases once on exit', async () => {
     const events: string[] = []
     const runtime = {
       acquire: vi.fn(async () => {
@@ -84,7 +84,7 @@ describe('development orchestration', () => {
     expect(runtime.release).toHaveBeenCalledTimes(1)
   })
 
-  it('warns and still launches Vite when Prisma acquisition fails', async () => {
+  it('warns and still launches Vite when Leda acquisition fails', async () => {
     const warn = vi.fn()
     const runtime = {
       acquire: vi.fn(async () => {
@@ -115,7 +115,7 @@ describe('development orchestration', () => {
 
   it('forwards a detected port_in_use startup failure to Vite as an environment variable', async () => {
     const warn = vi.fn()
-    const failureError = new Error('Prisma could not start: port 5057 is in use by "name.exe" (PID 1234). Close it and run the launcher again.')
+    const failureError = new Error('Leda could not start: port 5057 is in use by "name.exe" (PID 1234). Close it and run the launcher again.')
     ;(failureError as Error & { failure: unknown }).failure = { reason: 'port_in_use', port: 5057 }
     const runtime = {
       acquire: vi.fn(async () => {
@@ -139,10 +139,10 @@ describe('development orchestration', () => {
       warn,
     })).resolves.toBe(0)
 
-    expect(spawnVite).toHaveBeenCalledWith(['--host'], { PRISMA_STARTUP_FAILURE: JSON.stringify({ reason: 'port_in_use', port: 5057 }) })
+    expect(spawnVite).toHaveBeenCalledWith(['--host'], { LEDA_STARTUP_FAILURE: JSON.stringify({ reason: 'port_in_use', port: 5057 }) })
     // T4d Fix B: start-local.ps1 already printed its own single clear line for this case;
-    // the generic "Prisma Local is unavailable" warning would be a redundant second line.
-    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Prisma Local is unavailable'))
+    // the generic "Leda Local is unavailable" warning would be a redundant second line.
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Leda Local is unavailable'))
   })
 
   it('never forwards a startup failure marker when acquisition fails without a detected failure', async () => {
@@ -172,10 +172,10 @@ describe('development orchestration', () => {
     expect(spawnVite).toHaveBeenCalledWith([], {})
     // Regression check for the T4d skip above: an ordinary (non-startup-failure) rejection
     // must still print the generic warning exactly as before.
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Prisma Local is unavailable'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Leda Local is unavailable'))
   })
 
-  it('skips Prisma honestly on unsupported operating systems', async () => {
+  it('skips Leda honestly on unsupported operating systems', async () => {
     const warn = vi.fn()
     const runtime = {
       acquire: vi.fn(),
@@ -222,7 +222,7 @@ describe('development orchestration', () => {
     })
 
     // Waits for Vite to actually be running (not just for the signal listeners to be
-    // registered, which happens synchronously before the async Prisma-acquire/port-guard work)
+    // registered, which happens synchronously before the async Leda-acquire/port-guard work)
     // so this test exercises "signal forwarded to an already-running Vite", independently of
     // how many async steps precede spawnVite.
     await vi.waitFor(() => expect(spawnVite).toHaveBeenCalledTimes(1))
@@ -437,7 +437,7 @@ describe('createVitePortGuard', () => {
       spawn,
       files,
       newId: () => 'id',
-      operationsRoot: String.raw`C:\repo\services\prisma-runtime\operations`,
+      operationsRoot: String.raw`C:\repo\services\leda-runtime\operations`,
       viteCli: String.raw`C:\repo\hmi-app\node_modules\vite\bin\vite.js`,
       temporaryRoot: String.raw`C:\temp`,
     })
@@ -447,7 +447,7 @@ describe('createVitePortGuard', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.stringMatching(/powershell\.exe$/i),
       expect.arrayContaining([
-        '-File', String.raw`C:\repo\services\prisma-runtime\operations\resolve-vite-dev-port.ps1`,
+        '-File', String.raw`C:\repo\services\leda-runtime\operations\resolve-vite-dev-port.ps1`,
         '-Port', '5173',
         '-ViteCliPath', String.raw`C:\repo\hmi-app\node_modules\vite\bin\vite.js`,
         '-ReceiptPath', String.raw`C:\temp\vite-port-id.json`,
@@ -754,17 +754,17 @@ describe('native child adapters', () => {
   it('merges a detected startup failure into the Vite child environment without dropping the rest of process.env', () => {
     const child = new EventEmitter()
     const spawn = vi.fn(() => Object.assign(child, { kill: vi.fn() }))
-    createViteLauncher({ spawn })([], { PRISMA_STARTUP_FAILURE: '{"reason":"port_in_use","port":5057}' })
+    createViteLauncher({ spawn })([], { LEDA_STARTUP_FAILURE: '{"reason":"port_in_use","port":5057}' })
 
     const options = spawn.mock.calls[0]?.[2] as { env?: Record<string, string | undefined> }
-    expect(options.env?.PRISMA_STARTUP_FAILURE).toBe('{"reason":"port_in_use","port":5057}')
+    expect(options.env?.LEDA_STARTUP_FAILURE).toBe('{"reason":"port_in_use","port":5057}')
     expect(options.env?.PATH ?? options.env?.Path).toBe(process.env.PATH ?? process.env.Path)
   })
 })
 
-// L2: dev.mjs opens the browser itself once Prisma has settled (already ordered before Vite
+// L2: dev.mjs opens the browser itself once Leda has settled (already ordered before Vite
 // spawns) AND the Vite dev server actually answers, instead of the previous fixed 3 s timeout in
-// the desktop launcher. Opt-in only (PRISMA_DEV_AUTO_OPEN=1, set by the launcher), so plain
+// the desktop launcher. Opt-in only (LEDA_DEV_AUTO_OPEN=1, set by the launcher), so plain
 // `npm run dev` keeps today's behavior unchanged.
 describe('createServerReadinessWaiter', () => {
   it('resolves once the server responds ok, retrying with the configured sleep in between', async () => {
@@ -852,9 +852,9 @@ describe('createBrowserOpener (control Chrome)', () => {
       spawn,
       platform: 'win32',
       env: {
-        PRISMA_DEV_CHROME_PATH: String.raw`D:\Apps\Chrome\chrome.exe`,
-        PRISMA_DEV_CHROME_USER_DATA_DIR: String.raw`D:\ChromeControlProfile`,
-        PRISMA_DEV_CHROME_DEBUG_PORT: '9333',
+        LEDA_DEV_CHROME_PATH: String.raw`D:\Apps\Chrome\chrome.exe`,
+        LEDA_DEV_CHROME_USER_DATA_DIR: String.raw`D:\ChromeControlProfile`,
+        LEDA_DEV_CHROME_DEBUG_PORT: '9333',
       },
     })
 
@@ -949,7 +949,7 @@ describe('runDevelopment readiness-triggered browser open (L2)', () => {
     expect(browserOpener.open).not.toHaveBeenCalled()
   })
 
-  it('waits for the dev server to answer, then opens it, when PRISMA_DEV_AUTO_OPEN=1', async () => {
+  it('waits for the dev server to answer, then opens it, when LEDA_DEV_AUTO_OPEN=1', async () => {
     const exit = deferred<ExitResult>()
     const vite = { result: exit.promise, terminate: vi.fn() }
     const browserOpener = { open: vi.fn() }
@@ -963,7 +963,7 @@ describe('runDevelopment readiness-triggered browser open (L2)', () => {
       spawnVite: vi.fn(() => vite),
       signals: createSignals(),
       warn: vi.fn(),
-      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      env: { LEDA_DEV_AUTO_OPEN: '1' },
       browserOpener,
       readinessWaiter,
     })
@@ -989,7 +989,7 @@ describe('runDevelopment readiness-triggered browser open (L2)', () => {
       spawnVite: vi.fn(() => vite),
       signals: createSignals(),
       warn: vi.fn(),
-      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      env: { LEDA_DEV_AUTO_OPEN: '1' },
       browserOpener,
       readinessWaiter,
     })
@@ -1011,7 +1011,7 @@ describe('runDevelopment readiness-triggered browser open (L2)', () => {
       spawnVite: vi.fn(() => vite),
       signals: createSignals(),
       warn,
-      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      env: { LEDA_DEV_AUTO_OPEN: '1' },
       browserOpener,
       readinessWaiter,
     })
@@ -1036,7 +1036,7 @@ describe('runDevelopment readiness-triggered browser open (L2)', () => {
       spawnVite: vi.fn(() => vite),
       signals: createSignals(),
       warn,
-      env: { PRISMA_DEV_AUTO_OPEN: '1' },
+      env: { LEDA_DEV_AUTO_OPEN: '1' },
       browserOpener,
       readinessWaiter,
     })

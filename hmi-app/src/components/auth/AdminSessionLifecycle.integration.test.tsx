@@ -65,7 +65,7 @@ function renderLifecycle(controller: AdminSessionController) {
 
 function createFetch(absoluteExpiresAt: () => number) {
     return vi.fn<typeof fetch>((path) => {
-        if (path === '/api/prisma/admin/auth/session') {
+        if (path === '/api/leda/admin/auth/session') {
             return Promise.resolve(jsonResponse({
                 ok: true,
                 administrator: { username: 'admin' },
@@ -73,7 +73,7 @@ function createFetch(absoluteExpiresAt: () => number) {
                 absoluteExpiresAt: absoluteExpiresAt(),
             }));
         }
-        if (path === '/api/prisma/admin/auth/logout') {
+        if (path === '/api/leda/admin/auth/logout') {
             return Promise.resolve(new Response(null, { status: 204 }));
         }
         return Promise.resolve(jsonResponse({ configured: true }));
@@ -98,7 +98,7 @@ describe('AdminSessionLifecycle integration', () => {
         renderLifecycle(controller);
 
         expect(await screen.findByText('Contenido administrador')).toBeInTheDocument();
-        expect(fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/session').length).toBeGreaterThanOrEqual(2);
+        expect(fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/session').length).toBeGreaterThanOrEqual(2);
         await waitFor(() => expect(screen.getByText('Viewer público')).toBeInTheDocument(), { timeout: 2_000 });
     });
 
@@ -112,14 +112,14 @@ describe('AdminSessionLifecycle integration', () => {
         await user.click(screen.getByRole('button', { name: /configuracion general/i }));
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
         expect(useAuthStore.getState().session.isAuthenticated).toBe(true);
-        expect(fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/logout')).toHaveLength(0);
+        expect(fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/logout')).toHaveLength(0);
 
         // Leaving /admin through "Ver viewer" must not end the session (user decision
         // 2026-09-23, T5b): navigating away is not logging out.
         await user.click(screen.getByRole('button', { name: /ver viewer/i }));
         expect(await screen.findByText('Viewer público')).toBeInTheDocument();
         expect(useAuthStore.getState().session.isAuthenticated).toBe(true);
-        expect(fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/logout')).toHaveLength(0);
+        expect(fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/logout')).toHaveLength(0);
 
         // Browser history round-trips through /admin and back must not end it either.
         await user.click(screen.getByRole('button', { name: 'Atrás' }));
@@ -128,7 +128,7 @@ describe('AdminSessionLifecycle integration', () => {
         await user.click(screen.getByRole('button', { name: 'Adelante' }));
         expect(await screen.findByText('Viewer público')).toBeInTheDocument();
         expect(useAuthStore.getState().session.isAuthenticated).toBe(true);
-        expect(fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/logout')).toHaveLength(0);
+        expect(fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/logout')).toHaveLength(0);
 
         // Only "Cerrar sesión" ends it.
         await user.click(screen.getByRole('button', { name: 'Atrás' }));
@@ -137,6 +137,6 @@ describe('AdminSessionLifecycle integration', () => {
         await waitFor(() => {
             expect(useAuthStore.getState().session.isAuthenticated).toBe(false);
         });
-        expect(fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/logout')).toHaveLength(1);
+        expect(fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/logout')).toHaveLength(1);
     });
 });

@@ -1,6 +1,6 @@
-import { PRISMA_SNAPSHOT_URL } from '../config/prismaAssistant.config';
-import type { PrismaContextIntent } from '../domain/prismaSession.types';
-import { prismaSessionClient } from './prismaSessionClient';
+import { LEDA_SNAPSHOT_URL } from '../config/ledaAssistant.config';
+import type { LedaContextIntent } from '../domain/ledaSession.types';
+import { ledaSessionClient } from './ledaSessionClient';
 import { readHmiName } from './hmiName.service';
 
 const SNAPSHOT_EXPORT_FAILED_MESSAGE = '[dashboard-snapshot-export] Snapshot export failed.';
@@ -28,12 +28,12 @@ export async function exportDashboardSnapshot(
     snapshot: unknown,
     lifecycleSignal?: AbortSignal,
     fetchImpl?: typeof fetch,
-    intent?: PrismaContextIntent,
+    intent?: LedaContextIntent,
     frameGeneration?: number,
 ): Promise<boolean> {
     return sendContextCommand(
-        (signal) => prismaSessionClient.publishContext(
-            intent ?? prismaSessionClient.createContextIntent(), snapshot, signal, fetchImpl, frameGeneration,
+        (signal) => ledaSessionClient.publishContext(
+            intent ?? ledaSessionClient.createContextIntent(), snapshot, signal, fetchImpl, frameGeneration,
         ),
         lifecycleSignal,
     );
@@ -71,7 +71,7 @@ async function sendContextCommand(
         const detail: SnapshotExportFailureDetail = {
             reason: timedOut ? 'timeout' : 'request-failed',
             status: getErrorStatus(error),
-            url: PRISMA_SNAPSHOT_URL,
+            url: LEDA_SNAPSHOT_URL,
         };
         dispatchSnapshotExportFailedEvent(detail);
         console.warn(timedOut ? SNAPSHOT_EXPORT_TIMEOUT_MESSAGE : SNAPSHOT_EXPORT_FAILED_MESSAGE, error);
@@ -100,7 +100,7 @@ export function startDashboardSnapshotExporter({
     // visit. The frame is reused across periodic ticks and hidden/offline
     // resume (routine refreshes), while view navigation starts a new instance
     // and mints the next frame. Never derived from snapshot object identity.
-    const frameGeneration = prismaSessionClient.createContextFrame();
+    const frameGeneration = ledaSessionClient.createContextFrame();
 
     const abortPublication = () => {
         lifecycleController.abort();
@@ -112,18 +112,18 @@ export function startDashboardSnapshotExporter({
         if (contextInvalid || activeExporter !== owner) return;
         contextInvalid = true;
         // Allocate before any asynchronous work; never reuse the aborted publish signal.
-        void sendContextCommand((signal) => prismaSessionClient.invalidateContext(
-            prismaSessionClient.createContextIntent(), signal, fetchImpl,
+        void sendContextCommand((signal) => ledaSessionClient.invalidateContext(
+            ledaSessionClient.createContextIntent(), signal, fetchImpl,
         ));
     };
     const exportCurrentSnapshot = () => {
         if (stopped || activeExporter !== owner || paused || inFlight) return;
-        const epoch = prismaSessionClient.snapshot.epoch;
+        const epoch = ledaSessionClient.snapshot.epoch;
         const captureSignal = lifecycleController.signal;
-        let intent: PrismaContextIntent;
+        let intent: LedaContextIntent;
         let snapshot: unknown;
         try {
-            intent = prismaSessionClient.createContextIntent();
+            intent = ledaSessionClient.createContextIntent();
             snapshot = getSnapshot();
             if (typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot)) {
                 snapshot = { ...snapshot, hmiName: readHmiName().name };
@@ -134,7 +134,7 @@ export function startDashboardSnapshotExporter({
         }
         // Capture is foreign code and can synchronously retire this lease or session.
         if (stopped || activeExporter !== owner || captureSignal.aborted
-            || paused || !canCapture() || epoch !== prismaSessionClient.snapshot.epoch) return;
+            || paused || !canCapture() || epoch !== ledaSessionClient.snapshot.epoch) return;
         if (snapshot === null) {
             invalidate();
             return;
@@ -153,7 +153,7 @@ export function startDashboardSnapshotExporter({
         paused = !canCapture();
         if (paused) invalidate();
     };
-    const unsubscribeReset = prismaSessionClient.subscribeToReset(() => {
+    const unsubscribeReset = ledaSessionClient.subscribeToReset(() => {
         abortPublication();
         // Reset retired the old capability; only a future fresh capture may publish.
         contextInvalid = true;

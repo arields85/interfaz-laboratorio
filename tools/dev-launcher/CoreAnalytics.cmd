@@ -12,13 +12,13 @@ for %%I in ("%~dp0..\..") do set "PROJECT_PATH=%%~fI\hmi-app"
 
 rem Same default as the previous Desktop launcher; set this yourself before running the script to
 rem override it.
-if not defined PRISMA_CREDENTIAL_MASTER_KEY_FILE set "PRISMA_CREDENTIAL_MASTER_KEY_FILE=%LOCALAPPDATA%\CoreAnalytics\PrismaCredentialKey\master.key"
+if not defined LEDA_CREDENTIAL_MASTER_KEY_FILE set "LEDA_CREDENTIAL_MASTER_KEY_FILE=%LOCALAPPDATA%\CoreAnalytics\LedaCredentialKey\master.key"
 
 rem Opt-in for hmi-app/scripts/dev.mjs's readiness-triggered browser open: it opens the dedicated
-rem CONTROL Chrome profile (see README.md) only once Prisma and Vite are actually ready, instead
+rem CONTROL Chrome profile (see README.md) only once Leda and Vite are actually ready, instead
 rem of the previous fixed 3-second delay. Plain `npm run dev` without this variable never opens a
 rem browser.
-set "PRISMA_DEV_AUTO_OPEN=1"
+set "LEDA_DEV_AUTO_OPEN=1"
 
 if not exist "%PROJECT_PATH%" (
     echo Could not find hmi-app at "%PROJECT_PATH%".

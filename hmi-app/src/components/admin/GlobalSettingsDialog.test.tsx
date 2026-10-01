@@ -300,7 +300,7 @@ describe('GlobalSettingsDialog', () => {
         const dialog = screen.getByRole('dialog', { name: 'CONFIGURACION GENERAL' });
         const tabNames = Array.from(dialog.querySelectorAll('button')).slice(0, 6).map((button) => button.textContent);
 
-        expect(tabNames).toEqual(['Conexion', 'Diseno', 'Tema', 'Opciones', 'Ajustes', 'Prisma']);
+        expect(tabNames).toEqual(['Conexion', 'Diseno', 'Tema', 'Opciones', 'Ajustes', 'Leda']);
     });
 
     it('keeps every tab draft alive while switching tabs in the open dialog', async () => {
@@ -327,7 +327,7 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Temporal draft'));
         await user.type(screen.getByLabelText('Temporal draft'), 'Temporal unsaved');
 
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         await user.clear(screen.getByLabelText('Voice draft'));
         await user.type(screen.getByLabelText('Voice draft'), 'Voice unsaved');
 
@@ -346,7 +346,7 @@ describe('GlobalSettingsDialog', () => {
         await user.click(screen.getByRole('button', { name: 'Ajustes' }));
         expect(screen.getByLabelText('Temporal draft')).toHaveValue('Temporal unsaved');
 
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         expect(screen.getByLabelText('Voice draft')).toHaveValue('Voice unsaved');
     });
 
@@ -394,11 +394,11 @@ describe('GlobalSettingsDialog', () => {
         expect(designTab).not.toHaveAttribute('aria-describedby');
     });
 
-    it('projects the dirty Prisma effect status immediately before Save in the footer only on VOZ', async () => {
+    it('projects the dirty Leda effect status immediately before Save in the footer only on VOZ', async () => {
         const user = userEvent.setup();
         render(<Harness />);
 
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
             target: { value: '65' },
         });
@@ -416,7 +416,7 @@ describe('GlobalSettingsDialog', () => {
 
         await user.click(screen.getByRole('button', { name: 'Conexion' }));
         expect(within(actions).queryByText('Cambios sin guardar')).not.toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         expect(within(actions).getByText('Cambios sin guardar')).toHaveClass('text-status-warning');
     });
 
@@ -572,7 +572,7 @@ describe('GlobalSettingsDialog', () => {
     it('projects saving and saved with their semantic tones in the same footer position', async () => {
         const user = userEvent.setup();
         render(<Harness />);
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
             target: { value: '65' },
         });
@@ -597,7 +597,7 @@ describe('GlobalSettingsDialog', () => {
         const user = userEvent.setup();
         voiceSaveShouldFail = true;
         render(<Harness />);
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), {
             target: { value: '65' },
         });
@@ -614,7 +614,7 @@ describe('GlobalSettingsDialog', () => {
         await user.click(screen.getByRole('button', { name: 'Cerrar' }));
         await user.click(within(getConfirmDiscardDialog()).getByRole('button', { name: 'Descartar cambios' }));
         await user.click(screen.getByRole('button', { name: 'Reopen dialog' }));
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
 
         await waitFor(() => {
             expect(screen.queryByText('Error al guardar')).not.toBeInTheDocument();
@@ -653,7 +653,7 @@ describe('GlobalSettingsDialog', () => {
         await user.clear(screen.getByLabelText('Temporal draft'));
         await user.type(screen.getByLabelText('Temporal draft'), 'Temporal unsaved');
 
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         await user.clear(screen.getByLabelText('Voice draft'));
         await user.type(screen.getByLabelText('Voice draft'), 'Voice unsaved');
 
@@ -686,7 +686,7 @@ describe('GlobalSettingsDialog', () => {
         await user.click(screen.getByRole('button', { name: 'Ajustes' }));
         expect(screen.getByLabelText('Temporal draft')).toHaveValue('Persisted timezone');
 
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         expect(screen.getByLabelText('Voice draft')).toHaveValue('Persisted voice');
     });
 
@@ -836,13 +836,13 @@ describe('GlobalSettingsDialog', () => {
         document.removeEventListener('hmi:temporal-settings-changed', eventSpy);
     });
 
-    it('saves the active Prisma draft through the voice settings save branch', async () => {
+    it('saves the active Leda draft through the voice settings save branch', async () => {
         const user = userEvent.setup();
 
         localStorage.setItem(VOICE_STORAGE_KEY, 'Persisted voice');
         render(<Harness />);
 
-        await user.click(screen.getByRole('button', { name: 'Prisma' }));
+        await user.click(screen.getByRole('button', { name: 'Leda' }));
         await user.clear(screen.getByLabelText('Voice draft'));
         await user.type(screen.getByLabelText('Voice draft'), '/voice/new');
         await user.click(getSaveButton());

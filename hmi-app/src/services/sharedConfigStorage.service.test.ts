@@ -54,8 +54,8 @@ function createHarness(options: {
             });
         }
         if (!server.reachable) throw new TypeError('network down');
-        if (path === '/api/prisma/hmi-config/revision') return jsonResponse({ ok: true, revision: server.revision });
-        if (path === '/api/prisma/hmi-config') {
+        if (path === '/api/leda/hmi-config/revision') return jsonResponse({ ok: true, revision: server.revision });
+        if (path === '/api/leda/hmi-config') {
             return jsonResponse({ ok: true, revision: server.revision, items: server.items });
         }
         throw new Error(`unexpected request ${path}`);
@@ -83,7 +83,7 @@ function createHarness(options: {
 }
 
 function documentFetches(fetcher: ReturnType<typeof createHarness>['fetcher']): number {
-    return fetcher.mock.calls.filter(([path]) => String(path) === '/api/prisma/hmi-config').length;
+    return fetcher.mock.calls.filter(([path]) => String(path) === '/api/leda/hmi-config').length;
 }
 
 describe('sharedConfigStorage', () => {
@@ -406,7 +406,7 @@ describe('sharedConfigStorage', () => {
 
             await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS * 2);
 
-            expect(fetcher.mock.calls.filter(([path]) => String(path) === '/api/prisma/hmi-config/revision')).toHaveLength(2);
+            expect(fetcher.mock.calls.filter(([path]) => String(path) === '/api/leda/hmi-config/revision')).toHaveLength(2);
             expect(documentFetches(fetcher)).toBe(1);
             expect(listener).not.toHaveBeenCalled();
         });
@@ -641,7 +641,7 @@ describe('sharedConfigStorage', () => {
             storage.setItem(TEMPLATES, '[t2]');
             await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
 
-            expect(fetcher.mock.calls.map(([path]) => String(path))).toContain('/api/prisma/hmi-config/revision');
+            expect(fetcher.mock.calls.map(([path]) => String(path))).toContain('/api/leda/hmi-config/revision');
             expect(writeSharedConfig).toHaveBeenCalledTimes(1);
             expect(writeSharedConfig.mock.calls[0][0].set).toEqual({ [TEMPLATES]: '[t2]' });
             expect(server.items).toEqual({ [DASHBOARDS]: '[remote]', [TEMPLATES]: '[t2]' });

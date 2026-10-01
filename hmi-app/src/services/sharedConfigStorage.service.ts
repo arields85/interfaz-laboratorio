@@ -23,7 +23,7 @@ import { AdminAuthError, adminAuthClient, type AdminAuthClient } from './adminAu
 // =============================================================================
 // sharedConfigStorage
 // Synchronous getItem/setItem/removeItem over an in-memory copy of the shared HMI
-// configuration document that lives on the Prisma runtime. Reads never wait; writes
+// configuration document that lives on the Leda runtime. Reads never wait; writes
 // update memory at once and reach the server in debounced admin batches (session +
 // CSRF). A revision poll replaces memory when another browser changed the document.
 // localStorage keeps only a cache copy of the last server document, used when the
@@ -37,8 +37,8 @@ export const SHARED_CONFIG_CACHE_KEY = 'hmi:shared-config-cache';
 export const SHARED_CONFIG_POLL_INTERVAL_MS = 10_000;
 const SHARED_CONFIG_DEBOUNCE_MS = 300;
 const SHARED_CONFIG_LOAD_TIMEOUT_MS = 5_000;
-const DOCUMENT_ROUTE = '/api/prisma/hmi-config';
-const REVISION_ROUTE = '/api/prisma/hmi-config/revision';
+const DOCUMENT_ROUTE = '/api/leda/hmi-config';
+const REVISION_ROUTE = '/api/leda/hmi-config/revision';
 
 export interface SharedConfigCachePort {
     getItem(key: string): string | null;

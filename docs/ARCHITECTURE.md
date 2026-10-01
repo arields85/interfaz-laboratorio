@@ -36,9 +36,9 @@ Estos tres tipos son **independientes** y no deben mezclarse ni colapsarse en un
 
 ## Configuración compartida
 
-La configuración de la propia HMI (dashboards, plantillas, jerarquía, tipos de nodo, catálogo de variables, conexión de datos, nombre, loader, opciones temporales, orbe de Prisma, tema, diseño y shader) **vive en el servidor**, no en cada navegador. Lo que un administrador guarda en un navegador lo ven todos, incluidos los que ya están abiertos. Es configuración de la HMI, nunca un comando hacia la planta (no cambia el contrato de datos de planta de [`DATA_CONTRACT.md`](DATA_CONTRACT.md)).
+La configuración de la propia HMI (dashboards, plantillas, jerarquía, tipos de nodo, catálogo de variables, conexión de datos, nombre, loader, opciones temporales, orbe de Leda, tema, diseño y shader) **vive en el servidor**, no en cada navegador. Lo que un administrador guarda en un navegador lo ven todos, incluidos los que ya están abiertos. Es configuración de la HMI, nunca un comando hacia la planta (no cambia el contrato de datos de planta de [`DATA_CONTRACT.md`](DATA_CONTRACT.md)).
 
-- **Servidor**: el runtime de Prisma guarda un documento clave/valor con una revisión global (`GET /api/prisma/hmi-config`, `GET /api/prisma/hmi-config/revision`, `PUT /api/prisma/admin/hmi-config`). Rutas, límites y errores: [`prisma/PRISMA_BROWSER_ROUTING.md`](prisma/PRISMA_BROWSER_ROUTING.md).
+- **Servidor**: el runtime de Leda guarda un documento clave/valor con una revisión global (`GET /api/leda/hmi-config`, `GET /api/leda/hmi-config/revision`, `PUT /api/leda/admin/hmi-config`). Rutas, límites y errores: [`leda/LEDA_BROWSER_ROUTING.md`](leda/LEDA_BROWSER_ROUTING.md).
 - **Adaptador cliente**: `hmi-app/src/services/sharedConfigStorage.service.ts` expone `getItem`/`setItem`/`removeItem` síncronos sobre una copia en memoria. Los módulos de configuración lo usan en lugar de `localStorage` y mantienen su API. Las lecturas nunca escriben.
 - **Arranque**: `main.tsx` espera `load()` antes de aplicar la configuración y renderizar. Si el servidor no responde, usa la última copia buena guardada en `localStorage` (solo caché, `hmi:shared-config-cache`).
 - **Fallback local de arranque**: mientras el servidor nunca fue escrito (revisión 0, sin claves), las claves compartidas se leen de los datos locales de este navegador (solo lectura). Cualquier revisión mayor a 0 gana por completo. El primer guardado siembra los demás valores locales, pasando por los mismos límites que cualquier escritura, y antes verifica que la revisión siga en 0. Límite conocido: dos navegadores en fallback que guardan a la vez pueden pisarse en esa ventana (en el servidor real, un navegador nuevo no tiene datos locales).
@@ -48,7 +48,7 @@ La configuración de la propia HMI (dashboards, plantillas, jerarquía, tipos de
 
 ## Acceso oculto
 
-El visor común no muestra el ícono de usuarios ni el de Prisma. Se revelan con `Ctrl+Alt+A` (alterna) o entrando a `/acceso` (los revela, abre el login y vuelve a `/`). La bandera `hmi:hidden-access` es local a cada navegador y nunca se comparte (`services/hiddenAccess.service.ts`). Ocultar el ícono **no es** la barrera de seguridad: las rutas `/admin` y las escrituras siguen protegidas por la sesión del servidor.
+El visor común no muestra el ícono de usuarios ni el de Leda. Se revelan con `Ctrl+Alt+A` (alterna) o entrando a `/acceso` (los revela, abre el login y vuelve a `/`). La bandera `hmi:hidden-access` es local a cada navegador y nunca se comparte (`services/hiddenAccess.service.ts`). Ocultar el ícono **no es** la barrera de seguridad: las rutas `/admin` y las escrituras siguen protegidas por la sesión del servidor.
 
 ## Catálogo de Variables
 

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CredentialAdministrationClient, CredentialAdministrationController } from '../../hooks/usePrismaCredentialAdministration';
+import type { CredentialAdministrationClient, CredentialAdministrationController } from '../../hooks/useLedaCredentialAdministration';
 import { AdminAuthClient, AdminAuthError } from '../../services/adminAuth.service';
 import { useAuthStore } from '../../store/auth.store';
 import VoiceCredentialSettings from './VoiceCredentialSettings';
@@ -40,11 +40,11 @@ const allConfiguredMetadata = {
 };
 const TELEGRAM_VERIFIED = {
     configured: true, verified: true,
-    verification: { state: 'verified', checkedAt: 1_700_000_002, username: 'prisma_bot' },
+    verification: { state: 'verified', checkedAt: 1_700_000_002, username: 'leda_bot' },
 } as const;
 const CHANNEL_A_VERIFIED = {
     configured: true, verified: true,
-    verification: { state: 'verified', checkedAt: 1_700_000_003, username: 'prisma_channel_a_bot' },
+    verification: { state: 'verified', checkedAt: 1_700_000_003, username: 'leda_channel_a_bot' },
 } as const;
 const health = {
     enabled: true, configured: true, running: true, verified: false,
@@ -78,7 +78,7 @@ const channelARunning = {
     activationEpoch: 2,
     activation: { phase: 'running', reason: null, quiescent: false, restartRequired: false },
     lastError: null,
-    botUsername: 'prisma_channel_a_bot',
+    botUsername: 'leda_channel_a_bot',
     paired: true,
     retrying: false,
     retryAttempt: 0,
@@ -88,8 +88,8 @@ const channelAStopUnconfirmed = {
     desiredGeneration: 4,
     appliedGeneration: 4,
     activationEpoch: 2,
-    activation: { phase: 'stopped', reason: 'PRISMA_CHANNEL_A_RESTART_REQUIRED', quiescent: true, restartRequired: true },
-    lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+    activation: { phase: 'stopped', reason: 'LEDA_CHANNEL_A_RESTART_REQUIRED', quiescent: true, restartRequired: true },
+    lastError: 'LEDA_CHANNEL_A_STOP_UNCONFIRMED',
     botUsername: null,
     paired: false,
     retrying: false,
@@ -183,7 +183,7 @@ async function createClientWithDeferredChannelAWrite(method: 'PUT' | 'DELETE') {
             : new Response(null, { status: 204 }));
     });
     const fetcher = vi.fn<typeof fetch>((path, init) => {
-        if (path === '/api/prisma/admin/auth/session') {
+        if (path === '/api/leda/admin/auth/session') {
             return Promise.resolve(jsonResponse({
                 ok: true,
                 administrator: { username: 'admin' },
@@ -191,14 +191,14 @@ async function createClientWithDeferredChannelAWrite(method: 'PUT' | 'DELETE') {
                 absoluteExpiresAt: 2_000_000_000,
             }));
         }
-        if (path === '/api/prisma/admin/credentials' && (init?.method ?? 'GET') === 'GET') {
+        if (path === '/api/leda/admin/credentials' && (init?.method ?? 'GET') === 'GET') {
             return Promise.resolve(jsonResponse({ ok: true, providers: metadata }));
         }
-        if (path === '/api/prisma/health') return Promise.resolve(jsonResponse(healthEnvelope()));
-        if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+        if (path === '/api/leda/health') return Promise.resolve(jsonResponse(healthEnvelope()));
+        if (path === '/api/leda/admin/credentials/telegram_channel_a/status') {
             return Promise.resolve(jsonResponse({ ok: true, channelA: channelAIdle }));
         }
-        if (path === '/api/prisma/admin/credentials/telegram_channel_a' && init?.method === method) {
+        if (path === '/api/leda/admin/credentials/telegram_channel_a' && init?.method === method) {
             return pendingWrite;
         }
         throw new Error(`Unexpected request: ${String(path)} ${String(init?.method)}`);
@@ -213,7 +213,7 @@ async function createClientWithDeferredRefresh() {
     let releaseRefresh!: (response: Response) => void;
     const pendingRefresh = new Promise<Response>((resolve) => { releaseRefresh = resolve; });
     const fetcher = vi.fn<typeof fetch>((path, init) => {
-        if (path === '/api/prisma/admin/auth/session') {
+        if (path === '/api/leda/admin/auth/session') {
             return Promise.resolve(jsonResponse({
                 ok: true,
                 administrator: { username: 'admin' },
@@ -221,13 +221,13 @@ async function createClientWithDeferredRefresh() {
                 absoluteExpiresAt: 2_000_000_000,
             }));
         }
-        if (path === '/api/prisma/admin/credentials') {
+        if (path === '/api/leda/admin/credentials') {
             metadataRequests += 1;
             if (metadataRequests === 2) return pendingRefresh;
             return Promise.resolve(jsonResponse({ ok: true, providers: metadata }));
         }
-        if (path === '/api/prisma/health') return Promise.resolve(jsonResponse(healthEnvelope()));
-        if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+        if (path === '/api/leda/health') return Promise.resolve(jsonResponse(healthEnvelope()));
+        if (path === '/api/leda/admin/credentials/telegram_channel_a/status') {
             return Promise.resolve(jsonResponse({ ok: true, channelA: channelAIdle }));
         }
         if (init?.method === 'PUT') return Promise.resolve(jsonResponse({ ok: true, provider: 'gemini', configured: true }));
@@ -419,7 +419,7 @@ describe('VoiceCredentialSettings', () => {
         expect(screen.getAllByRole('group')).toHaveLength(3);
         expect(channelA).not.toBe(telegram);
         expect(within(channelA).getByText(
-            'Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.',
+            'Canal privado de Telegram: se vincula con un QR y Leda responde consultas sobre la interfaz.',
         )).toBeInTheDocument();
         const input = await within(channelA).findByLabelText('Telegram bot API Token');
         // Same Chrome password-manager workaround as Gemini's field.
@@ -428,7 +428,7 @@ describe('VoiceCredentialSettings', () => {
         expect(input.className).toMatch(/hmi-masked-text/);
         // Running fixture: connected icon and the connected bot's username.
         expect(await within(channelA).findByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
-        expect(within(channelA).getByText('@prisma_channel_a_bot')).toBeInTheDocument();
+        expect(within(channelA).getByText('@leda_channel_a_bot')).toBeInTheDocument();
         // No "Aplicar cambio" button and no verification claim for channel A.
         expect(within(channelA).queryByRole('button', { name: 'Aplicar cambio' })).not.toBeInTheDocument();
         expect(within(channelA).queryByText(/Verificaci/)).not.toBeInTheDocument();
@@ -572,7 +572,7 @@ describe('VoiceCredentialSettings', () => {
     });
 
     it('renders initial and malformed responses as unavailable rather than negative facts', async () => {
-        const fetcher = vi.fn<typeof fetch>(async (path) => path === '/api/prisma/admin/credentials'
+        const fetcher = vi.fn<typeof fetch>(async (path) => path === '/api/leda/admin/credentials'
             ? jsonResponse({ ok: true, providers: { gemini: { configured: 'yes' } }, extra: 'synthetic-secret-canary' })
             : jsonResponse(healthEnvelope()));
         renderSettingsWithClient(new AdminAuthClient(fetcher));
@@ -612,7 +612,7 @@ describe('VoiceCredentialSettings', () => {
         // Same rationale as above: drive the refetch failure through Channel
         // A's own Save instead of the removed refresh/apply buttons.
         const user = userEvent.setup();
-        const statusFailure = new AdminAuthError('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
+        const statusFailure = new AdminAuthError('LEDA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
         const channelAStatus = vi.fn(async () => channelARunning)
             .mockResolvedValueOnce(channelARunning)
             .mockRejectedValueOnce(statusFailure);
@@ -632,7 +632,7 @@ describe('VoiceCredentialSettings', () => {
         expect(within(channelACard).getByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
         // The failure surfaces as the sanitized card message, never the raw code.
         expect(within(channelACard).getByText('El estado del Canal A no está disponible.')).toBeInTheDocument();
-        expect(screen.queryByText('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
+        expect(screen.queryByText('LEDA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
     });
 
     it('does not clear a newer draft or publish save success when an old refresh completes', async () => {
@@ -681,7 +681,7 @@ describe('VoiceCredentialSettings', () => {
         });
         const runningCard = await screen.findByRole('group', { name: 'Canal A' });
         expect(await within(runningCard).findByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
-        expect(within(runningCard).getByText('@prisma_channel_a_bot')).toBeInTheDocument();
+        expect(within(runningCard).getByText('@leda_channel_a_bot')).toBeInTheDocument();
         running.unmount();
 
         const stopped = {
@@ -694,7 +694,7 @@ describe('VoiceCredentialSettings', () => {
         // T15: "Bot detenido" is a warning-tone state, text only (no icon).
         expect(await within(idleCard).findByText('Bot detenido')).toBeInTheDocument();
         expect(within(idleCard).queryByRole('img', { name: 'Bot detenido' })).not.toBeInTheDocument();
-        expect(within(idleCard).queryByText('@prisma_channel_a_bot')).not.toBeInTheDocument();
+        expect(within(idleCard).queryByText('@leda_channel_a_bot')).not.toBeInTheDocument();
     });
 
     it('shows no execution icon at all for an unconfigured channel A credential', async () => {
@@ -744,7 +744,7 @@ describe('VoiceCredentialSettings', () => {
     it('shows a genuinely unknown channel A phase as "Estado no confirmado", text only', async () => {
         const status = {
             ...channelARunning,
-            activation: { phase: 'retired', reason: 'PRISMA_CHANNEL_A_RESTART_REQUIRED', quiescent: true, restartRequired: true },
+            activation: { phase: 'retired', reason: 'LEDA_CHANNEL_A_RESTART_REQUIRED', quiescent: true, restartRequired: true },
             lastError: null,
             botUsername: null,
         } as const;
@@ -764,8 +764,8 @@ describe('VoiceCredentialSettings', () => {
     it('shows a retrying channel A background failure as "Reconectando…", warning tone', async () => {
         const status = {
             ...channelARunning,
-            activation: { phase: 'failed', reason: 'PRISMA_CHANNEL_A_POLL_FAILED', quiescent: true, restartRequired: false },
-            lastError: 'PRISMA_CHANNEL_A_POLL_FAILED',
+            activation: { phase: 'failed', reason: 'LEDA_CHANNEL_A_POLL_FAILED', quiescent: true, restartRequired: false },
+            lastError: 'LEDA_CHANNEL_A_POLL_FAILED',
             botUsername: null,
             retrying: true,
             retryAttempt: 2,
@@ -786,7 +786,7 @@ describe('VoiceCredentialSettings', () => {
     // T16: the two PERMANENT failures the backend never retries get their own
     // specific critical text instead of the generic fallback.
     it.each([
-        { lastError: 'PRISMA_CHANNEL_A_UNAUTHORIZED' as const, expectedText: 'Token inválido' },
+        { lastError: 'LEDA_CHANNEL_A_UNAUTHORIZED' as const, expectedText: 'Token inválido' },
         { lastError: 'TELEGRAM_BOT_IDENTITY_RESERVED' as const, expectedText: 'Bot en uso por el otro canal' },
     ])('shows the permanent channel A failure ($lastError) with its specific text', async ({ lastError, expectedText }) => {
         const status = {
@@ -809,7 +809,7 @@ describe('VoiceCredentialSettings', () => {
     it('shows the channel A stop-unconfirmed lastError as the error state, distinct from Telegram, text only', async () => {
         const status = {
             ...channelARunning,
-            lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+            lastError: 'LEDA_CHANNEL_A_STOP_UNCONFIRMED',
         } as const;
         renderSettings({
             credentialMetadata: vi.fn(async () => configuredA),
@@ -826,7 +826,7 @@ describe('VoiceCredentialSettings', () => {
     it('disables only channel A controls when its status fails and keeps Gemini/B usable', async () => {
         renderSettings({
             channelAStatus: vi.fn(async () => {
-                throw new AdminAuthError('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
+                throw new AdminAuthError('LEDA_CHANNEL_A_MANAGER_UNAVAILABLE', 503, false);
             }),
         });
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
@@ -839,7 +839,7 @@ describe('VoiceCredentialSettings', () => {
         expect(within(channelA).getByLabelText('Telegram bot API Token')).toBeDisabled();
         expect(within(channelA).getByRole('button', { name: 'Guardar credencial' })).toBeDisabled();
         expect(within(channelA).getByRole('button', { name: 'Eliminar credencial' })).toBeDisabled();
-        expect(screen.queryByText('PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
+        expect(screen.queryByText('LEDA_CHANNEL_A_MANAGER_UNAVAILABLE')).not.toBeInTheDocument();
 
         expect(within(gemini).getByLabelText('API Key de Gemini')).toBeEnabled();
         expect(within(telegram).getByLabelText('Telegram bot API Token')).toBeEnabled();
@@ -848,7 +848,7 @@ describe('VoiceCredentialSettings', () => {
     it('retries only the channel A stop-unconfirmed deletion from its own warning', async () => {
         const user = userEvent.setup();
         const deleteCredential = vi.fn(async () => {
-            throw new AdminAuthError('PRISMA_CHANNEL_A_STOP_UNCONFIRMED', 409, true);
+            throw new AdminAuthError('LEDA_CHANNEL_A_STOP_UNCONFIRMED', 409, true);
         });
         const { client } = renderSettings({
             credentialMetadata: vi.fn(async () => configuredA),
@@ -1144,7 +1144,7 @@ describe('VoiceCredentialSettings', () => {
     });
 
     it.each([
-        ['Canal A' as const, 'verifyChannelA' as const, 'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS', 'Ya hay una verificación en curso. Espere a que finalice.'],
+        ['Canal A' as const, 'verifyChannelA' as const, 'LEDA_CHANNEL_A_VERIFICATION_IN_PROGRESS', 'Ya hay una verificación en curso. Espere a que finalice.'],
         ['Canal B' as const, 'verifyTelegram' as const, 'TELEGRAM_VERIFICATION_IN_PROGRESS', 'Ya hay una verificación en curso. Espere a que finalice.'],
     ])('shows a safe message when a concurrent %s verification is rejected', async (groupName, clientMethod, code, expectedText) => {
         const user = userEvent.setup();
@@ -1163,7 +1163,7 @@ describe('VoiceCredentialSettings', () => {
     });
 
     it.each([
-        ['Canal A' as const, 'verifyChannelA' as const, 'PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE', 'La verificación del Canal A no está disponible.'],
+        ['Canal A' as const, 'verifyChannelA' as const, 'LEDA_CHANNEL_A_VERIFICATION_UNAVAILABLE', 'La verificación del Canal A no está disponible.'],
         ['Canal B' as const, 'verifyTelegram' as const, 'TELEGRAM_VERIFICATION_UNAVAILABLE', 'La verificación del Canal B no está disponible.'],
     ])('shows the exact safe message when %s verification is reported unavailable, never the raw code', async (
         groupName, clientMethod, code, expectedText,
@@ -1198,7 +1198,7 @@ describe('VoiceCredentialSettings', () => {
         const channelA = await screen.findByRole('group', { name: 'Canal A' });
 
         expect(await within(channelA).findByText('No se pudo confirmar la detención del Canal A.')).toBeInTheDocument();
-        expect(within(channelA).queryByText('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')).not.toBeInTheDocument();
+        expect(within(channelA).queryByText('LEDA_CHANNEL_A_STOP_UNCONFIRMED')).not.toBeInTheDocument();
     });
 
     // T11 (2026-09-23, user manual-test feedback): Canal A must render above
@@ -1239,8 +1239,8 @@ describe('VoiceCredentialSettings', () => {
     });
 
     it.each([
-        ['Canal A', 'Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.'],
-        ['Canal B', 'Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar la interfaz.'],
+        ['Canal A', 'Canal privado de Telegram: se vincula con un QR y Leda responde consultas sobre la interfaz.'],
+        ['Canal B', 'Consultas a distancia por Telegram: Leda responde por mensaje, sin necesidad de mirar la interfaz.'],
     ])('gives the %s description extra bottom margin before its field label', async (groupName, description) => {
         renderSettings({ credentialMetadata: vi.fn(async () => configuredA), channelAStatus: vi.fn(async () => channelARunning) });
         const group = await screen.findByRole('group', { name: groupName });
@@ -1257,7 +1257,7 @@ describe('VoiceCredentialSettings', () => {
         renderSettings();
         const channelB = await screen.findByRole('group', { name: 'Canal B' });
 
-        expect(within(channelB).getByText('Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar la interfaz.')).toBeInTheDocument();
+        expect(within(channelB).getByText('Consultas a distancia por Telegram: Leda responde por mensaje, sin necesidad de mirar la interfaz.')).toBeInTheDocument();
         expect(await within(channelB).findByLabelText('Telegram bot API Token')).toBeInTheDocument();
     });
 
@@ -1317,7 +1317,7 @@ describe('VoiceCredentialSettings', () => {
         await user.click(verify);
 
         expect(client.verifyTelegram).toHaveBeenCalledWith(expect.any(AbortSignal));
-        expect(await within(group).findByText('@prisma_bot')).toBeInTheDocument();
+        expect(await within(group).findByText('@leda_bot')).toBeInTheDocument();
         const verifiedIcon = within(group).getByRole('img', { name: /Token verificado/ });
         expectLucideIcon(verifiedIcon, 'check');
     });
@@ -1347,7 +1347,7 @@ describe('VoiceCredentialSettings', () => {
         expect(client.verifyChannelA).toHaveBeenCalledWith(expect.any(AbortSignal));
         expect(await within(group).findByText(expectedText)).toBeInTheDocument();
         expect(within(group).queryByRole('img', { name: expectedText })).not.toBeInTheDocument();
-        expect(within(group).queryByText('@prisma_channel_a_bot')).not.toBeInTheDocument();
+        expect(within(group).queryByText('@leda_channel_a_bot')).not.toBeInTheDocument();
     });
 
     it('never calls the other channel\'s verify action when verifying Canal A', async () => {
@@ -1708,7 +1708,7 @@ describe('VoiceCredentialSettings', () => {
         const del = within(row).getByRole('button', { name: 'Eliminar credencial' });
         const verify = within(row).getByRole('button', { name: 'Verificar' });
         const resultArea = within(row).getByTestId('telegram_channel_a-verification-result');
-        const resultText = within(resultArea).getByText('@prisma_channel_a_bot');
+        const resultText = within(resultArea).getByText('@leda_channel_a_bot');
         const resultIcon = within(resultArea).getByRole('img', { name: 'Bot conectado' });
 
         const order = [input, credentialIcon, save, del, verify, resultText, resultIcon].map((element) =>
@@ -1791,7 +1791,7 @@ describe('VoiceCredentialSettings', () => {
             await act(async () => { vi.advanceTimersByTime(5_000); });
             await waitFor(() => expect(within(channelA).queryByText('Bot vinculado')).not.toBeInTheDocument());
             expect(within(channelA).getByRole('img', { name: 'Bot conectado' })).toBeInTheDocument();
-            expect(within(channelA).getByText('@prisma_channel_a_bot')).toBeInTheDocument();
+            expect(within(channelA).getByText('@leda_channel_a_bot')).toBeInTheDocument();
         });
 
         it('never reverts a failed Canal A verification, even long after the display duration', async () => {

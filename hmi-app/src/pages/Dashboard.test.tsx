@@ -234,7 +234,7 @@ describe('Dashboard page layout', () => {
             }),
         ]);
 
-        renderDashboard('/?prismaMode=local');
+        renderDashboard('/?ledaMode=local');
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-presentation-frame')).toHaveTextContent(
@@ -918,14 +918,14 @@ describe('Dashboard page layout', () => {
     });
 
     it('starts one frame-ready exporter even when legacy routing preferences are present', async () => {
-        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
+        localStorage.setItem('hmi:leda-runtime-mode', 'local');
         localStorage.setItem('hmi:snapshot-export-enabled', 'false');
         localStorage.setItem('hmi:snapshot-export-endpoint', 'https://legacy.invalid/snapshot');
         dashboardStorageMock.getDashboards.mockResolvedValue([
             makeDashboard({ id: 'local-dashboard', status: 'published', widgets: [], layout: [] }),
         ]);
 
-        renderDashboard('/?prismaMode=local');
+        renderDashboard('/?ledaMode=local');
 
         await waitFor(() => {
             expect(screen.getByTestId('dashboard-viewer-root')).toBeInTheDocument();

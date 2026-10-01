@@ -12,8 +12,8 @@ on the HMI (orb + voice) — never dropped with `audio-failure`, never overlappi
 
 Two Channel A voice notes arrived in the same `getUpdates` batch (presentation log
 `Channel A getUpdates: count=2`); both transcribed in ~1-2s; both answers published almost
-simultaneously; the voice process returned 503 for BOTH `POST /internal/prisma/prefetch` and
-`POST /prisma/speak-live` for BOTH events at 09:33:39 (voice log), then 200 for both at 09:33:40;
+simultaneously; the voice process returned 503 for BOTH `POST /internal/leda/prefetch` and
+`POST /leda/speak-live` for BOTH events at 09:33:39 (voice log), then 200 for both at 09:33:40;
 the HMI recorded `HMI voice timeline: ... type=error ... error_code=audio-failure` — one answer
 never played. The 503 comes from `voice_service.py` ~L1137-1141: `AudioCapacityError` other than
 `VOICE_SUBSCRIBER_LIMIT` -> 503, or `AudioCoordinatorError/RuntimeError` -> 503
@@ -25,12 +25,12 @@ never played. The 503 comes from `voice_service.py` ~L1137-1141: `AudioCapacityE
   `max_subscribers_per_owner=8`, `max_records=64`, `max_queue=8` global) do NOT trip from just two
   concurrent events for one owner under the prefetch-then-attach pattern — empirically probed with
   a real `AudioCoordinator` (2 owners x prefetch+speak-live, concurrent threads): no rejection.
-- `usePrismaOrbPresentation.ts` (T17, deliberate, documented design): every new voice event —
+- `useLedaOrbPresentation.ts` (T17, deliberate, documented design): every new voice event —
   "including one arriving while the previous answer is still speaking" — immediately calls
   `engine.play()`, which unconditionally cancels ("cancel", true) whatever is currently playing
-  (`PrismaVoiceAudioEngine.play()` -> `cleanupActive('cancel', true)` -> `abortController.abort()`).
+  (`LedaVoiceAudioEngine.play()` -> `cleanupActive('cancel', true)` -> `abortController.abort()`).
   This is the mechanism that makes two back-to-back answers overlap/drop instead of queueing.
-- **Confirmed real backend defect**: `/prisma/speak-live`'s response
+- **Confirmed real backend defect**: `/leda/speak-live`'s response
   (`voice_service.py` `_pcm_stream_response(lambda: _timed_pcm_stream(stream, request_received))`)
   registers `response.call_on_close(close)` with `close = _timed_pcm_stream`'s OWN generator's
   `.close`, never the inner `AudioSubscription` (`stream`) it wraps. On a NORMAL full read,
@@ -49,8 +49,8 @@ never played. The 503 comes from `voice_service.py` ~L1137-1141: `AudioCapacityE
   answers (matching the reported transient 503 window). Existing test
   `test_http_response_close_releases_unstarted_audio_subscription` only covers `_pcm_stream_response`
   called DIRECTLY with the subscription as `stream` — it never exercises the real
-  `/prisma/speak-live` wiring through `_timed_pcm_stream`, so the gap was untested.
-- Rejections were never logged at all (`prisma_speak_live`/`prisma_prefetch`'s `except` branches go
+  `/leda/speak-live` wiring through `_timed_pcm_stream`, so the gap was untested.
+- Rejections were never logged at all (`leda_speak_live`/`leda_prefetch`'s `except` branches go
   straight to `jsonify(...)`), so the exact admission reason was invisible in the reported incident.
 
 ## Fix strategy (server-side preferred, per this task's brief; HMI also fixed since dropping the
@@ -59,12 +59,12 @@ overlapping" not being met today)
 
 1. **Backend**: `_timed_pcm_stream` (`voice_service.py`) closes the wrapped `AudioSubscription` in
    its `finally`, on every teardown path (normal, error, or early external `.close()`) — mirrors
-   `prisma_prefetch`'s existing explicit `subscription.close()`. `AudioSubscription.close()` is
+   `leda_prefetch`'s existing explicit `subscription.close()`. `AudioSubscription.close()` is
    already idempotent, so this is safe alongside the existing self-close-on-`StopIteration` path.
-2. **Backend**: log (WARNING, no secrets/ids) the admission-rejection reason in `prisma_speak_live`
-   and `prisma_prefetch` when `subscribe()`/`resolve_voice_event()` raises an
+2. **Backend**: log (WARNING, no secrets/ids) the admission-rejection reason in `leda_speak_live`
+   and `leda_prefetch` when `subscribe()`/`resolve_voice_event()` raises an
    `AudioCapacityError`/`AudioCoordinatorError`/`RuntimeError` — currently silent.
-3. **Frontend**: `usePrismaOrbPresentation.ts` — a new voice event arriving while the CURRENT one is
+3. **Frontend**: `useLedaOrbPresentation.ts` — a new voice event arriving while the CURRENT one is
    still actively being presented (thinking or visible/speaking, i.e. before its own terminal
    fires) is queued (small bounded FIFO) instead of aborting the current playback; it starts the
    moment the current one's terminal (`onEnded`/`onError`/thinking-timeout) fires. An event arriving
@@ -75,12 +75,12 @@ overlapping" not being met today)
 ## TDD
 
 Strict TDD: enabled (source: session configuration "Strict TDD Mode: enabled").
-Runner (prisma-runtime, worktree-scoped):
-`D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m
-unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\voice-overlap\services\prisma-runtime -p "test_*.py"`.
+Runner (leda-runtime, worktree-scoped):
+`D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\leda-runtime\.venv\Scripts\python.exe -m
+unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\voice-overlap\services\leda-runtime -p "test_*.py"`.
 Runner (hmi-app, worktree-scoped): `cd hmi-app && npx vitest run` / `npx tsc -b` / `npm run lint`.
 
-Baseline (worktree, before changes, 2026-09-25): prisma-runtime **1766 tests, 2 pre-existing
+Baseline (worktree, before changes, 2026-09-25): leda-runtime **1766 tests, 2 pre-existing
 environmental failures, 2 skipped** (`test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference`,
 `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child` — both spawn a
 subprocess expecting a worktree-local `.venv\Scripts\python.exe` this worktree does not have;
@@ -90,19 +90,19 @@ unrelated to this task, not touched). hmi-app: 221 files / 2571 tests, all passi
 ## Tasks
 
 - [x] **V1 — Reproduce and fix the AudioSubscription close-forwarding leak (backend).**
-  `services/prisma-runtime/src/prisma_runtime/voice_service.py`, `tests/test_voice_service.py`.
+  `services/leda-runtime/src/leda_runtime/voice_service.py`, `tests/test_voice_service.py`.
   Route: inline (one already-understood file + its test, no design decision after the read-only
   investigation above).
   Evidence: new `test_speak_live_closes_the_underlying_subscription_on_early_response_teardown`
-  posts to `/prisma/speak-live` with `buffered=False`, reads only the first chunk (simulating the
+  posts to `/leda/speak-live` with `buffered=False`, reads only the first chunk (simulating the
   orb aborting mid-stream), calls `response.close()`, and asserts the mocked `AudioSubscription`'s
   `close()` was called exactly once. RED confirmed (`Expected 'close' to be called once. Called 0
   times.`) before the fix; GREEN after `_timed_pcm_stream`'s `finally` also closes `stream`
   (idempotent, safe alongside the pre-existing self-close-on-`StopIteration` path and
-  `prisma_prefetch`'s own explicit `.close()`). Full `test_voice_service` module: 88 passed.
+  `leda_prefetch`'s own explicit `.close()`). Full `test_voice_service` module: 88 passed.
   Commit: `a6b0102`.
 - [x] **V2 — Log the admission-rejection reason (backend).**
-  `services/prisma-runtime/src/prisma_runtime/voice_service.py`, `tests/test_voice_service.py`.
+  `services/leda-runtime/src/leda_runtime/voice_service.py`, `tests/test_voice_service.py`.
   Route: inline (same file as V1).
   Evidence: new `test_speak_live_logs_the_admission_rejection_reason` and
   `test_prefetch_logs_the_admission_rejection_reason` assert one WARNING line containing the
@@ -111,9 +111,9 @@ unrelated to this task, not touched). hmi-app: 221 files / 2571 tests, all passi
   `AudioCapacityError`/`(AudioCoordinatorError, RuntimeError)` branches; GREEN after. Commit:
   `a6b0102`.
 - [x] **V3 — Queue an overlapping voice event instead of aborting the current answer (frontend).**
-  `hmi-app/src/hooks/usePrismaOrbPresentation.ts`, `usePrismaOrbPresentation.test.ts`. Route:
+  `hmi-app/src/hooks/useLedaOrbPresentation.ts`, `useLedaOrbPresentation.test.ts`. Route:
   inline (one already-understood file + its test).
-  Evidence: `presentVoiceEvent` now queues (bounded FIFO, `PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT = 4`)
+  Evidence: `presentVoiceEvent` now queues (bounded FIFO, `LEDA_ORB_VOICE_EVENT_QUEUE_LIMIT = 4`)
   a new event while `isActiveRef.current` is true (set at the start of the renamed
   `beginPresenting`, cleared at the top of `beginFade` — i.e. active from "thinking" through
   "visible" until the answer's own terminal, not through the cosmetic fade/hidden transition, so an
@@ -123,7 +123,7 @@ unrelated to this task, not touched). hmi-app: 221 files / 2571 tests, all passi
   the current one finishes; drops the newest overflow event beyond the bound). RED confirmed by
   stashing the source change and re-running: `expected "vi.fn()" to be called 1 times, but got 2
   times` (the old code always interrupted) for the "queues while thinking"/"queues while visible"
-  tests, and an overflow-bound failure for the drop test (`PRISMA_ORB_VOICE_EVENT_QUEUE_LIMIT` did
+  tests, and an overflow-bound failure for the drop test (`LEDA_ORB_VOICE_EVENT_QUEUE_LIMIT` did
   not exist yet); GREEN after restoring the fix. All 27 tests in the file green (was 24; net +3
   after removing the now-inaccurate "ignores stale terminal callbacks" test, replaced by the 4
   above — the pre-existing "restarts at thinking when a new event arrives while fading" test needed
@@ -131,19 +131,19 @@ unrelated to this task, not touched). hmi-app: 221 files / 2571 tests, all passi
   files / 2574 tests (was 2571). `npx tsc -b` clean. `npm run lint` clean. Commit: `b827937`.
   Re-entrancy check (raised by the GGA pre-commit review): `beginFade` calling `beginPresenting` ->
   `engine.play()` from inside the engine's own `onEnded`/`onError` callback is safe —
-  `PrismaVoiceAudioEngine` already calls `cleanupActive('complete'|'error', ...)` and nulls
+  `LedaVoiceAudioEngine` already calls `cleanupActive('complete'|'error', ...)` and nulls
   `this.active` BEFORE invoking `lifecycle.onEnded`/`onError`, so the re-entrant `play()`'s own
   `cleanupActive('cancel', true)` finds `this.active === null` and no-ops (verified by reading
-  `prismaVoiceAudioEngine.ts`'s `completeLiveIfFinished`/`failActive`).
+  `ledaVoiceAudioEngine.ts`'s `completeLiveIfFinished`/`failActive`).
 
-## V4 (added mid-task) — bursts of 401 on `/internal/prisma/prefetch`
+## V4 (added mid-task) — bursts of 401 on `/internal/leda/prefetch`
 
-**Evidence (coordinator, 2026-09-25 live log):** `prisma-voice-stderr.log` shows bursts of ~11 and
-~9 consecutive `POST /internal/prisma/prefetch` 401 within ~1 s at 09:51:08 and 09:54:29-30.
+**Evidence (coordinator, 2026-09-25 live log):** `leda-voice-stderr.log` shows bursts of ~11 and
+~9 consecutive `POST /internal/leda/prefetch` 401 within ~1 s at 09:51:08 and 09:54:29-30.
 
-**Investigation (read-only, this task).** Correlated `prisma-presentation-stderr.log` for the same
+**Investigation (read-only, this task).** Correlated `leda-presentation-stderr.log` for the same
 timestamps: each voice-side 401 corresponds to a presentation-side `GET
-/internal/prisma/voice-events/<event_id>` 401 (the loopback hop `resolve_voice_event` makes) — and
+/internal/leda/voice-events/<event_id>` 401 (the loopback hop `resolve_voice_event` makes) — and
 critically, **each of the ~11 has a DIFFERENT event id**, not the same id repeated. This rules out a
 retry storm outright: `_fire_voice_prefetch`/`_fire_channel_a_voice_prefetch` fire exactly once per
 call, on their own background thread, with a blanket `except Exception: pass` and (before this fix)
@@ -176,8 +176,8 @@ Flask dev-server concurrency and the shared loopback `requests.Session` connecti
 reproduced deterministically and is reported, not fixed, as speculative.
 
 **Fix applied (safe, evidence-independent, directly requested): WARNING logging.**
-`services/prisma-runtime/src/prisma_runtime/local_presentation.py` — `_fire_voice_prefetch` now logs
-`Prisma voice prefetch rejected: status=%s` on a non-2xx response and `Prisma voice prefetch
+`services/leda-runtime/src/leda_runtime/local_presentation.py` — `_fire_voice_prefetch` now logs
+`Leda voice prefetch rejected: status=%s` on a non-2xx response and `Leda voice prefetch
 rejected: reason=%s` (exception class name only) on any exception — WARNING, never the event id or
 the capability/token, matching every other rejection-logging line added in this task (V2). This is
 additive and never changes control flow (still no retry, still never raises). Route: inline (one
@@ -199,9 +199,9 @@ mint and the failed resolve to confirm or rule out the queueing-under-burst theo
 
 ## Acceptance criteria
 
-- A real `/prisma/speak-live` response whose HTTP teardown happens before the stream is fully
+- A real `/leda/speak-live` response whose HTTP teardown happens before the stream is fully
   drained (client abort) closes the underlying `AudioCoordinator` subscription exactly once.
-- An admission rejection on `/prisma/speak-live` or `/internal/prisma/prefetch` is logged at
+- An admission rejection on `/leda/speak-live` or `/internal/leda/prefetch` is logged at
   WARNING with the rejection reason, no event/owner id, no secret.
 - Two voice events for the same HMI session, arriving while the first is still thinking/speaking,
   both play in full, in order — the second never aborts the first mid-stream.

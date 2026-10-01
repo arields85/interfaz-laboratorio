@@ -44,7 +44,7 @@ function HmiNameForm({ enabled }: { enabled: boolean }) {
 
     return (
         <section className={`${ADMIN_SIDEBAR_SECTION_CLS} space-y-3 p-4`}>
-            <h3 className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>Prisma · Nombre de HMI</h3>
+            <h3 className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>Leda · Nombre de HMI</h3>
             <label htmlFor={inputId} className={ADMIN_SIDEBAR_HINT_CLS}>Nombre de esta HMI</label>
             <input
                 id={inputId}

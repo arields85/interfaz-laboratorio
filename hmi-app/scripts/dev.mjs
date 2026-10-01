@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const appRoot = resolve(currentDirectory, '..')
 const repositoryRoot = resolve(appRoot, '..')
-const defaultOperationsRoot = join(repositoryRoot, 'services', 'prisma-runtime', 'operations')
+const defaultOperationsRoot = join(repositoryRoot, 'services', 'leda-runtime', 'operations')
 const defaultViteCli = join(appRoot, 'node_modules', 'vite', 'bin', 'vite.js')
 
 function waitForChild(child) {
@@ -23,14 +23,14 @@ function signalExitCode(signal) {
 }
 
 // Minimal, documented receipt-on-failure schema written by start-local.ps1 (T1b) when a
-// foreign (non-Prisma) process blocks 5056/5057: { registered: false, failure: { reason:
+// foreign (non-Leda) process blocks 5056/5057: { registered: false, failure: { reason:
 // 'port_in_use', port, processName, pid } }. Only `reason` and `port` are forwarded to Vite;
 // anything else (missing file, malformed JSON, an unknown reason, an out-of-range port) is
 // treated as "no detectable failure detail" rather than surfaced as a hard error, since the
 // launcher must still fall back to its existing generic warning either way.
 const KNOWN_STARTUP_FAILURE_REASONS = new Set(['port_in_use'])
 
-function parsePrismaStartupFailure(raw) {
+function parseLedaStartupFailure(raw) {
   if (typeof raw !== 'object' || raw === null) return null
   if (raw.registered !== false) return null
   const failure = raw.failure
@@ -42,12 +42,12 @@ function parsePrismaStartupFailure(raw) {
 }
 
 // T4d: a detected startup failure (currently only port_in_use) is thrown by
-// Invoke-PrismaStartTransaction's earliest guard, before any process is started or any
+// Invoke-LedaStartTransaction's earliest guard, before any process is started or any
 // development owner is ever registered in the manifest -- there is nothing to recover, and
 // start-local.ps1 already printed its own single, clear terminal line for this case. Both
 // call sites below treat any OTHER rejection exactly as before (recovery attempted, generic
 // warning printed).
-function hasPrismaStartupFailure(error) {
+function hasLedaStartupFailure(error) {
   return Boolean(error && typeof error === 'object' && 'failure' in error && error.failure)
 }
 
@@ -77,8 +77,8 @@ export function createPowerShellRuntime({
   return {
     async acquire(ownerToken) {
       const operationId = newId()
-      const receiptPath = join(temporaryRoot, `prisma-dev-${operationId}.json`)
-      const cancellationPath = join(temporaryRoot, `prisma-dev-${operationId}.cancel`)
+      const receiptPath = join(temporaryRoot, `leda-dev-${operationId}.json`)
+      const cancellationPath = join(temporaryRoot, `leda-dev-${operationId}.cancel`)
       acquisitions.set(ownerToken, cancellationPath)
       try {
         try {
@@ -96,7 +96,7 @@ export function createPowerShellRuntime({
           // receipt is inspected here, before the `finally` block below deletes it.
           let failure = null
           try {
-            failure = parsePrismaStartupFailure(JSON.parse(await files.readFile(receiptPath, 'utf8')))
+            failure = parseLedaStartupFailure(JSON.parse(await files.readFile(receiptPath, 'utf8')))
           }
           catch {
             failure = null
@@ -113,10 +113,10 @@ export function createPowerShellRuntime({
         if (receipt.registered === true && typeof receipt.generation === 'string' && receipt.generation.length > 0) {
           return { ownerToken, generation: receipt.generation }
         }
-        throw new Error('Prisma Local acquisition returned an invalid ownership receipt.')
+        throw new Error('Leda Local acquisition returned an invalid ownership receipt.')
       }
       catch (error) {
-        if (!hasPrismaStartupFailure(error)) {
+        if (!hasLedaStartupFailure(error)) {
           try {
             await runScript('release-dev-local.ps1', [
               '-DevelopmentOwnerToken', ownerToken,
@@ -125,7 +125,7 @@ export function createPowerShellRuntime({
             ])
           }
           catch (recoveryError) {
-            warn(`Prisma Local ownership recovery could not be proven: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`)
+            warn(`Leda Local ownership recovery could not be proven: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`)
           }
         }
         throw error
@@ -138,7 +138,7 @@ export function createPowerShellRuntime({
         ])
         for (const result of cleanupResults) {
           if (result.status === 'rejected') {
-            warn(`Prisma Local temporary handoff cleanup failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
+            warn(`Leda Local temporary handoff cleanup failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
           }
         }
       }
@@ -160,7 +160,7 @@ export function createPowerShellRuntime({
 }
 
 // T18b: default Vite dev port when --port is not present in viteArgs -- matches Vite's own
-// default and the project's fixed-port contract (AGENTS.md, odd/tasks/pw-006-prisma-responsiveness.md).
+// default and the project's fixed-port contract (AGENTS.md, odd/tasks/pw-006-leda-responsiveness.md).
 const DEFAULT_VITE_DEV_PORT = 5173
 
 function parseVitePort(viteArguments) {
@@ -185,9 +185,9 @@ function parseVitePort(viteArguments) {
 // freshly relaunched dev.mjs tried to start a new one, so Vite silently fell back to 5174 while
 // the user's browser (fixed on 5173) got ERR_CONNECTION_REFUSED. Layering: OS-level process/port
 // verification (is a listener on this port really THIS repository's own Vite CLI, by executable
-// name + script path?) lives in resolve-vite-dev-port.ps1 / Resolve-PrismaViteDevPortState
-// (services/prisma-runtime/operations/process-ownership.ps1), mirroring the existing
-// Resolve-PrismaPortState pattern used for Prisma's own ports -- Node has no reliable
+// name + script path?) lives in resolve-vite-dev-port.ps1 / Resolve-LedaViteDevPortState
+// (services/leda-runtime/operations/process-ownership.ps1), mirroring the existing
+// Resolve-LedaPortState pattern used for Leda's own ports -- Node has no reliable
 // cross-process command-line inspection on Windows without shelling out, and this repository
 // already has that verification helper. This factory only orchestrates: run the classifier
 // script, stop a verified leftover Vite (the script itself stops it and waits briefly -- see
@@ -344,9 +344,9 @@ function resolveControlChromeConfig(env) {
   const programFiles = env.ProgramFiles || String.raw`C:\Program Files`
   const localAppData = env.LOCALAPPDATA || String.raw`C:\Users\Default\AppData\Local`
   return {
-    chromeExecutable: env.PRISMA_DEV_CHROME_PATH || join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    userDataDir: env.PRISMA_DEV_CHROME_USER_DATA_DIR || join(localAppData, 'CoreAnalytics', 'ChromeControl'),
-    remoteDebuggingPort: env.PRISMA_DEV_CHROME_DEBUG_PORT || DEFAULT_CONTROL_CHROME_DEBUG_PORT,
+    chromeExecutable: env.LEDA_DEV_CHROME_PATH || join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    userDataDir: env.LEDA_DEV_CHROME_USER_DATA_DIR || join(localAppData, 'CoreAnalytics', 'ChromeControl'),
+    remoteDebuggingPort: env.LEDA_DEV_CHROME_DEBUG_PORT || DEFAULT_CONTROL_CHROME_DEBUG_PORT,
   }
 }
 
@@ -452,7 +452,7 @@ export async function runDevelopment({
       await runtime.release(receipt)
     }
     catch (error) {
-      warn(`Prisma Local cleanup could not be completed safely: ${error instanceof Error ? error.message : String(error)}`)
+      warn(`Leda Local cleanup could not be completed safely: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   const handleSignal = (signal) => {
@@ -462,7 +462,7 @@ export async function runDevelopment({
       vite.terminate(signal)
     } else if (!vite) {
       Promise.resolve(runtime.cancelAcquire(ownerToken)).catch((error) => {
-        warn(`Prisma Local cancellation could not be recorded: ${error instanceof Error ? error.message : String(error)}`)
+        warn(`Leda Local cancellation could not be recorded: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
   }
@@ -477,13 +477,13 @@ export async function runDevelopment({
         receipt = await runtime.acquire(ownerToken)
       }
       catch (error) {
-        if (hasPrismaStartupFailure(error)) {
+        if (hasLedaStartupFailure(error)) {
           // start-local.ps1 already printed its own single, clear terminal line for this
           // case (T4c/T4d); the generic warning here would be a redundant second line.
           startupFailure = error.failure
         }
         else {
-          warn(`Prisma Local is unavailable; Vite will continue: ${error instanceof Error ? error.message : String(error)}`)
+          warn(`Leda Local is unavailable; Vite will continue: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
       if (requestedSignal) {
@@ -491,7 +491,7 @@ export async function runDevelopment({
         return signalExitCode(requestedSignal)
       }
     } else {
-      warn('Automatic Prisma Local orchestration is available only for Windows development; Vite will continue without it.')
+      warn('Automatic Leda Local orchestration is available only for Windows development; Vite will continue without it.')
     }
 
     if (platform === 'win32') {
@@ -513,7 +513,7 @@ export async function runDevelopment({
     }
 
     try {
-      const extraEnvironment = startupFailure ? { PRISMA_STARTUP_FAILURE: JSON.stringify(startupFailure) } : {}
+      const extraEnvironment = startupFailure ? { LEDA_STARTUP_FAILURE: JSON.stringify(startupFailure) } : {}
       vite = spawnVite(viteArgs, extraEnvironment)
     }
     catch (error) {
@@ -521,12 +521,12 @@ export async function runDevelopment({
       return 1
     }
 
-    // L2: opt-in only (PRISMA_DEV_AUTO_OPEN=1, set by the dev launcher) -- plain `npm run dev`
+    // L2: opt-in only (LEDA_DEV_AUTO_OPEN=1, set by the dev launcher) -- plain `npm run dev`
     // keeps today's behavior of never opening a browser. Runs concurrently with the `await
     // vite.result` below rather than blocking it: Vite is a long-running dev server, and this
     // must never delay forwarding its own exit code or signal handling. Raced against Vite
     // exiting first so a crash never opens a browser tab that would just show a connection error.
-    if (env.PRISMA_DEV_AUTO_OPEN === '1') {
+    if (env.LEDA_DEV_AUTO_OPEN === '1') {
       const devServerUrl = buildDevServerUrl(viteArgs)
       const viteExitedBeforeReady = vite.result.then(() => {
         throw new Error(`Vite exited before the dev server at ${devServerUrl} became ready.`)

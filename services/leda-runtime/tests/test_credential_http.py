@@ -1,0 +1,602 @@
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RUNTIME_ROOT / "src"))
+
+from leda_runtime.admin_http import AdminHttpBoundary
+from leda_runtime.credential_store import CredentialUnavailable
+from leda_runtime.gemini_credentials import GEMINI_VERIFY_MODEL, GeminiVerification, GeminiVerificationInProgress
+from leda_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
+from leda_runtime.telegram_verification import TelegramTokenVerification, TelegramTokenVerificationInProgress
+
+
+SECRET = "  synthetic-秘密-token  "
+
+
+class CredentialHttpTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.auth = Mock()
+        self.credentials = Mock()
+        self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
+        self.auth.read_session.return_value = self.session
+        self.telegram_manager = Mock()
+        self.gemini_verification = Mock()
+        self.gemini_verification.snapshot.return_value = GeminiVerification("not_checked", None)
+        self.telegram_verification = Mock()
+        self.telegram_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        self.channel_a_verification = Mock()
+        self.channel_a_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        boundary = AdminHttpBoundary(
+            self.auth,
+            credential_service=self.credentials,
+            telegram_manager=self.telegram_manager,
+            gemini_verification_service=self.gemini_verification,
+            telegram_verification_service=self.telegram_verification,
+            channel_a_verification_service=self.channel_a_verification,
+        )
+        self.client = create_app(
+            JsonFileStore(self.root / "snapshot.json"),
+            VoiceEventStore(),
+            None,
+            admin_http=boundary,
+        ).test_client()
+        self.client.set_cookie("leda_admin_session", "session-id", path="/api/leda/admin")
+        self.environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+        self.headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf-token"}
+
+    def test_absent_expired_or_revoked_session_denies_before_provider_or_storage(self) -> None:
+        self.auth.read_session.return_value = None
+        self.auth.was_session_replaced.return_value = False
+        response = self.client.put(
+            "/api/leda/admin/credentials/unsupported",
+            json={"secret": "synthetic"},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
+        self.credentials.status.assert_not_called()
+        self.credentials.set_secret.assert_not_called()
+        self.credentials.delete_secret.assert_not_called()
+
+    def test_write_requires_origin_and_rejects_malformed_csrf_before_storage(self) -> None:
+        missing_origin = self.client.put(
+            "/api/leda/admin/credentials/gemini",
+            json={"secret": SECRET},
+            headers={"X-CSRF-Token": "csrf-token"},
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(missing_origin.status_code, 403)
+        for method, token in (("put", None), ("put", "wrong"), ("put", "é"), ("delete", None), ("delete", "wrong"), ("delete", "é")):
+            with self.subTest(method=method, token=token):
+                headers = {"Origin": "http://localhost:5173"}
+                if token is not None:
+                    headers["X-CSRF-Token"] = token
+                arguments = {"json": {"secret": SECRET}} if method == "put" else {}
+                response = getattr(self.client, method)(
+                    "/api/leda/admin/credentials/gemini",
+                    headers=headers,
+                    environ_overrides=self.environ,
+                    **arguments,
+                )
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.get_json()["error"], "CSRF_VALIDATION_FAILED")
+        self.credentials.assert_not_called()
+
+    def test_metadata_only_get_and_committed_put_delete_never_echo_secret_or_set_cookie(self) -> None:
+        self.credentials.status.return_value = {"gemini": True, "telegram": False, "telegram_channel_a": False}
+        response = self.client.get("/api/leda/admin/credentials", environ_overrides=self.environ)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "ok": True,
+                "providers": {
+                    "gemini": {
+                        "configured": True,
+                        "verified": False,
+                        "verification": {"state": "not_checked", "checkedAt": None},
+                        "model": GEMINI_VERIFY_MODEL,
+                    },
+                    "telegram": {
+                        "configured": False,
+                        "verified": False,
+                        "verification": {"state": "not_checked", "checkedAt": None, "username": None},
+                    },
+                    "telegram_channel_a": {
+                        "configured": False,
+                        "verified": False,
+                        "verification": {"state": "not_checked", "checkedAt": None, "username": None},
+                    },
+                },
+            },
+        )
+        self.assertNotIn("Set-Cookie", response.headers)
+        self.assertNotIn(SECRET, response.get_data(as_text=True))
+
+        saved = self.client.put(
+            "/api/leda/admin/credentials/gemini",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.get_json(), {"ok": True, "provider": "gemini", "configured": True})
+        self.credentials.set_secret.assert_called_once_with("gemini", SECRET)
+        self.assertNotIn(SECRET, saved.get_data(as_text=True))
+        # Saving a new Gemini credential invalidates any prior verification result.
+        self.gemini_verification.reset.assert_called_once_with()
+        # Saving a different provider never resets an unrelated one's verification.
+        self.telegram_verification.reset.assert_not_called()
+        self.channel_a_verification.reset.assert_not_called()
+
+        deleted = self.client.delete(
+            "/api/leda/admin/credentials/gemini", headers=self.headers, environ_overrides=self.environ
+        )
+        self.assertEqual(deleted.status_code, 204)
+        self.credentials.delete_secret.assert_called_once_with("gemini")
+        # Deleting it resets verification too.
+        self.assertEqual(self.gemini_verification.reset.call_count, 2)
+        self.telegram_verification.reset.assert_not_called()
+        self.channel_a_verification.reset.assert_not_called()
+
+    def test_gemini_verification_reset_is_optional_when_no_service_is_composed(self) -> None:
+        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        client = create_app(
+            JsonFileStore(self.root / "no-verification-snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("leda_admin_session", "session-id", path="/api/leda/admin")
+        self.credentials.status.return_value = {"gemini": False, "telegram": False, "telegram_channel_a": False}
+
+        status = client.get("/api/leda/admin/credentials", environ_overrides=self.environ)
+        self.assertEqual(
+            status.get_json()["providers"]["gemini"],
+            {
+                "configured": False, "verified": False,
+                "verification": {"state": "not_checked", "checkedAt": None},
+                "model": GEMINI_VERIFY_MODEL,
+            },
+        )
+
+        saved = client.put(
+            "/api/leda/admin/credentials/gemini",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.status_code, 200)
+
+    def test_strict_provider_payload_type_shape_and_decoded_bound_are_controlled(self) -> None:
+        invalid_payloads = (None, [], {}, {"secret": None}, {"secret": ""}, {"secret": "   "}, {"secret": "x", "extra": 1})
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                arguments = {"json": payload} if payload is not None else {"data": b"null", "content_type": "application/json"}
+                response = self.client.put(
+                    "/api/leda/admin/credentials/gemini", headers=self.headers, environ_overrides=self.environ, **arguments
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "INVALID_CREDENTIAL_REQUEST")
+
+        unsupported = self.client.put(
+            "/api/leda/admin/credentials/other",
+            json={"secret": "valid"},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(unsupported.status_code, 404)
+        over_decoded_limit = self.client.put(
+            "/api/leda/admin/credentials/gemini",
+            json={"secret": "é" * 2049},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(over_decoded_limit.status_code, 400)
+        self.assertEqual(over_decoded_limit.get_json()["error"], "INVALID_CREDENTIAL_REQUEST")
+
+    def test_wire_bound_accepts_maximum_decoded_secrets_but_rejects_true_oversize_bodies(self) -> None:
+        for secret in ("😀" * 1024, "\x00" * 4096):
+            with self.subTest(first_character=repr(secret[0])):
+                response = self.client.put(
+                    "/api/leda/admin/credentials/gemini",
+                    json={"secret": secret},
+                    headers=self.headers,
+                    environ_overrides=self.environ,
+                )
+                self.assertGreater(response.request.content_length, 8192)
+                self.assertEqual(response.status_code, 200)
+                self.credentials.set_secret.assert_called_with("gemini", secret)
+
+        oversized = self.client.put(
+            "/api/leda/admin/credentials/gemini",
+            data=b'{"secret":"' + b"x" * 30000 + b'"}',
+            content_type="application/json",
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(oversized.status_code, 413)
+
+    def test_credential_family_responses_are_no_store_without_scoping_lookalikes(self) -> None:
+        self.auth.reset_mock()
+        self.credentials.reset_mock()
+        for path in ("/api/leda/admin/credentials", "/api/leda/admin/credentials/gemini"):
+            with self.subTest(path=path):
+                response = self.client.options(path, environ_overrides=self.environ)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+                self.assertNotIn(SECRET, response.get_data(as_text=True))
+        self.auth.read_session.assert_not_called()
+        self.credentials.assert_not_called()
+
+        method_error = self.client.post(
+            "/api/leda/admin/credentials/gemini", environ_overrides=self.environ
+        )
+        self.assertEqual(method_error.status_code, 405)
+        self.assertEqual(method_error.headers.get("Cache-Control"), "no-store")
+        lookalike = self.client.options(
+            "/api/leda/admin/credentials-lookalike", environ_overrides=self.environ
+        )
+        self.assertNotEqual(lookalike.headers.get("Cache-Control"), "no-store")
+
+    def test_channel_a_writes_are_refused_without_a_manager_and_never_touch_the_store(self) -> None:
+        # Approved user decision: a missing Channel A manager refuses save/delete
+        # with a closed 503 instead of falling back to a direct store write.
+        saved = self.client.put(
+            "/api/leda/admin/credentials/telegram_channel_a",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.status_code, 503)
+        self.assertEqual(saved.get_json(), {"ok": False, "error": "LEDA_CHANNEL_A_MANAGER_UNAVAILABLE"})
+        self.assertEqual(saved.headers.get("Cache-Control"), "no-store")
+        self.credentials.set_secret.assert_not_called()
+        self.assertNotIn(SECRET, saved.get_data(as_text=True))
+
+        deleted = self.client.delete(
+            "/api/leda/admin/credentials/telegram_channel_a",
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(deleted.status_code, 503)
+        self.assertEqual(deleted.get_json(), {"ok": False, "error": "LEDA_CHANNEL_A_MANAGER_UNAVAILABLE"})
+        self.assertEqual(deleted.headers.get("Cache-Control"), "no-store")
+        self.credentials.delete_secret.assert_not_called()
+        self.assertEqual(self.telegram_manager.mock_calls, [])
+        # A refused write must never reset a verification result either.
+        self.channel_a_verification.reset.assert_not_called()
+
+    def test_telegram_provider_keeps_the_manager_special_case(self) -> None:
+        self.telegram_manager.delete_secret.return_value = True
+        saved = self.client.put(
+            "/api/leda/admin/credentials/telegram",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram", "configured": True})
+        self.telegram_manager.set_secret.assert_called_once_with(SECRET)
+        self.credentials.set_secret.assert_not_called()
+        # Saving a new Telegram token invalidates any prior verification result.
+        self.telegram_verification.reset.assert_called_once_with()
+        self.gemini_verification.reset.assert_not_called()
+        self.channel_a_verification.reset.assert_not_called()
+        deleted = self.client.delete(
+            "/api/leda/admin/credentials/telegram",
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(deleted.status_code, 204)
+        self.telegram_manager.delete_secret.assert_called_once_with()
+        self.credentials.delete_secret.assert_not_called()
+        self.assertEqual(self.telegram_verification.reset.call_count, 2)
+
+    def test_telegram_save_restarts_the_bot_with_the_new_token(self) -> None:
+        """T10: a saved Telegram credential is applied (restarted) in the same
+        request, so the admin panel never needs a separate explicit apply."""
+        saved = self.client.put(
+            "/api/leda/admin/credentials/telegram",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(
+            self.telegram_manager.mock_calls,
+            [unittest.mock.call.set_secret(SECRET), unittest.mock.call.apply()],
+        )
+
+    def test_telegram_save_response_survives_an_apply_failure(self) -> None:
+        """An apply failure after a successful save must never fail the save
+        response; it stays captured in the manager's own lifecycle status,
+        exactly like startup_apply's non-raising contract."""
+        from leda_runtime.telegram_lifecycle import TelegramLifecycleError
+
+        self.telegram_manager.apply.side_effect = TelegramLifecycleError("TELEGRAM_PROVIDER_UNAVAILABLE")
+
+        saved = self.client.put(
+            "/api/leda/admin/credentials/telegram",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.get_json(), {"ok": True, "provider": "telegram", "configured": True})
+        self.telegram_manager.set_secret.assert_called_once_with(SECRET)
+        self.telegram_manager.apply.assert_called_once_with()
+
+    def test_storage_failures_are_sanitized_and_do_not_leak_secret(self) -> None:
+        self.credentials.set_secret.side_effect = CredentialUnavailable("sensitive path and key detail")
+        response = self.client.put(
+            "/api/leda/admin/credentials/gemini",
+            json={"secret": SECRET},
+            headers=self.headers,
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "CREDENTIAL_STORAGE_UNAVAILABLE"})
+        self.assertNotIn(SECRET, response.get_data(as_text=True))
+        self.assertNotIn("sensitive", response.get_data(as_text=True))
+
+
+class GeminiVerifyHttpTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.auth = Mock()
+        self.credentials = Mock()
+        self.credentials.status.return_value = {"gemini": True, "telegram": False, "telegram_channel_a": False}
+        self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
+        self.auth.read_session.return_value = self.session
+        self.verification = Mock()
+        self.verification.snapshot.return_value = GeminiVerification("not_checked", None)
+        boundary = AdminHttpBoundary(
+            self.auth, credential_service=self.credentials, gemini_verification_service=self.verification
+        )
+        self.client = create_app(
+            JsonFileStore(self.root / "snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        self.client.set_cookie("leda_admin_session", "session-id", path="/api/leda/admin")
+        self.environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+        self.headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf-token"}
+
+    def _verify(self):
+        return self.client.post(
+            "/api/leda/admin/credentials/gemini/verify", headers=self.headers, environ_overrides=self.environ
+        )
+
+    def test_requires_authenticated_session_before_verifying(self) -> None:
+        self.auth.read_session.return_value = None
+        self.auth.was_session_replaced.return_value = False
+        response = self._verify()
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
+        self.verification.verify.assert_not_called()
+
+    def test_requires_origin_and_valid_csrf(self) -> None:
+        missing_origin = self.client.post(
+            "/api/leda/admin/credentials/gemini/verify",
+            headers={"X-CSRF-Token": "csrf-token"},
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(missing_origin.status_code, 403)
+
+        bad_csrf = self.client.post(
+            "/api/leda/admin/credentials/gemini/verify",
+            headers={"Origin": "http://localhost:5173", "X-CSRF-Token": "wrong"},
+            environ_overrides=self.environ,
+        )
+        self.assertEqual(bad_csrf.status_code, 403)
+        self.assertEqual(bad_csrf.get_json()["error"], "CSRF_VALIDATION_FAILED")
+        self.verification.verify.assert_not_called()
+
+    def test_successful_verification_reports_the_gemini_status_shape(self) -> None:
+        self.verification.verify.return_value = GeminiVerification("verified", 123.5)
+        response = self._verify()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "ok": True,
+                "gemini": {
+                    "configured": True,
+                    "verified": True,
+                    "verification": {"state": "verified", "checkedAt": 123.5},
+                    "model": GEMINI_VERIFY_MODEL,
+                },
+            },
+        )
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+
+    def test_invalid_key_and_unreachable_report_without_leaking_provider_text(self) -> None:
+        for state in ("invalid_key", "unreachable", "not_configured"):
+            with self.subTest(state=state):
+                self.verification.verify.return_value = GeminiVerification(state, 1.0)
+                response = self._verify()
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["gemini"]["verification"]["state"], state)
+                self.assertEqual(response.get_json()["gemini"]["verified"], state == "verified")
+
+    def test_concurrent_verification_is_rejected_with_409(self) -> None:
+        self.verification.verify.side_effect = GeminiVerificationInProgress("GEMINI_VERIFICATION_IN_PROGRESS")
+        response = self._verify()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "GEMINI_VERIFICATION_IN_PROGRESS")
+
+    def test_missing_verification_service_fails_closed(self) -> None:
+        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        client = create_app(
+            JsonFileStore(self.root / "unavailable-snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("leda_admin_session", "session-id", path="/api/leda/admin")
+        response = client.post(
+            "/api/leda/admin/credentials/gemini/verify", headers=self.headers, environ_overrides=self.environ
+        )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "GEMINI_VERIFICATION_UNAVAILABLE")
+
+    def test_verify_route_is_no_store_and_never_leaks_a_get_lookalike(self) -> None:
+        self.verification.verify.return_value = GeminiVerification("verified", 1.0)
+        wrong_method = self.client.get(
+            "/api/leda/admin/credentials/gemini/verify", environ_overrides=self.environ
+        )
+        self.assertEqual(wrong_method.status_code, 405)
+
+
+class TelegramFamilyVerifyHttpTests(unittest.TestCase):
+    """Shared scenarios for both Telegram-family verify routes (Channel A and
+    the legacy/"Canal B" bot), parametrized by provider so both channels are
+    proven identical without duplicating the whole test body."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.auth = Mock()
+        self.credentials = Mock()
+        self.credentials.status.return_value = {"gemini": False, "telegram": True, "telegram_channel_a": True}
+        self.session = SimpleNamespace(csrf_token="csrf-token", username="admin")
+        self.auth.read_session.return_value = self.session
+        self.telegram_verification = Mock()
+        self.telegram_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        self.channel_a_verification = Mock()
+        self.channel_a_verification.snapshot.return_value = TelegramTokenVerification("not_checked", None, None)
+        boundary = AdminHttpBoundary(
+            self.auth,
+            credential_service=self.credentials,
+            telegram_verification_service=self.telegram_verification,
+            channel_a_verification_service=self.channel_a_verification,
+        )
+        self.client = create_app(
+            JsonFileStore(self.root / "snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        self.client.set_cookie("leda_admin_session", "session-id", path="/api/leda/admin")
+        self.environ = {"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "localhost"}
+        self.headers = {"Origin": "http://localhost:5173", "X-CSRF-Token": "csrf-token"}
+
+    def _service(self, provider: str) -> Mock:
+        return self.telegram_verification if provider == "telegram" else self.channel_a_verification
+
+    def _route(self, provider: str) -> str:
+        return f"/api/leda/admin/credentials/{provider}/verify"
+
+    def _key(self, provider: str) -> str:
+        return "telegram" if provider == "telegram" else "channelA"
+
+    def _verify(self, provider: str):
+        return self.client.post(self._route(provider), headers=self.headers, environ_overrides=self.environ)
+
+    def test_requires_authenticated_session_before_verifying(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                self.auth.read_session.return_value = None
+                self.auth.was_session_replaced.return_value = False
+                response = self._verify(provider)
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
+                self._service(provider).verify.assert_not_called()
+        self.auth.read_session.return_value = self.session
+
+    def test_requires_origin_and_valid_csrf(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                missing_origin = self.client.post(
+                    self._route(provider), headers={"X-CSRF-Token": "csrf-token"}, environ_overrides=self.environ,
+                )
+                self.assertEqual(missing_origin.status_code, 403)
+                bad_csrf = self.client.post(
+                    self._route(provider),
+                    headers={"Origin": "http://localhost:5173", "X-CSRF-Token": "wrong"},
+                    environ_overrides=self.environ,
+                )
+                self.assertEqual(bad_csrf.status_code, 403)
+                self.assertEqual(bad_csrf.get_json()["error"], "CSRF_VALIDATION_FAILED")
+                self._service(provider).verify.assert_not_called()
+
+    def test_successful_verification_reports_the_configured_state_and_username(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                self._service(provider).verify.return_value = TelegramTokenVerification(
+                    "verified", 123.5, "leda_channel_a_bot",
+                )
+                response = self._verify(provider)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.get_json(),
+                    {
+                        "ok": True,
+                        self._key(provider): {
+                            "configured": True,
+                            "verified": True,
+                            "verification": {
+                                "state": "verified", "checkedAt": 123.5, "username": "leda_channel_a_bot",
+                            },
+                        },
+                    },
+                )
+                self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+
+    def test_invalid_and_unreachable_report_without_leaking_provider_text(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            for state in ("invalid_token", "unreachable", "not_configured"):
+                with self.subTest(provider=provider, state=state):
+                    self._service(provider).verify.return_value = TelegramTokenVerification(state, 1.0, None)
+                    response = self._verify(provider)
+                    self.assertEqual(response.status_code, 200)
+                    body = response.get_json()[self._key(provider)]
+                    self.assertEqual(body["verification"]["state"], state)
+                    self.assertEqual(body["verified"], state == "verified")
+                    self.assertIsNone(body["verification"]["username"])
+
+    def test_concurrent_verification_is_rejected_with_409(self) -> None:
+        for provider, code in (
+            ("telegram", "TELEGRAM_VERIFICATION_IN_PROGRESS"),
+            ("telegram_channel_a", "LEDA_CHANNEL_A_VERIFICATION_IN_PROGRESS"),
+        ):
+            with self.subTest(provider=provider):
+                self._service(provider).verify.side_effect = TelegramTokenVerificationInProgress(code)
+                response = self._verify(provider)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.get_json()["error"], code)
+
+    def test_missing_verification_service_fails_closed(self) -> None:
+        boundary = AdminHttpBoundary(self.auth, credential_service=self.credentials)
+        client = create_app(
+            JsonFileStore(self.root / "unavailable-snapshot.json"), VoiceEventStore(), None, admin_http=boundary
+        ).test_client()
+        client.set_cookie("leda_admin_session", "session-id", path="/api/leda/admin")
+        for provider, code in (
+            ("telegram", "TELEGRAM_VERIFICATION_UNAVAILABLE"),
+            ("telegram_channel_a", "LEDA_CHANNEL_A_VERIFICATION_UNAVAILABLE"),
+        ):
+            with self.subTest(provider=provider):
+                response = client.post(self._route(provider), headers=self.headers, environ_overrides=self.environ)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["error"], code)
+
+    def test_verify_route_is_no_store_and_never_a_get_lookalike(self) -> None:
+        for provider in ("telegram", "telegram_channel_a"):
+            with self.subTest(provider=provider):
+                self._service(provider).verify.return_value = TelegramTokenVerification("verified", 1.0, "bot")
+                wrong_method = self.client.get(self._route(provider), environ_overrides=self.environ)
+                self.assertEqual(wrong_method.status_code, 405)
+
+    def test_verify_never_calls_the_other_channels_service(self) -> None:
+        self.telegram_verification.verify.return_value = TelegramTokenVerification("verified", 1.0, "bot")
+        self._verify("telegram")
+        self.channel_a_verification.verify.assert_not_called()
+
+        self.channel_a_verification.verify.return_value = TelegramTokenVerification("verified", 2.0, "bot")
+        self._verify("telegram_channel_a")
+        self.assertEqual(self.telegram_verification.verify.call_count, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -23,13 +23,13 @@ import {
     type TelegramPassiveHealth,
 } from '../domain';
 
-const AUTH_ROOT = '/api/prisma/admin/auth';
-const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
-const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
-const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
-const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
-const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
-const SHARED_CONFIG_WRITE_ROUTE = '/api/prisma/admin/hmi-config';
+const AUTH_ROOT = '/api/leda/admin/auth';
+const CHANNEL_A_STATUS_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/status';
+const CHANNEL_A_APPLY_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/apply';
+const GEMINI_VERIFY_ROUTE = '/api/leda/admin/credentials/gemini/verify';
+const TELEGRAM_VERIFY_ROUTE = '/api/leda/admin/credentials/telegram/verify';
+const CHANNEL_A_VERIFY_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/verify';
+const SHARED_CONFIG_WRITE_ROUTE = '/api/leda/admin/hmi-config';
 const CSRF_TOKEN_LENGTH = 43;
 export interface AdminLoginOptions {
     signal?: AbortSignal;
@@ -65,18 +65,18 @@ const PUBLIC_ERROR_CODES = new Set([
     'INVALID_TELEGRAM_APPLY_REQUEST',
     'JSON_REQUIRED',
     'LOGIN_RATE_LIMITED',
-    'PRISMA_CHANNEL_A_CONFIGURATION_INVALID',
-    'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
-    'PRISMA_CHANNEL_A_CREDENTIAL_MISSING',
-    'PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
-    'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
-    'PRISMA_CHANNEL_A_MANAGER_BUSY',
-    'PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE',
-    'PRISMA_CHANNEL_A_RESTART_REQUIRED',
-    'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
-    'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS',
-    'PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE',
-    'PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING',
+    'LEDA_CHANNEL_A_CONFIGURATION_INVALID',
+    'LEDA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
+    'LEDA_CHANNEL_A_CREDENTIAL_MISSING',
+    'LEDA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
+    'LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
+    'LEDA_CHANNEL_A_MANAGER_BUSY',
+    'LEDA_CHANNEL_A_MANAGER_UNAVAILABLE',
+    'LEDA_CHANNEL_A_RESTART_REQUIRED',
+    'LEDA_CHANNEL_A_STOP_UNCONFIRMED',
+    'LEDA_CHANNEL_A_VERIFICATION_IN_PROGRESS',
+    'LEDA_CHANNEL_A_VERIFICATION_UNAVAILABLE',
+    'LEDA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING',
     'TELEGRAM_CREDENTIAL_MISSING',
     'TELEGRAM_DISABLED',
     'TELEGRAM_POLL_FAILED',
@@ -243,7 +243,7 @@ export class AdminAuthClient {
 
     async credentialMetadata(signal?: AbortSignal): Promise<CredentialMetadata> {
         return this.protectedOperation(false, signal, async (requestSignal) => {
-            const response = await this.request('/api/prisma/admin/credentials', {
+            const response = await this.request('/api/leda/admin/credentials', {
                 method: 'GET', signal: requestSignal,
             });
             return this.parseResponse(response, parseCredentialMetadata);
@@ -252,7 +252,7 @@ export class AdminAuthClient {
 
     async telegramHealth(signal?: AbortSignal): Promise<TelegramPassiveHealth> {
         return this.protectedOperation(false, signal, async (requestSignal) => {
-            const response = await this.request('/api/prisma/health', { method: 'GET', signal: requestSignal });
+            const response = await this.request('/api/leda/health', { method: 'GET', signal: requestSignal });
             return this.parseResponse(response, parseTelegramPassiveHealth);
         });
     }
@@ -264,7 +264,7 @@ export class AdminAuthClient {
     ): Promise<CredentialMutationResult> {
         validateCredentialSecret(secret);
         return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
-            const response = await this.request(`/api/prisma/admin/credentials/${provider}`, {
+            const response = await this.request(`/api/leda/admin/credentials/${provider}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body: JSON.stringify({ secret }),
@@ -277,7 +277,7 @@ export class AdminAuthClient {
     async deleteCredential(provider: CredentialProvider, signal?: AbortSignal): Promise<void> {
         return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
             try {
-                const response = await this.request(`/api/prisma/admin/credentials/${provider}`, {
+                const response = await this.request(`/api/leda/admin/credentials/${provider}`, {
                     method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken }, signal: requestSignal,
                 });
                 const body = await response.text().catch(() => {
@@ -290,7 +290,7 @@ export class AdminAuthClient {
                 if (error instanceof AdminAuthError && error.status === 409) {
                     const stopUnconfirmed = (provider === 'telegram' && error.code === 'TELEGRAM_STOP_TIMEOUT')
                         || (provider === 'telegram_channel_a'
-                            && error.code === 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED');
+                            && error.code === 'LEDA_CHANNEL_A_STOP_UNCONFIRMED');
                     if (stopUnconfirmed) throw new AdminAuthError(error.code, error.status, true);
                 }
                 throw error;
@@ -314,7 +314,7 @@ export class AdminAuthClient {
 
     async applyTelegram(signal?: AbortSignal): Promise<TelegramAdministrationStatus> {
         return this.protectedOperation(true, signal, async (requestSignal, csrfToken) => {
-            const response = await this.request('/api/prisma/admin/credentials/telegram/apply', {
+            const response = await this.request('/api/leda/admin/credentials/telegram/apply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body: '{}',

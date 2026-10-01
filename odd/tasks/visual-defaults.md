@@ -109,7 +109,7 @@ Only overrides are stored; keys absent or null already equal the code defaults.
     "--color-status-normal": "#29dde0"
   },
   "hmi-color-palette": null,
-  "hmi:prisma-orb-visual-config": {
+  "hmi:leda-orb-visual-config": {
     "rays": 0.45,
     "speed": 1.85,
     "intensity": 0.8,
@@ -128,7 +128,7 @@ Only overrides are stored; keys absent or null already equal the code defaults.
 - Diseño tab: `hmi-theme-fonts` (`--font-size-mono: 11px`) and `hmi-theme-colors` (7 color
   tokens) — defaults live in `index.css` `@theme` AND in `DesignSettingsTab.tsx` DEFAULT_* maps;
   both must agree.
-- Prisma orb visual config (`config/prismaOrb.config.ts` defaults) — included as visual language.
+- Leda orb visual config (`config/ledaOrb.config.ts` defaults) — included as visual language.
 - Loader options and color palette: no overrides stored, nothing to change.
 - Out of scope: non-visual per-origin settings (data connection, temporal settings, HMI name) and
   the theme style (lives on `feat/theme-tab`).

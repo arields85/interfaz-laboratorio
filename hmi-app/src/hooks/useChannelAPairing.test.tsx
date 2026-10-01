@@ -2,7 +2,7 @@
 // The hook source does NOT exist yet: importing it must fail collection, which is the honest
 // observed RED for the later UI gate. No placeholder source and no import catch are used here.
 //
-// Frozen contract under test (tracker `odd/tasks/prisma-channel-a-remote.md`):
+// Frozen contract under test (tracker `odd/tasks/leda-channel-a-remote.md`):
 // - `useChannelAPairing(open: boolean)` -> `{ phase, qr, remainingSeconds }` with local ephemeral
 //   React state ONLY (no TanStack/Zustand, no logs/storage/framework).
 // - `CHANNEL_A_PAIRING_POLL_INTERVAL_MS = 2000`; all pairing requests are single-flight: the
@@ -28,8 +28,8 @@ import {
     useChannelAPairing,
     type ChannelAPairingPhase,
 } from './useChannelAPairing';
-import { PrismaChannelAPairingError } from '../services/prismaChannelAPairing.service';
-import { PrismaStaleSessionResponse } from '../services/prismaSessionClient';
+import { LedaChannelAPairingError } from '../services/ledaChannelAPairing.service';
+import { LedaStaleSessionResponse } from '../services/ledaSessionClient';
 import type {
     ChannelAPairingIssue,
     ChannelAPairingQr,
@@ -50,35 +50,35 @@ const subscribeToResetMock = vi.hoisted(() =>
 );
 // The hook must go through the service boundary; a direct client fetch is a contract defect.
 const sessionFetchMock = vi.hoisted(() =>
-    vi.fn(() => Promise.reject(new Error('useChannelAPairing must not call prismaSessionClient.fetch directly'))),
+    vi.fn(() => Promise.reject(new Error('useChannelAPairing must not call ledaSessionClient.fetch directly'))),
 );
 
-vi.mock('../services/prismaChannelAPairing.service', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../services/prismaChannelAPairing.service')>();
+vi.mock('../services/ledaChannelAPairing.service', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../services/ledaChannelAPairing.service')>();
     return {
         ...actual,
-        prismaChannelAPairing: {
+        ledaChannelAPairing: {
             status: statusMock,
             issue: issueMock,
         },
     };
 });
 
-// Keep the real classes (PrismaStaleSessionResponse identity shared with the hook) and replace
+// Keep the real classes (LedaStaleSessionResponse identity shared with the hook) and replace
 // only the singleton used by the hook for reset subscription; no bootstrap or network request
 // can happen through this fake.
-vi.mock('../services/prismaSessionClient', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../services/prismaSessionClient')>();
+vi.mock('../services/ledaSessionClient', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../services/ledaSessionClient')>();
     return {
         ...actual,
-        prismaSessionClient: {
+        ledaSessionClient: {
             subscribeToReset: subscribeToResetMock,
             fetch: sessionFetchMock,
         },
     };
 });
 
-const BOT_USERNAME = 'PrismaHmiBot';
+const BOT_USERNAME = 'LedaHmiBot';
 const QR_LINK_FIRST = `https://t.me/${BOT_USERNAME}?start=${'A'.repeat(43)}`;
 const QR_LINK_RENEWED = `https://t.me/${BOT_USERNAME}?start=${'B'.repeat(43)}`;
 
@@ -455,7 +455,7 @@ describe('useChannelAPairing', () => {
         // The old generation's late response is ordinary cleanup: a stale rejection stays quiet
         // and its QR can never appear.
         await act(async () => {
-            lateIssue.reject(new PrismaStaleSessionResponse());
+            lateIssue.reject(new LedaStaleSessionResponse());
             for (let tick = 0; tick < 6; tick += 1) {
                 await Promise.resolve();
             }
@@ -499,7 +499,7 @@ describe('useChannelAPairing', () => {
     it('on a POST conflict clears the QR state and refreshes once immediately without re-issuing while free', async () => {
         // The GET never conflicts: the 409 arrives from the first POST issuance.
         statusMock.mockResolvedValue(statusFixture('free'));
-        issueMock.mockRejectedValueOnce(new PrismaChannelAPairingError('conflict'))
+        issueMock.mockRejectedValueOnce(new LedaChannelAPairingError('conflict'))
             .mockResolvedValue(issueFixture(qrFixture(60, QR_LINK_RENEWED)));
 
         const { result } = renderHook(() => useChannelAPairing(true));
@@ -527,7 +527,7 @@ describe('useChannelAPairing', () => {
 
     it('on a pairing error hides the QR, stops polling and only resumes after close and reopen', async () => {
         statusMock.mockResolvedValueOnce(statusFixture('free'))
-            .mockRejectedValue(new PrismaChannelAPairingError('unavailable'));
+            .mockRejectedValue(new LedaChannelAPairingError('unavailable'));
         issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
 
         const { result, rerender } = renderHook(
@@ -566,8 +566,8 @@ describe('useChannelAPairing', () => {
 
     it('on a runtime_unreachable error shows the unreachable phase but keeps polling and recovers when the runtime answers again', async () => {
         statusMock.mockResolvedValueOnce(statusFixture('free'))
-            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable'))
-            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable'))
+            .mockRejectedValueOnce(new LedaChannelAPairingError('runtime_unreachable'))
+            .mockRejectedValueOnce(new LedaChannelAPairingError('runtime_unreachable'))
             .mockResolvedValue(statusFixture('free'));
         issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
 
@@ -597,7 +597,7 @@ describe('useChannelAPairing', () => {
 
     it('carries the port_in_use detail while unreachable and clears it once the runtime answers again', async () => {
         statusMock.mockResolvedValueOnce(statusFixture('free'))
-            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable', { reason: 'port_in_use', port: 5057 }))
+            .mockRejectedValueOnce(new LedaChannelAPairingError('runtime_unreachable', { reason: 'port_in_use', port: 5057 }))
             .mockResolvedValue(statusFixture('free'));
         issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
 
@@ -616,7 +616,7 @@ describe('useChannelAPairing', () => {
 
     it('reports no detail when the runtime_unreachable error carries none', async () => {
         statusMock.mockResolvedValueOnce(statusFixture('free'))
-            .mockRejectedValueOnce(new PrismaChannelAPairingError('runtime_unreachable'))
+            .mockRejectedValueOnce(new LedaChannelAPairingError('runtime_unreachable'))
             .mockResolvedValue(statusFixture('free'));
         issueMock.mockResolvedValue(issueFixture(qrFixture(60)));
 

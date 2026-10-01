@@ -5,9 +5,9 @@ import './index.css'
 import App from './App.tsx'
 import { applySharedConfigToDocument, startSharedConfigReapply } from './app/sharedConfigAppliers'
 import { cleanupLegacyStorage } from './utils/legacyStorageCleanup'
-import { prismaSessionClient } from './services/prismaSessionClient'
+import { ledaSessionClient } from './services/ledaSessionClient'
 import { sharedConfigStorage } from './services/sharedConfigStorage.service'
-import { startPrismaVoiceTimelineDiagnostics } from './services/prismaVoiceTimelineDiagnosticsSink'
+import { startLedaVoiceTimelineDiagnostics } from './services/ledaVoiceTimelineDiagnosticsSink'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,13 +30,13 @@ async function bootstrap(): Promise<void> {
   applySharedConfigToDocument()
   // Another browser's saved change reaches this one within a poll interval and is applied live.
   startSharedConfigReapply({ queryClient })
-  void prismaSessionClient.bootstrap().catch(() => undefined)
+  void ledaSessionClient.bootstrap().catch(() => undefined)
   // T16: registered before the session-reset pagehide listener below, so its
   // own pagehide flush (browser voice timeline diagnostics) runs first --
   // listeners on the same target/event fire in registration order, and once
   // the session resets its capability is gone.
-  startPrismaVoiceTimelineDiagnostics()
-  window.addEventListener('pagehide', () => prismaSessionClient.reset({ keepalive: true }), { once: true })
+  startLedaVoiceTimelineDiagnostics()
+  window.addEventListener('pagehide', () => ledaSessionClient.reset({ keepalive: true }), { once: true })
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

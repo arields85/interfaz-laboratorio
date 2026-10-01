@@ -2,28 +2,28 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 import {
-    PRISMA_ORB_CORE_OPTIONS,
-    PRISMA_ORB_GLOW_OPTIONS,
-    PRISMA_ORB_VISUAL_LIMITS,
-    readPrismaOrbVisualConfig,
-    savePrismaOrbVisualConfig,
-} from '../../config/prismaOrb.config';
+    LEDA_ORB_CORE_OPTIONS,
+    LEDA_ORB_GLOW_OPTIONS,
+    LEDA_ORB_VISUAL_LIMITS,
+    readLedaOrbVisualConfig,
+    saveLedaOrbVisualConfig,
+} from '../../config/ledaOrb.config';
 import {
-    clonePrismaVoiceConfig,
-    validatePrismaVoiceConfig,
-} from '../../domain/prismaVoiceConfig';
-import type { PrismaOrbVisualConfig } from '../../domain/voice.types';
-import { usePrismaVoiceConfigDraft } from '../../hooks/usePrismaVoiceConfigDraft';
-import { usePrismaVoiceConfig } from '../../queries/usePrismaVoiceConfig';
-import { useUpdatePrismaVoiceConfig } from '../../queries/useUpdatePrismaVoiceConfig';
-import PrismaOrb from '../PrismaOrb';
+    cloneLedaVoiceConfig,
+    validateLedaVoiceConfig,
+} from '../../domain/ledaVoiceConfig';
+import type { LedaOrbVisualConfig } from '../../domain/voice.types';
+import { useLedaVoiceConfigDraft } from '../../hooks/useLedaVoiceConfigDraft';
+import { useLedaVoiceConfig } from '../../queries/useLedaVoiceConfig';
+import { useUpdateLedaVoiceConfig } from '../../queries/useUpdateLedaVoiceConfig';
+import LedaOrb from '../LedaOrb';
 import AdminSelect from './AdminSelect';
 import DockColorField from './DockColorField';
 import DockInlineControlRow from './DockInlineControlRow';
 import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
-import PrismaVoiceEffectsSettings from './PrismaVoiceEffectsSettings';
-import PrismaVoicePlaybackBufferSettings from './PrismaVoicePlaybackBufferSettings';
+import LedaVoiceEffectsSettings from './LedaVoiceEffectsSettings';
+import LedaVoicePlaybackBufferSettings from './LedaVoicePlaybackBufferSettings';
 import VoiceCredentialSettings from './VoiceCredentialSettings';
 import HmiNameSettings from './HmiNameSettings';
 import {
@@ -54,7 +54,7 @@ const PREVIEW_BACKDROP_OPTIONS = [
     { value: 'Light panel', label: 'Panel claro' },
 ] satisfies Array<{ value: PreviewBackdrop; label: string }>;
 
-function visualConfigsEqual(left: PrismaOrbVisualConfig, right: PrismaOrbVisualConfig): boolean {
+function visualConfigsEqual(left: LedaOrbVisualConfig, right: LedaOrbVisualConfig): boolean {
     return left.rays === right.rays
         && left.speed === right.speed
         && left.intensity === right.intensity
@@ -69,14 +69,14 @@ export default function VoiceSettingsTab({
     onSaveStatusChange,
     saveRef,
 }: VoiceSettingsTabProps) {
-    const voiceConfigDraft = usePrismaVoiceConfigDraft();
-    const updateVoiceConfig = useUpdatePrismaVoiceConfig();
+    const voiceConfigDraft = useLedaVoiceConfigDraft();
+    const updateVoiceConfig = useUpdateLedaVoiceConfig();
     const [initialSettings] = useState(() => {
         return {
-            visualConfig: readPrismaOrbVisualConfig(),
+            visualConfig: readLedaOrbVisualConfig(),
         };
     });
-    const remoteVoiceConfig = usePrismaVoiceConfig();
+    const remoteVoiceConfig = useLedaVoiceConfig();
     const persistedSettingsRef = useRef({
         visualConfig: initialSettings.visualConfig,
     });
@@ -173,14 +173,14 @@ export default function VoiceSettingsTab({
             return saveInFlightRef.current;
         }
 
-        const voiceConfigSnapshot = clonePrismaVoiceConfig(voiceConfigDraft.draft);
-        const validation = validatePrismaVoiceConfig(voiceConfigSnapshot);
+        const voiceConfigSnapshot = cloneLedaVoiceConfig(voiceConfigDraft.draft);
+        const validation = validateLedaVoiceConfig(voiceConfigSnapshot);
         if (!voiceConfigValidRef.current || !validation.valid) {
             setSaveStatus('error');
             return Promise.resolve();
         }
 
-        const savedVisualConfig = savePrismaOrbVisualConfig(draftVisualConfig);
+        const savedVisualConfig = saveLedaOrbVisualConfig(draftVisualConfig);
         persistedSettingsRef.current = {
             visualConfig: savedVisualConfig,
         };
@@ -236,9 +236,9 @@ export default function VoiceSettingsTab({
         };
     }, [handleSave, saveRef]);
 
-    const updateVisualConfig = <Key extends keyof PrismaOrbVisualConfig>(
+    const updateVisualConfig = <Key extends keyof LedaOrbVisualConfig>(
         key: Key,
-        value: PrismaOrbVisualConfig[Key],
+        value: LedaOrbVisualConfig[Key],
     ) => {
         markPersistentEdit();
         setDraftVisualConfig((current) => ({ ...current, [key]: value }));
@@ -285,17 +285,17 @@ export default function VoiceSettingsTab({
 
             {remoteVoiceConfig.error ? (
                 <p className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4 text-xs text-industrial-muted`} aria-live="polite">
-                    No se pudo cargar la configuración de Prisma. Se mantienen los valores actuales.
+                    No se pudo cargar la configuración de Leda. Se mantienen los valores actuales.
                 </p>
             ) : null}
 
-            <PrismaVoicePlaybackBufferSettings
+            <LedaVoicePlaybackBufferSettings
                 config={voiceConfigDraft.draft.playbackBuffer}
                 onFieldChange={voiceConfigDraft.updatePlaybackBufferField}
                 onEdit={() => markPersistentEdit()}
             />
 
-            <PrismaVoiceEffectsSettings
+            <LedaVoiceEffectsSettings
                 key={voiceConfigDraft.baselineGeneration}
                 config={voiceConfigDraft.draft}
                 onFieldChange={voiceConfigDraft.updateField}
@@ -306,21 +306,21 @@ export default function VoiceSettingsTab({
 
             <section className={`${ADMIN_SIDEBAR_SECTION_CLS} p-4`}>
                 <div className={ADMIN_SIDEBAR_SECTION_HEADER_CLS}>
-                    Prisma · Orbe visual
+                    Leda · Orbe visual
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-[minmax(220px,0.9fr)_minmax(0,1.1fr)]">
                     <div
-                        data-testid="prisma-orb-preview-stage"
+                        data-testid="leda-orb-preview-stage"
                         className={`grid min-h-72 place-items-center overflow-hidden rounded-lg border border-white/10 p-3 transition-colors ${PREVIEW_BACKDROP_CLASSES[backdrop]}`}
                     >
                         <div
-                            data-testid="prisma-orb-preview-size"
-                            className="pointer-events-none size-[min(var(--prisma-orb-size),100%)] shrink-0"
-                            style={{ '--prisma-orb-size': `${draftVisualConfig.size}px` } as CSSProperties}
+                            data-testid="leda-orb-preview-size"
+                            className="pointer-events-none size-[min(var(--leda-orb-size),100%)] shrink-0"
+                            style={{ '--leda-orb-size': `${draftVisualConfig.size}px` } as CSSProperties}
                         >
-                            <div data-testid="prisma-orb-preview" className="size-full">
-                                <PrismaOrb
+                            <div data-testid="leda-orb-preview" className="size-full">
+                                <LedaOrb
                                     config={draftVisualConfig}
                                     speaking={resolvedSpeaking}
                                 />
@@ -333,7 +333,7 @@ export default function VoiceSettingsTab({
                             label="Haces (rays)"
                             ariaLabel="Haces (rays)"
                             value={draftVisualConfig.rays}
-                            {...PRISMA_ORB_VISUAL_LIMITS.rays}
+                            {...LEDA_ORB_VISUAL_LIMITS.rays}
                             onChange={(value) => updateVisualConfig('rays', value)}
                         />
                         <DockToggleField
@@ -358,19 +358,19 @@ export default function VoiceSettingsTab({
                         <DockSliderField
                             label="Velocidad"
                             value={draftVisualConfig.speed}
-                            {...PRISMA_ORB_VISUAL_LIMITS.speed}
+                            {...LEDA_ORB_VISUAL_LIMITS.speed}
                             onChange={(value) => updateVisualConfig('speed', value)}
                         />
                         <DockSliderField
                             label="Intensidad"
                             value={draftVisualConfig.intensity}
-                            {...PRISMA_ORB_VISUAL_LIMITS.intensity}
+                            {...LEDA_ORB_VISUAL_LIMITS.intensity}
                             onChange={(value) => updateVisualConfig('intensity', value)}
                         />
                         <DockSliderField
                             label="Tamaño (px)"
                             value={draftVisualConfig.size}
-                            {...PRISMA_ORB_VISUAL_LIMITS.size}
+                            {...LEDA_ORB_VISUAL_LIMITS.size}
                             onChange={(value) => updateVisualConfig('size', value)}
                         />
                         <DockColorField
@@ -379,7 +379,7 @@ export default function VoiceSettingsTab({
                             hexCode={coreHexCode}
                             alpha={100}
                             showAlpha={false}
-                            options={PRISMA_ORB_CORE_OPTIONS}
+                            options={LEDA_ORB_CORE_OPTIONS}
                             optionsAriaLabel="Colores de núcleo sugeridos"
                             optionAriaLabel={(color) => `Usar color de núcleo ${color}`}
                             invalid={!HEX_CODE_PATTERN.test(coreHexCode)}
@@ -396,7 +396,7 @@ export default function VoiceSettingsTab({
                             hexCode={glowHexCode}
                             alpha={100}
                             showAlpha={false}
-                            options={PRISMA_ORB_GLOW_OPTIONS}
+                            options={LEDA_ORB_GLOW_OPTIONS}
                             optionsAriaLabel="Colores de halo sugeridos"
                             optionAriaLabel={(color) => `Usar color de halo ${color}`}
                             invalid={!HEX_CODE_PATTERN.test(glowHexCode)}
@@ -420,7 +420,7 @@ export default function VoiceSettingsTab({
                                 label="Penetración de haces"
                                 ariaLabel="Penetración de haces"
                                 value={draftVisualConfig.rays}
-                                {...PRISMA_ORB_VISUAL_LIMITS.rays}
+                                {...LEDA_ORB_VISUAL_LIMITS.rays}
                                 onChange={(value) => updateVisualConfig('rays', value)}
                             />
                         ) : null}

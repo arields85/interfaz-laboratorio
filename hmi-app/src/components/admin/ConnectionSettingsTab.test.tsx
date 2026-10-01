@@ -105,9 +105,9 @@ describe('ConnectionSettingsTab activity-series settings', () => {
         expect(onDirtyChange).not.toHaveBeenCalledWith(false);
     });
 
-    it('retires Prisma snapshot export controls without changing industrial telemetry settings', () => {
+    it('retires Leda snapshot export controls without changing industrial telemetry settings', () => {
         localStorage.setItem('hmi:snapshot-export-enabled', 'true');
-        localStorage.setItem('hmi:snapshot-export-endpoint', '/legacy-prisma-snapshot');
+        localStorage.setItem('hmi:snapshot-export-endpoint', '/legacy-leda-snapshot');
         localStorage.setItem('hmi:snapshot-export-interval-ms', '1234');
 
         render(<ConnectionSettingsTab />);
@@ -119,7 +119,7 @@ describe('ConnectionSettingsTab activity-series settings', () => {
         expect(screen.getByLabelText('Endpoint Histórico')).toBeInTheDocument();
         expect(screen.getByLabelText('Endpoint Activity-Series')).toBeInTheDocument();
         expect(localStorage.getItem('hmi:snapshot-export-enabled')).toBe('true');
-        expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('/legacy-prisma-snapshot');
+        expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('/legacy-leda-snapshot');
         expect(localStorage.getItem('hmi:snapshot-export-interval-ms')).toBe('1234');
     });
 });

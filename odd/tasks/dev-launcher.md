@@ -4,17 +4,17 @@
 
 The user's desktop launcher (`C:\Users\Ariel De Simone\Desktop\CoreAnalitycs\CoreAnalitycs.bat`,
 outside the repo, not touched by this task) hardcodes an absolute project path and opens the
-browser after a fixed 3 s delay regardless of whether Prisma/Vite are actually ready. Separately,
-the Prisma startup wait indicator's animated "..." text is grey and dot-based; the user wants an
+browser after a fixed 3 s delay regardless of whether Leda/Vite are actually ready. Separately,
+the Leda startup wait indicator's animated "..." text is grey and dot-based; the user wants an
 orange `| / - \` classic spinner instead. Three independent, bounded tasks:
 
 - **L1** — commit an equivalent launcher inside the repo at `tools/dev-launcher/`, dev-only,
-  excluded from `git archive` and never touched by the hmi-app Vite build or Prisma's own
+  excluded from `git archive` and never touched by the hmi-app Vite build or Leda's own
   packaging/bootstrap scripts.
-- **L2** — `hmi-app/scripts/dev.mjs` opens the browser itself, only once Prisma orchestration has
+- **L2** — `hmi-app/scripts/dev.mjs` opens the browser itself, only once Leda orchestration has
   settled AND the Vite dev server actually answers, behind an opt-in `--open` flag (never on by
   default, so plain `npm run dev` is unchanged).
-- **L3** — `services/prisma-runtime/operations/console-progress.ps1`'s animated wait indicator
+- **L3** — `services/leda-runtime/operations/console-progress.ps1`'s animated wait indicator
   becomes an orange `|/-\` spinner (0.1 s/frame, 0.4 s full cycle) instead of grey animated dots;
   `start-local.ps1`'s `Wait-VoiceReady`/`Wait-PresentationReady` tick it at that cadence.
 
@@ -22,8 +22,8 @@ orange `| / - \` classic spinner instead. Three independent, bounded tasks:
 
 - Never modify the user's actual Desktop `.bat` file — this task produces the in-repo replacement
   and reports what the Desktop shortcut should point to instead; the parent applies that.
-- Never start the real launcher, Prisma runtime, or Vite dev server as part of verification.
-- No change to Prisma's own startup/health-check timeout budget (still 30 attempts) — only the
+- Never start the real launcher, Leda runtime, or Vite dev server as part of verification.
+- No change to Leda's own startup/health-check timeout budget (still 30 attempts) — only the
   spinner's internal tick rate inside each 1 s attempt changes.
 - No change to non-TTY (redirected stdout) wait-indicator behavior — it keeps printing the label
   once, unanimated (existing test-locked contract).
@@ -33,7 +33,7 @@ orange `| / - \` classic spinner instead. Three independent, bounded tasks:
 Strict TDD, per session configuration ("Strict TDD Mode: enabled").
 - JS/TS (`dev.mjs`): `hmi-app`'s vitest (`npx vitest run`), RED observed before implementation.
 - PowerShell (`console-progress.ps1`, `start-local.ps1`): the existing Python `unittest`
-  subprocess-harness style in `services/prisma-runtime/tests/test_runtime_safety.py`, RED observed
+  subprocess-harness style in `services/leda-runtime/tests/test_runtime_safety.py`, RED observed
   before implementation.
 - `tools/dev-launcher/CoreAnalytics.cmd` and its `README.md`: no test harness exists in this repo
   for batch scripts (the pre-existing `bootstrap-local.cmd` has none either) and the script must
@@ -53,8 +53,8 @@ personal Chrome profile/history. `createBrowserOpener` (L2) was redesigned to sp
 directly (never through `cmd /c start`) so a `--user-data-dir` value containing spaces (the
 default does) needs no manual quoting and can never silently fall back to the default profile the
 way an incorrectly quoted `cmd /c start` invocation could. Chrome path, user-data-dir and debug
-port are configurable via `PRISMA_DEV_CHROME_PATH` / `PRISMA_DEV_CHROME_USER_DATA_DIR` /
-`PRISMA_DEV_CHROME_DEBUG_PORT`, defaulting from `%ProgramFiles%`/`%LOCALAPPDATA%` (no
+port are configurable via `LEDA_DEV_CHROME_PATH` / `LEDA_DEV_CHROME_USER_DATA_DIR` /
+`LEDA_DEV_CHROME_DEBUG_PORT`, defaulting from `%ProgramFiles%`/`%LOCALAPPDATA%` (no
 machine-specific absolute path in the repo). A new standalone `tools/dev-launcher/` script opens
 only the control Chrome on the HMI URL (for when the dev server is already running), importing
 `createBrowserOpener` from `hmi-app/scripts/dev.mjs` so the argument-building logic is shared, not
@@ -65,17 +65,17 @@ duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then 
 - [x] L1 — `tools/dev-launcher/CoreAnalytics.cmd` (path derived from `%~dp0`, no hardcoded
       absolute path, master-key env var kept as a default), `tools/dev-launcher/README.md`
       (English), `.gitattributes` marking the folder `export-ignore`; grep evidence that nothing
-      in the hmi-app Vite build or Prisma's own bootstrap/packaging scripts references
+      in the hmi-app Vite build or Leda's own bootstrap/packaging scripts references
       `tools/dev-launcher`. Plus (mid-cycle decision) `tools/dev-launcher/open-control-chrome.mjs`
       + `OpenControlChrome.cmd`, a standalone control-Chrome-only opener sharing
       `createBrowserOpener` from `dev.mjs`.
-- [x] L2 — `dev.mjs` gains an opt-in readiness-triggered browser open: Prisma settling (already
+- [x] L2 — `dev.mjs` gains an opt-in readiness-triggered browser open: Leda settling (already
       ordered before Vite spawns) + an HTTP poll of the Vite dev server URL, raced against Vite
       exiting early; opens the dedicated CONTROL Chrome (mid-cycle decision above), with the
       browser command/spawn and URL injectable for tests; on timeout or Vite exiting first, warns
       instead of opening. TDD: new vitest cases first (RED), then implementation; redone in a
       second RED/GREEN round for the control-Chrome redesign. Opt-in is the
-      `PRISMA_DEV_AUTO_OPEN=1` env var (not a CLI flag, to avoid colliding with Vite's own
+      `LEDA_DEV_AUTO_OPEN=1` env var (not a CLI flag, to avoid colliding with Vite's own
       built-in `--open`).
 - [x] L3 — `console-progress.ps1`'s interactive animation becomes a `| / - \` spinner glyph before
       the label, orange (ANSI truecolor `38;2;255;140;0` when VT is supported, detected once at
@@ -93,7 +93,7 @@ duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then 
 - `cd hmi-app && npx vitest run` — baseline 221 files / 2531 tests passed (recorded below).
 - `npx tsc -b`
 - `npm run lint`
-- `<repo>\services\prisma-runtime\.venv\Scripts\python.exe -m unittest discover -s <worktree>\services\prisma-runtime -p "test_*.py"` — baseline 1532 tests, 2 known env failures (worktree
+- `<repo>\services\leda-runtime\.venv\Scripts\python.exe -m unittest discover -s <worktree>\services\leda-runtime -p "test_*.py"` — baseline 1532 tests, 2 known env failures (worktree
   has no local `.venv`; both failures reference the missing worktree-local interpreter path),
   2 skipped. These 2 are pre-existing/environmental, not caused by this task, and are expected to
   remain exactly the same 2 after L3.
@@ -120,9 +120,9 @@ duplicated. TDD: `createBrowserOpener`'s tests were rewritten first (RED), then 
   found exactly one hit outside `tools/dev-launcher/` itself: a documentation comment in
   `hmi-app/scripts/dev.mjs` naming the standalone tool (the dependency direction is
   `tools/dev-launcher` → `hmi-app/scripts/dev.mjs`, never the reverse) — no functional coupling.
-- `services/prisma-runtime/operations/*.ps1` bootstrap/packaging scripts: the only
+- `services/leda-runtime/operations/*.ps1` bootstrap/packaging scripts: the only
   `Get-ChildItem`/`Copy-Item`/`Compress-Archive` use is `runtime-environment.ps1`'s sweep of stale
-  `prisma_voice_config.json.*.tmp` files under Prisma's own state root — unrelated to `tools/`.
+  `leda_voice_config.json.*.tmp` files under Leda's own state root — unrelated to `tools/`.
 
 ## Closure
 
@@ -158,14 +158,14 @@ Live test (2026-09-27) feedback on L3's orange `|/-\` spinner:
 
 - (a) the label must print in the SAME color as the npm lines above it (the console's own default
   foreground), not orange — remove the ANSI truecolor path and the `DarkYellow` fallback entirely
-  (`console-progress.ps1`'s `Test-PrismaVirtualTerminalSupport` helper and its VT-state script
+  (`console-progress.ps1`'s `Test-LedaVirtualTerminalSupport` helper and its VT-state script
   variables are unused anywhere else in the repo, confirmed by grep, so removed cleanly rather than
   kept dead).
 - (b) replace the `|/-\` spinner with the blinking underscore caret already used elsewhere in the
   HMI ("Cargando_" / `.widget-runtime-state-caret` in `hmi-app/src/index.css`): the label followed
   immediately (no space) by a `_` that alternates visible/hidden at the same 0.6 s cycle / 50% duty
   (~0.3 s each phase). `start-local.ps1`'s existing 100 ms tick (`$tick`, unchanged) means 3 ticks =
-  one phase; `Update-PrismaWaitIndicator` now derives the caret from `[Math]::Floor($FrameIndex / 3)
+  one phase; `Update-LedaWaitIndicator` now derives the caret from `[Math]::Floor($FrameIndex / 3)
   % 2` instead of the old 4-glyph spinner-frame index. The hidden phase overwrites the caret with a
   space (never omits it), so the line length never changes and no stray `_` is ever left behind.
   Overall ~30 s health-check budget, non-TTY (print-once, unanimated) behavior, and clear-on-ready
@@ -174,7 +174,7 @@ Live test (2026-09-27) feedback on L3's orange `|/-\` spinner:
 Route: direct inline (one already-understood file — `console-progress.ps1` — plus its Python test
 file; no cross-cutting design left after L3).
 
-TDD: Strict, same runner as L3 (`services/prisma-runtime/tests/test_runtime_safety.py`, Python
+TDD: Strict, same runner as L3 (`services/leda-runtime/tests/test_runtime_safety.py`, Python
 `unittest` subprocess-harness style). RED observed before implementation.
 
 Checks: same as above (`test_runtime_safety.py`'s progress-indicator tests; full runtime suite
@@ -187,15 +187,15 @@ baseline 1791/1791 modulo the 2 known pre-existing worktree-`.venv` environmenta
   (asserts `"{label}_"`/`"{label} "` prefixes across FrameIndex 0-6 and a constant line length) and
   `test_wait_indicator_uses_orange_ansi_truecolor_around_the_spinner_when_vt_is_supported` into
   `test_wait_indicator_never_applies_any_color_matching_the_npm_output_lines_above_it` (structural:
-  no `ForegroundColor`/`DarkYellow`/`38;2;255;140;0`/`prismaSpinnerFrames`/
-  `Test-PrismaVirtualTerminalSupport` in source; behavioral: no `\x1b` anywhere). Both failed against
-  the pre-fix source for the expected reason: `'| Starting Prisma voic' != 'Starting Prisma voice_'`
+  no `ForegroundColor`/`DarkYellow`/`38;2;255;140;0`/`ledaSpinnerFrames`/
+  `Test-LedaVirtualTerminalSupport` in source; behavioral: no `\x1b` anywhere). Both failed against
+  the pre-fix source for the expected reason: `'| Starting Leda voic' != 'Starting Leda voice_'`
   (old spinner-glyph-before-label output) and `'ForegroundColor' unexpectedly found in <source>`.
-- Fix: `console-progress.ps1` rewritten — removed `Test-PrismaVirtualTerminalSupport`,
-  `$script:prismaSpinnerFrames`, `$script:prismaOrangeAnsiTrueColor`, `$script:prismaAnsiReset`,
-  `$script:prismaVirtualTerminalEnabled` (grep-confirmed unused elsewhere in the repo);
-  `Start-PrismaWaitIndicator`'s non-TTY line and `Update-PrismaWaitIndicator`'s interactive line
-  both drop `-ForegroundColor` entirely. `Update-PrismaWaitIndicator` now computes
+- Fix: `console-progress.ps1` rewritten — removed `Test-LedaVirtualTerminalSupport`,
+  `$script:ledaSpinnerFrames`, `$script:ledaOrangeAnsiTrueColor`, `$script:ledaAnsiReset`,
+  `$script:ledaVirtualTerminalEnabled` (grep-confirmed unused elsewhere in the repo);
+  `Start-LedaWaitIndicator`'s non-TTY line and `Update-LedaWaitIndicator`'s interactive line
+  both drop `-ForegroundColor` entirely. `Update-LedaWaitIndicator` now computes
   `$phase = [Math]::Floor($FrameIndex / 3)`, caret = `'_'` when `$phase % 2 -eq 0` else `' '`, text =
   `"$Label$caret"` padded to the same 40-char width. `start-local.ps1`'s tick loops and comments
   updated to describe the caret instead of the retired spinner (no behavior change — same 100 ms
@@ -211,6 +211,6 @@ baseline 1791/1791 modulo the 2 known pre-existing worktree-`.venv` environmenta
 
 Passed. The launcher opens the control Chrome once ready; the console wait label prints in the
 default foreground color with a trailing blinking caret ("_"); the taskbar/shortcut icon is now a
-monochrome Lucide pyramid, renamed to `tools/dev-launcher/prisma-pyramid.ico` (`b86f2e9`) to bust
+monochrome Lucide pyramid, renamed to `tools/dev-launcher/leda-pyramid.ico` (`b86f2e9`) to bust
 Windows' cached-icon behavior. The user's Desktop shortcut (residual item 3 above) has been
 repointed to the in-repo launcher. No pending work.

@@ -11,7 +11,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Ctrl+Alt+A reveals or hides the users icon and the Prisma control in this browser. Mounted once
+ * Ctrl+Alt+A reveals or hides the users icon and the Leda control in this browser. Mounted once
  * at app level. It is ignored while the user is typing, and it does not collide with the builder's
  * undo/redo (Ctrl+Z / Ctrl+Y), which never use Alt.
  */

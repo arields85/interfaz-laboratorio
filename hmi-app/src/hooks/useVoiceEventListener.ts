@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import { PRISMA_EVENTS_STREAM_URL, PRISMA_EVENTS_URL } from '../config/prismaAssistant.config';
+import { LEDA_EVENTS_STREAM_URL, LEDA_EVENTS_URL } from '../config/ledaAssistant.config';
 import type { VoiceEvent } from '../domain/voice.types';
 import { startVoiceEventListener } from '../services/voiceEventListener.service';
 
@@ -12,8 +12,8 @@ export function useVoiceEventListener(onEvent: (event: VoiceEvent) => void): voi
     }, [onEvent]);
 
     useEffect(() => startVoiceEventListener({
-        url: PRISMA_EVENTS_URL,
-        streamUrl: PRISMA_EVENTS_STREAM_URL,
+        url: LEDA_EVENTS_URL,
+        streamUrl: LEDA_EVENTS_STREAM_URL,
         onEvent: (event) => onEventRef.current(event),
     }), []);
 }

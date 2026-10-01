@@ -28,11 +28,11 @@ const FRESH_SESSION = {
     csrfToken: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE',
 };
 
-const CHANNEL_A_STATUS_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/status';
-const CHANNEL_A_APPLY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/apply';
-const GEMINI_VERIFY_ROUTE = '/api/prisma/admin/credentials/gemini/verify';
-const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
-const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
+const CHANNEL_A_STATUS_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/status';
+const CHANNEL_A_APPLY_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/apply';
+const GEMINI_VERIFY_ROUTE = '/api/leda/admin/credentials/gemini/verify';
+const TELEGRAM_VERIFY_ROUTE = '/api/leda/admin/credentials/telegram/verify';
+const CHANNEL_A_VERIFY_ROUTE = '/api/leda/admin/credentials/telegram_channel_a/verify';
 
 const GEMINI_MODEL = 'gemini-3.1-flash-tts-preview';
 
@@ -55,7 +55,7 @@ const TELEGRAM_VERIFIED = {
     ok: true,
     telegram: {
         configured: true, verified: true,
-        verification: { state: 'verified', checkedAt: 1_700_000_000, username: 'prisma_bot' },
+        verification: { state: 'verified', checkedAt: 1_700_000_000, username: 'leda_bot' },
     },
 } as const;
 
@@ -63,7 +63,7 @@ const CHANNEL_A_VERIFIED = {
     ok: true,
     channelA: {
         configured: true, verified: true,
-        verification: { state: 'verified', checkedAt: 1_700_000_001, username: 'prisma_channel_a_bot' },
+        verification: { state: 'verified', checkedAt: 1_700_000_001, username: 'leda_channel_a_bot' },
     },
 } as const;
 
@@ -78,7 +78,7 @@ const CHANNEL_A_STATUS = {
             phase: 'running', reason: null, quiescent: false, restartRequired: false,
         },
         lastError: null,
-        botUsername: 'prisma_channel_a_bot',
+        botUsername: 'leda_channel_a_bot',
         paired: false,
         retrying: false,
         retryAttempt: 0,
@@ -107,8 +107,8 @@ describe('AdminAuthClient', () => {
         if (this !== undefined && this !== globalThis && this !== window) {
             throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
         }
-        if (path === '/api/prisma/admin/auth/session') return Promise.resolve(jsonResponse(SESSION));
-        if (path === '/api/prisma/admin/auth/login') return Promise.resolve(jsonResponse(FRESH_SESSION));
+        if (path === '/api/leda/admin/auth/session') return Promise.resolve(jsonResponse(SESSION));
+        if (path === '/api/leda/admin/auth/login') return Promise.resolve(jsonResponse(FRESH_SESSION));
         return Promise.reject(new Error(`Unexpected path: ${String(path)}`));
     }
 
@@ -123,8 +123,8 @@ describe('AdminAuthClient', () => {
             absoluteExpiresAt: FRESH_SESSION.absoluteExpiresAt,
         });
         expect(fetchSpy.mock.calls.map(([path]) => path)).toEqual([
-            '/api/prisma/admin/auth/session',
-            '/api/prisma/admin/auth/login',
+            '/api/leda/admin/auth/session',
+            '/api/leda/admin/auth/login',
         ]);
         for (const [, init] of fetchSpy.mock.calls) {
             expect(init).toEqual(expect.objectContaining({
@@ -151,13 +151,13 @@ describe('AdminAuthClient', () => {
 
         await client.login('admin', '  exact password\n', undefined);
 
-        expect(fetcher).toHaveBeenCalledWith('/api/prisma/admin/auth/login', expect.objectContaining({
+        expect(fetcher).toHaveBeenCalledWith('/api/leda/admin/auth/login', expect.objectContaining({
             method: 'POST', credentials: 'same-origin', cache: 'no-store',
             body: JSON.stringify({ username: 'admin', password: '  exact password\n' }),
         }));
         const headers = fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>;
         expect(headers.Origin).toBeUndefined();
-        expect(headers['X-Prisma-Session-Capability']).toBeUndefined();
+        expect(headers['X-Leda-Session-Capability']).toBeUndefined();
     });
 
     it('keeps CSRF private and sends it only on logout', async () => {
@@ -246,7 +246,7 @@ describe('AdminAuthClient', () => {
         }));
         const headers = fetcher.mock.calls[0]?.[1]?.headers as Record<string, string>;
         expect(headers['X-CSRF-Token']).toBeUndefined();
-        expect(headers['X-Prisma-Session-Capability']).toBeUndefined();
+        expect(headers['X-Leda-Session-Capability']).toBeUndefined();
     });
 
     it('applies channel A on its exact route with an empty JSON body and the active private CSRF', async () => {
@@ -273,29 +273,29 @@ describe('AdminAuthClient', () => {
     it('keeps a channel A apply manager-busy failure uncommitted on its exact route', async () => {
         const fetcher = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))
-            .mockResolvedValueOnce(jsonResponse({ ok: false, error: 'PRISMA_CHANNEL_A_MANAGER_BUSY' }, 409));
+            .mockResolvedValueOnce(jsonResponse({ ok: false, error: 'LEDA_CHANNEL_A_MANAGER_BUSY' }, 409));
         const client = new AdminAuthClient(fetcher);
         await client.session();
 
         await expect(client.applyChannelA()).rejects.toMatchObject({
-            code: 'PRISMA_CHANNEL_A_MANAGER_BUSY', status: 409, committed: false,
+            code: 'LEDA_CHANNEL_A_MANAGER_BUSY', status: 409, committed: false,
         });
         expect(fetcher.mock.calls[1]?.[0]).toBe(CHANNEL_A_APPLY_ROUTE);
         expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
     it.each([
-        ['PRISMA_CHANNEL_A_CONFIGURATION_INVALID', 503],
-        ['PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE', 503],
-        ['PRISMA_CHANNEL_A_CREDENTIAL_MISSING', 409],
-        ['PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE', 503],
-        ['PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE', 502],
-        ['PRISMA_CHANNEL_A_RESTART_REQUIRED', 409],
+        ['LEDA_CHANNEL_A_CONFIGURATION_INVALID', 503],
+        ['LEDA_CHANNEL_A_CONFIGURATION_UNAVAILABLE', 503],
+        ['LEDA_CHANNEL_A_CREDENTIAL_MISSING', 409],
+        ['LEDA_CHANNEL_A_CREDENTIAL_UNAVAILABLE', 503],
+        ['LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE', 502],
+        ['LEDA_CHANNEL_A_RESTART_REQUIRED', 409],
         ['TELEGRAM_BOT_IDENTITY_RESERVED', 409],
         ['INVALID_CREDENTIAL_REQUEST', 400],
-        ['PRISMA_CHANNEL_A_MANAGER_BUSY', 409],
-        ['PRISMA_CHANNEL_A_STOP_UNCONFIRMED', 409],
-        ['PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE', 503],
+        ['LEDA_CHANNEL_A_MANAGER_BUSY', 409],
+        ['LEDA_CHANNEL_A_STOP_UNCONFIRMED', 409],
+        ['LEDA_CHANNEL_A_MANAGER_UNAVAILABLE', 503],
     ])('preserves the channel A canonical public code %s with its authoritative status %s', async (code, status) => {
         const fetcher = vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))
@@ -427,7 +427,7 @@ describe('AdminAuthClient', () => {
 
     it.each([
         ['Telegram (Canal B)', 'verifyTelegram', TELEGRAM_VERIFY_ROUTE, 'TELEGRAM_VERIFICATION_IN_PROGRESS'] as const,
-        ['Canal A', 'verifyChannelA', CHANNEL_A_VERIFY_ROUTE, 'PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS'] as const,
+        ['Canal A', 'verifyChannelA', CHANNEL_A_VERIFY_ROUTE, 'LEDA_CHANNEL_A_VERIFICATION_IN_PROGRESS'] as const,
     ])('keeps a concurrent %s verification as an uncommitted 409 failure without leaking provider text', async (
         _label, method, _route, code,
     ) => {
@@ -462,7 +462,7 @@ describe('AdminAuthClient', () => {
         await expect(client.applyTelegram()).rejects.toMatchObject({
             code: 'TELEGRAM_BOT_IDENTITY_RESERVED', status: 409, committed: false,
         });
-        expect(fetcher.mock.calls[1]?.[0]).toBe('/api/prisma/admin/credentials/telegram/apply');
+        expect(fetcher.mock.calls[1]?.[0]).toBe('/api/leda/admin/credentials/telegram/apply');
         expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
             method: 'POST',
             credentials: 'same-origin',
@@ -504,10 +504,10 @@ describe('AdminAuthClient', () => {
         await client.applyTelegram();
 
         expect(fetcher.mock.calls.slice(1).map(([path, init]) => [path, init?.method])).toEqual([
-            ['/api/prisma/admin/credentials', 'GET'],
-            ['/api/prisma/admin/credentials/gemini', 'PUT'],
-            ['/api/prisma/admin/credentials/gemini', 'DELETE'],
-            ['/api/prisma/admin/credentials/telegram/apply', 'POST'],
+            ['/api/leda/admin/credentials', 'GET'],
+            ['/api/leda/admin/credentials/gemini', 'PUT'],
+            ['/api/leda/admin/credentials/gemini', 'DELETE'],
+            ['/api/leda/admin/credentials/telegram/apply', 'POST'],
         ]);
         const put = fetcher.mock.calls[2]?.[1];
         expect(put?.body).toBe(JSON.stringify({ secret }));
@@ -530,7 +530,7 @@ describe('AdminAuthClient', () => {
 
         await expect(client.writeSharedConfig(batch)).resolves.toEqual({ revision: 7 });
         const [path, init] = fetcher.mock.calls[1] ?? [];
-        expect(path).toBe('/api/prisma/admin/hmi-config');
+        expect(path).toBe('/api/leda/admin/hmi-config');
         expect(init?.method).toBe('PUT');
         expect(init?.body).toBe(JSON.stringify(batch));
         expect(init?.headers).toEqual(expect.objectContaining({
@@ -579,7 +579,7 @@ describe('AdminAuthClient', () => {
     it('reads only passive Telegram health metadata from the fixed same-origin route', async () => {
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
             ok: true,
-            service: 'prisma-local-presentation',
+            service: 'leda-local-presentation',
             telegramEnabled: true,
             telegramConfigured: true,
             telegramConnected: false,
@@ -596,7 +596,7 @@ describe('AdminAuthClient', () => {
         await expect(client.telegramHealth()).resolves.toMatchObject({
             enabled: true, configured: true, running: false, lastError: 'TELEGRAM_POLL_FAILED',
         });
-        expect(fetcher).toHaveBeenCalledWith('/api/prisma/health', expect.objectContaining({
+        expect(fetcher).toHaveBeenCalledWith('/api/leda/health', expect.objectContaining({
             method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
         }));
     });
@@ -625,7 +625,7 @@ describe('AdminAuthClient', () => {
         await expect(client.saveCredential('telegram_channel_a', secret)).resolves.toEqual({
             provider: 'telegram_channel_a', configured: true,
         });
-        expect(fetcher.mock.calls[2]?.[0]).toBe('/api/prisma/admin/credentials/telegram_channel_a');
+        expect(fetcher.mock.calls[2]?.[0]).toBe('/api/leda/admin/credentials/telegram_channel_a');
         expect(fetcher.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
             method: 'PUT',
             body: JSON.stringify({ secret }),
@@ -645,7 +645,7 @@ describe('AdminAuthClient', () => {
 
         await expect(client.deleteCredential('telegram_channel_a')).resolves.toBeUndefined();
 
-        expect(fetcher.mock.calls[1]?.[0]).toBe('/api/prisma/admin/credentials/telegram_channel_a');
+        expect(fetcher.mock.calls[1]?.[0]).toBe('/api/leda/admin/credentials/telegram_channel_a');
         expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
             method: 'DELETE',
             credentials: 'same-origin',
@@ -694,18 +694,18 @@ describe('AdminAuthClient', () => {
 
         const channelA = new AdminAuthClient(vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))
-            .mockResolvedValueOnce(conflict('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')));
+            .mockResolvedValueOnce(conflict('LEDA_CHANNEL_A_STOP_UNCONFIRMED')));
         await channelA.session();
         await expect(channelA.deleteCredential('telegram_channel_a')).rejects.toMatchObject({
-            code: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED', status: 409, committed: true,
+            code: 'LEDA_CHANNEL_A_STOP_UNCONFIRMED', status: 409, committed: true,
         });
 
         const telegram = new AdminAuthClient(vi.fn<typeof fetch>()
             .mockResolvedValueOnce(jsonResponse(SESSION))
-            .mockResolvedValueOnce(conflict('PRISMA_CHANNEL_A_STOP_UNCONFIRMED')));
+            .mockResolvedValueOnce(conflict('LEDA_CHANNEL_A_STOP_UNCONFIRMED')));
         await telegram.session();
         await expect(telegram.deleteCredential('telegram')).rejects.toMatchObject({
-            code: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED', status: 409, committed: false,
+            code: 'LEDA_CHANNEL_A_STOP_UNCONFIRMED', status: 409, committed: false,
         });
 
         const channelAWithBCode = new AdminAuthClient(vi.fn<typeof fetch>()
@@ -778,8 +778,8 @@ describe('AdminAuthClient', () => {
         let releaseLogin!: (response: Response) => void;
         const loginResponse = new Promise<Response>((resolve) => { releaseLogin = resolve; });
         const fetcher = vi.fn<typeof fetch>((path) => {
-            if (path === '/api/prisma/admin/auth/login') return loginResponse;
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/login') return loginResponse;
+            if (path === '/api/leda/admin/auth/session') {
                 return Promise.resolve(jsonResponse(reconciledSession));
             }
             return Promise.resolve(new Response(null, { status: 204 }));
@@ -790,13 +790,13 @@ describe('AdminAuthClient', () => {
 
         const login = controller.login('admin', 'password');
         await vi.waitFor(() => expect(fetcher).toHaveBeenCalledWith(
-            '/api/prisma/admin/auth/login', expect.any(Object),
+            '/api/leda/admin/auth/login', expect.any(Object),
         ));
         const exiting = controller.exit();
         releaseLogin(jsonResponse(SESSION));
         await Promise.all([login, exiting]);
 
-        const logoutCalls = fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/logout');
+        const logoutCalls = fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/logout');
         expect(logoutCalls).toHaveLength(1);
         expect((logoutCalls[0]?.[1]?.headers as Record<string, string>)['X-CSRF-Token'])
             .toBe(reconciledSession.csrfToken);
@@ -808,7 +808,7 @@ describe('AdminAuthClient', () => {
         let serverCookie = false;
         let completeServerLogin!: () => void;
         const fetcher = vi.fn<typeof fetch>((path, init) => {
-            if (path === '/api/prisma/admin/auth/login') {
+            if (path === '/api/leda/admin/auth/login') {
                 return new Promise<Response>((_resolve, reject) => {
                     completeServerLogin = () => { serverCookie = true; };
                     init?.signal?.addEventListener('abort', () => {
@@ -816,12 +816,12 @@ describe('AdminAuthClient', () => {
                     }, { once: true });
                 });
             }
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/session') {
                 return Promise.resolve(serverCookie
                     ? jsonResponse(SESSION)
                     : jsonResponse({ ok: false, error: 'AUTHENTICATION_REQUIRED' }, 401));
             }
-            if (path === '/api/prisma/admin/auth/logout') {
+            if (path === '/api/leda/admin/auth/logout') {
                 serverCookie = false;
                 return Promise.resolve(new Response(null, { status: 204 }));
             }
@@ -834,7 +834,7 @@ describe('AdminAuthClient', () => {
 
         const login = controller.login('admin', 'password');
         await vi.waitFor(() => expect(fetcher).toHaveBeenCalledWith(
-            '/api/prisma/admin/auth/login', expect.any(Object),
+            '/api/leda/admin/auth/login', expect.any(Object),
         ));
         await Promise.all([login, controller.exit()]);
 
@@ -867,7 +867,7 @@ describe('AdminAuthClient', () => {
         let loginAttempt = 0;
         let completeAbortedServerLogin!: () => void;
         const fetcher = vi.fn<typeof fetch>((path, init) => {
-            if (path === '/api/prisma/admin/auth/login') {
+            if (path === '/api/leda/admin/auth/login') {
                 loginAttempt += 1;
                 if (loginAttempt === 1) {
                     return new Promise<Response>((_resolve, reject) => {
@@ -880,13 +880,13 @@ describe('AdminAuthClient', () => {
                 serverCookie = 'fresh';
                 return Promise.resolve(jsonResponse(FRESH_SESSION));
             }
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/session') {
                 if (serverCookie === null) {
                     return Promise.resolve(jsonResponse({ ok: false, error: 'AUTHENTICATION_REQUIRED' }, 401));
                 }
                 return Promise.resolve(jsonResponse(serverCookie === 'A' ? SESSION : FRESH_SESSION));
             }
-            if (path === '/api/prisma/admin/auth/logout') {
+            if (path === '/api/leda/admin/auth/logout') {
                 serverCookie = null;
                 return Promise.resolve(new Response(null, { status: 204 }));
             }
@@ -899,7 +899,7 @@ describe('AdminAuthClient', () => {
 
         const login = controller.login('admin', 'password');
         await vi.waitFor(() => expect(fetcher).toHaveBeenCalledWith(
-            '/api/prisma/admin/auth/login', expect.any(Object),
+            '/api/leda/admin/auth/login', expect.any(Object),
         ));
         await Promise.all([login, controller.exit()]);
 
@@ -937,16 +937,16 @@ describe('AdminAuthClient', () => {
     it('keeps an ordinary exact-204 exit signed out without a false error until explicit login', async () => {
         let serverCookie = true;
         const fetcher = vi.fn<typeof fetch>((path) => {
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/session') {
                 return Promise.resolve(serverCookie
                     ? jsonResponse(SESSION)
                     : jsonResponse({ ok: false, error: 'AUTHENTICATION_REQUIRED' }, 401));
             }
-            if (path === '/api/prisma/admin/auth/logout') {
+            if (path === '/api/leda/admin/auth/logout') {
                 serverCookie = false;
                 return Promise.resolve(new Response(null, { status: 204 }));
             }
-            if (path === '/api/prisma/admin/auth/login') {
+            if (path === '/api/leda/admin/auth/login') {
                 serverCookie = true;
                 return Promise.resolve(jsonResponse(FRESH_SESSION));
             }
@@ -982,9 +982,9 @@ describe('AdminAuthClient', () => {
         let releaseOldSession!: (response: Response) => void;
         const oldSession = new Promise<Response>((resolve) => { releaseOldSession = resolve; });
         const fetcher = vi.fn<typeof fetch>((path) => {
-            if (path === '/api/prisma/admin/auth/session') return oldSession;
-            if (path === '/api/prisma/admin/auth/login') return Promise.resolve(jsonResponse(FRESH_SESSION));
-            if (path === '/api/prisma/admin/auth/logout') return Promise.resolve(new Response(null, { status: 204 }));
+            if (path === '/api/leda/admin/auth/session') return oldSession;
+            if (path === '/api/leda/admin/auth/login') return Promise.resolve(jsonResponse(FRESH_SESSION));
+            if (path === '/api/leda/admin/auth/logout') return Promise.resolve(new Response(null, { status: 204 }));
             throw new Error(`Unexpected path: ${String(path)}`);
         });
         const client = new AdminAuthClient(fetcher);
@@ -995,7 +995,7 @@ describe('AdminAuthClient', () => {
 
         const bootstrap = controller.bootstrap();
         await vi.waitFor(() => expect(fetcher).toHaveBeenCalledWith(
-            '/api/prisma/admin/auth/session', expect.any(Object),
+            '/api/leda/admin/auth/session', expect.any(Object),
         ));
         const login = await controller.login('admin', 'password');
         expect(login.ok).toBe(true);
@@ -1006,7 +1006,7 @@ describe('AdminAuthClient', () => {
 
         expect(state.get().session.isAuthenticated).toBe(true);
         await client.logout();
-        const logoutCall = fetcher.mock.calls.find(([path]) => path === '/api/prisma/admin/auth/logout');
+        const logoutCall = fetcher.mock.calls.find(([path]) => path === '/api/leda/admin/auth/logout');
         expect((logoutCall?.[1]?.headers as Record<string, string>)['X-CSRF-Token'])
             .toBe(FRESH_SESSION.csrfToken);
     });
@@ -1022,9 +1022,9 @@ describe('AdminAuthClient', () => {
             };
         });
         const fetcher = vi.fn<typeof fetch>((path) => {
-            if (path === '/api/prisma/admin/auth/session') return Promise.resolve(jsonResponse(SESSION));
-            if (path === '/api/prisma/admin/auth/logout') return pendingLogout;
-            if (path === '/api/prisma/admin/auth/login') {
+            if (path === '/api/leda/admin/auth/session') return Promise.resolve(jsonResponse(SESSION));
+            if (path === '/api/leda/admin/auth/logout') return pendingLogout;
+            if (path === '/api/leda/admin/auth/login') {
                 serverCookie = true;
                 return Promise.resolve(jsonResponse(FRESH_SESSION));
             }
@@ -1038,11 +1038,11 @@ describe('AdminAuthClient', () => {
 
         const bootstrap = controller.bootstrap();
         await vi.waitFor(() => expect(fetcher.mock.calls.some(
-            ([path]) => path === '/api/prisma/admin/auth/logout',
+            ([path]) => path === '/api/leda/admin/auth/logout',
         )).toBe(true));
         const login = controller.login('admin', 'password');
         await Promise.resolve();
-        expect(fetcher.mock.calls.some(([path]) => path === '/api/prisma/admin/auth/login')).toBe(false);
+        expect(fetcher.mock.calls.some(([path]) => path === '/api/leda/admin/auth/login')).toBe(false);
 
         releaseLogout();
         await bootstrap;
@@ -1052,7 +1052,7 @@ describe('AdminAuthClient', () => {
         expect(serverCookie).toBe(true);
         expect(state.get().session.isAuthenticated).toBe(true);
         await client.logout();
-        const logoutCalls = fetcher.mock.calls.filter(([path]) => path === '/api/prisma/admin/auth/logout');
+        const logoutCalls = fetcher.mock.calls.filter(([path]) => path === '/api/leda/admin/auth/logout');
         expect((logoutCalls.at(-1)?.[1]?.headers as Record<string, string>)['X-CSRF-Token'])
             .toBe(FRESH_SESSION.csrfToken);
     });

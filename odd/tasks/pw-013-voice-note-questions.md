@@ -1,13 +1,13 @@
 # PW-013 — voice-note questions on both channels — ODD feature document
 
 > ODD feature task (not SDD). Created 2026-09-24. Index row: PW-013 (`docs/PENDING_WORK.md`,
-> `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §6.3). Branch `feat/pw-013-voice-note-questions` from
-> `feat/prisma-channel-b-voice-replies` at `7da1131` (already contains B1/B1c/B1b Channel B voice
+> `docs/leda/LEDA_DOCUMENTO_MAESTRO.md` §6.3). Branch `feat/pw-013-voice-note-questions` from
+> `feat/leda-channel-b-voice-replies` at `7da1131` (already contains B1/B1c/B1b Channel B voice
 > replies). Worktree: `D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\pw-013`.
 
 ## Objective
 
-A person can ask Prisma a question by sending a Telegram voice note, on **both** channels (A —
+A person can ask Leda a question by sending a Telegram voice note, on **both** channels (A —
 dedicated HMI bot — and B — personal remote bot), instead of only typing. The note is transcribed
 and answered exactly as if the transcript had been typed: no echo of the transcript is sent back,
 and the answer goes through the same downstream path typed text already uses on each channel
@@ -40,7 +40,7 @@ existing text/voice-reply delivery).
 
 ## Architecture
 
-- `services/prisma-runtime/src/prisma_runtime/voice_transcription.py` (new, shared by both bots):
+- `services/leda-runtime/src/leda_runtime/voice_transcription.py` (new, shared by both bots):
   duration/size limits, the domain-vocabulary prompt builder, the `transcribe_voice_note(client,
   audio_bytes, mime_type, extra_terms=...)` Gemini call, the closed exception hierarchy, and the
   Spanish user-facing failure copy.
@@ -52,7 +52,7 @@ existing text/voice-reply delivery).
   bots run) — mirrors the existing Channel B voice-**reply** design (B1): presentation mints a
   single-use bearer token (new `VoiceEventStore` table, `mint_voice_transcription_token`/
   `resolve_voice_transcription_token`), POSTs it to a new voice-process route
-  (`/internal/prisma/voice-transcription`), which resolves the token back via one loopback GET to a
+  (`/internal/leda/voice-transcription`), which resolves the token back via one loopback GET to a
   new presentation-process route of the same name, decodes the audio, calls Gemini, and returns the
   transcript **synchronously** in the POST response (unlike B1's fire-and-forget voice-reply route,
   this call's caller needs the transcript back to continue answering).
@@ -61,8 +61,8 @@ existing text/voice-reply delivery).
 
 - Mode: **strict TDD enabled** (source: session configuration "Strict TDD Mode: enabled").
 - Runner (from the worktree, using the main checkout's interpreter):
-  `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m
-  unittest discover -s services/prisma-runtime -p "test_*.py"`. Baseline verified 2026-09-24:
+  `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\leda-runtime\.venv\Scripts\python.exe -m
+  unittest discover -s services/leda-runtime -p "test_*.py"`. Baseline verified 2026-09-24:
   **1576 tests, 2 pre-existing failures (worktree-local `.venv` missing — expected, reported
   separately, not touched by this task), 2 skipped.**
 - HMI suite only if `hmi-app` is touched (not expected for this backend-only task).
@@ -76,8 +76,8 @@ existing text/voice-reply delivery).
   `resolve_voice_transcription_token` (single-use, own TTL/capacity, mirrors
   `mint_channel_b_reply_token`). Route: direct inline.
 - [x] **V3 — Internal transcription routes.** New route on voice (5056):
-  `POST /internal/prisma/voice-transcription`. New route on presentation (5057):
-  `GET /internal/prisma/voice-transcription`. Plus the presentation-side synchronous request helper.
+  `POST /internal/leda/voice-transcription`. New route on presentation (5057):
+  `GET /internal/leda/voice-transcription`. Plus the presentation-side synchronous request helper.
   Route: delegated writer (multi-file: `voice_service.py`, `local_presentation.py`, tests).
 - [x] **V4 — Channel A integration.** `channel_a_transport.py` (`get_file`/`download_file`),
   `channel_a_bot.py` (`enable_voice_notes`, `_handle_voice_note`, protocol widening),
@@ -86,7 +86,7 @@ existing text/voice-reply delivery).
 - [x] **V5 — Channel B integration.** `local_presentation.py` (`TelegramLocalBot._handle_message`
   voice branch, `_transcribe_voice_note`). Route: delegated writer (same pass as V3/V4 — one writer
   thread, not re-delegated per file).
-- [x] **V6 — Documentation.** `docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md` §1/§1.1/§6.3 updated to say
+- [x] **V6 — Documentation.** `docs/leda/LEDA_DOCUMENTO_MAESTRO.md` §1/§1.1/§6.3 updated to say
   both channels now receive voice-note questions. Route: inline.
   **Done 2026-09-24** — see Evidence below for all of V1-V6.
 
@@ -162,7 +162,7 @@ it will not crash, but voice-note questions will not work until the id is correc
 - **The 2 pre-existing failures** (`test_python_environment.py::test_real_missing_import_is_
   normalized_to_bootstrap_remedy_under_stop_preference`, `test_runtime_safety.py::
   test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`) both fail because this
-  worktree has no `.venv` under `services/prisma-runtime/` of its own — they spawn a subprocess with
+  worktree has no `.venv` under `services/leda-runtime/` of its own — they spawn a subprocess with
   the repository-owned interpreter path, which only exists in the main checkout. Pre-existing,
   unrelated to this task, not touched.
 
@@ -213,8 +213,8 @@ it will not crash, but voice-note questions will not work until the id is correc
 - Direction/architecture decision: unlike Channel B's fire-and-forget voice-**reply** route (B1),
   this call is synchronous — presentation needs the transcript back to keep answering. Presentation
   downloads/bounds the audio, mints a token (`mint_voice_transcription_token`), POSTs it (bearer-only
-  body) to voice's new `POST /internal/prisma/voice-transcription`; voice resolves it back via one
-  loopback `GET /internal/prisma/voice-transcription` on presentation
+  body) to voice's new `POST /internal/leda/voice-transcription`; voice resolves it back via one
+  loopback `GET /internal/leda/voice-transcription` on presentation
   (`_resolve_voice_transcription_payload`), decodes the audio, calls `get_gemini_client()` +
   `transcribe_voice_note(...)`, and returns `{"ok": true, "transcript": "..."}` directly in the
   original POST's response (`voice_transcription()` route) — presentation's own
@@ -224,7 +224,7 @@ it will not crash, but voice-note questions will not work until the id is correc
   `MAX_VOICE_NOTE_FILE_SIZE_BYTES` (~4/3 base64 expansion + margin).
 - The new presentation route was added to the existing `Cache-Control: no-store` set in
   `add_local_cors` (GGA caught this was missing on first commit — fixed in `171eb04`, with a new
-  test; the pre-existing `/internal/prisma/channel-b/voice-reply` route still lacks it, left
+  test; the pre-existing `/internal/leda/channel-b/voice-reply` route still lacks it, left
   unchanged — out of this task's authorized scope).
 - RED evidence: 10 new/changed test failures across `test_voice_service.py` (`AttributeError`/404 —
   route and helper functions did not exist) and `test_local_presentation.py` (404 on the new GET
@@ -306,7 +306,7 @@ it will not crash, but voice-note questions will not work until the id is correc
   new regression test `test_an_empty_downloaded_file_replies_and_never_raises` (66/66 green after).
 - Commits: `9bd03c9`, `be15b9f`, `e4de079`.
 
-### V6 — documentation (`docs/prisma/PRISMA_DOCUMENTO_MAESTRO.md`)
+### V6 — documentation (`docs/leda/LEDA_DOCUMENTO_MAESTRO.md`)
 
 - §1.1 rows "Canal A — QR/status y panel manual" and "Canal B — Telegram autónomo": both now note
   voice-note questions are implemented offline as of 2026-09-24 (PW-013), live test pending.
@@ -344,18 +344,18 @@ tracked under PW-003.
 
 ## Integration
 
-Rebased onto `fix/pw-011-prisma-minor-followups` (main + PW-011), using
-`git rebase --onto fix/pw-011-prisma-minor-followups 7da1131` so only PW-013's own 20 commits
+Rebased onto `fix/pw-011-leda-minor-followups` (main + PW-011), using
+`git rebase --onto fix/pw-011-leda-minor-followups 7da1131` so only PW-013's own 20 commits
 (everything after `7da1131`) replayed — the Channel B commits already present on `main` were not
 re-applied. New tip: `51dd0eb`.
 
-One conflicting commit: `95c0e27` (`feat(prisma-voice-notes): thread transcribe through
+One conflicting commit: `95c0e27` (`feat(leda-voice-notes): thread transcribe through
 ChannelAActivation (V4c)`), touching:
-- `services/prisma-runtime/src/prisma_runtime/channel_a_activation.py` — both sides added a new
+- `services/leda-runtime/src/leda_runtime/channel_a_activation.py` — both sides added a new
   keyword-only constructor parameter (PW-011's `sweep_interval_seconds`/`sweep_timer_factory` for
   the periodic housekeeping sweep, PW-013's `transcribe` for voice-note transcription). Resolved by
   keeping all three parameters.
-- `services/prisma-runtime/tests/test_channel_a_activation.py` — the `activate()` test helper had
+- `services/leda-runtime/tests/test_channel_a_activation.py` — the `activate()` test helper had
   the same two-sided parameter addition (`sweep_timer_factory` vs `transcribe`). Resolved by keeping
   both parameters on the helper signature and forwarding both to the real constructor call.
 
@@ -368,7 +368,7 @@ active-screen/FIFO voice-reply queue and PW-013's `_transcribe_voice_note` path 
 that omitted it, so no test update was needed there).
 
 Checks after rebase:
-- Runtime suite (`python -m unittest discover -s services/prisma-runtime -p "test_*.py"`): 1730
+- Runtime suite (`python -m unittest discover -s services/leda-runtime -p "test_*.py"`): 1730
   tests, 2 failures, 2 skipped. Same known environment-only cases as PW-011 (worktree-local `.venv`
   missing), not caused by the rebase.
 - hmi-app: `node_modules` was missing in this worktree, ran `npm ci` first (343 packages).
@@ -376,6 +376,6 @@ Checks after rebase:
 - hmi-app `npx tsc -b`: clean, no output.
 - hmi-app `npm run lint`: clean, no findings.
 
-`feat/pw-013-voice-note-questions` is confirmed a descendant of `fix/pw-011-prisma-minor-followups`
-(`git merge-base --is-ancestor fix/pw-011-prisma-minor-followups HEAD` succeeds), which is itself a
+`feat/pw-013-voice-note-questions` is confirmed a descendant of `fix/pw-011-leda-minor-followups`
+(`git merge-base --is-ancestor fix/pw-011-leda-minor-followups HEAD` succeeds), which is itself a
 descendant of `main`.

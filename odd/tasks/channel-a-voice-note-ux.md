@@ -31,7 +31,7 @@ HMI. Channel B feels faster only because its text reply arrives first.
 `channel_a_on_outcome` (`local_presentation.py`) calls `voice_events.publish(...)` **first**, and
 only **after** it returns does it call `mint_prefetch_token(...)` + `_fire_channel_a_voice_prefetch`
 (which spawns a background thread that itself still has to reach the voice process over HTTP). This
-means the HMI is told about the new event (and can immediately POST `/prisma/speak-live`, a single
+means the HMI is told about the new event (and can immediately POST `/leda/speak-live`, a single
 local hop once notified) strictly *before* the prefetch has even been dispatched — a real ordering
 defect, not a fundamental race: whichever request reaches `AudioCoordinator.subscribe()` first
 creates the generation job; the other attaches to it (confirmed already covered by
@@ -49,20 +49,20 @@ Reuse the existing per-owner voice-event channel (SSE + polling fallback, `Voice
 `"thinking"` (no answer, sent the moment `_handle_voice_note` confirms phone-to-owner authorization,
 before any duration/size check or download) and `"cancel"` (sent when the note is rejected/fails, so
 the orb can hide immediately instead of waiting out the bounded timeout). Absent `kind` means
-`"answer"` (every existing event, unchanged). `/prisma/speak-live` and `/internal/prisma/prefetch`
+`"answer"` (every existing event, unchanged). `/leda/speak-live` and `/internal/leda/prefetch`
 reject a non-answer-kind event id with 400 `INVALID_VOICE_EVENT_REQUEST` before ever reaching
 `AudioCoordinator.subscribe()` — a thinking/cancel event must never be able to trigger TTS.
 
-Frontend (`usePrismaOrbPresentation.ts`): `presentVoiceEvent` branches on `event.kind`. A `thinking`
+Frontend (`useLedaOrbPresentation.ts`): `presentVoiceEvent` branches on `event.kind`. A `thinking`
 event, when no answer is currently active (`isActiveRef` false), shows the existing `'thinking'` phase
-and starts a new bounded `PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS` wait for the real answer; if nothing
+and starts a new bounded `LEDA_ORB_THINKING_SIGNAL_TIMEOUT_MS` wait for the real answer; if nothing
 arrives, the orb returns to `'hidden'` (no fade — nothing ever played). A `cancel` event, while
 awaiting an answer, clears that wait and hides immediately. Either kind is a no-op while an answer is
 currently active/playing (`isActiveRef` true) — per the user's explicit requirement, a thinking signal
 must never abort an answer in progress; a *real* answer arriving while active still queues, unchanged
 (V3, `fix/voice-overlap`).
 
-`PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS` chosen at 30 000 ms: comfortably above
+`LEDA_ORB_THINKING_SIGNAL_TIMEOUT_MS` chosen at 30 000 ms: comfortably above
 `VOICE_TRANSCRIPTION_REQUEST_TIMEOUT_SECONDS = 25` s (the backend's own worst-case ceiling for the
 download+transcribe round trip), so the orb is never hidden out from under a transcription that is
 still legitimately in flight, while still bounded per the requirement.
@@ -75,9 +75,9 @@ existing hook point for it and adding one is new wiring, not free, so per the ex
 ## TDD
 
 Strict TDD: enabled (source: session configuration "Strict TDD Mode: enabled").
-Runner (prisma-runtime, worktree-scoped):
-`D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m
-unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\voice-ux\services\prisma-runtime -p "test_*.py"`.
+Runner (leda-runtime, worktree-scoped):
+`D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\leda-runtime\.venv\Scripts\python.exe -m
+unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\voice-ux\services\leda-runtime -p "test_*.py"`.
 Runner (hmi-app, worktree-scoped): `cd hmi-app && npx vitest run` / `npx tsc -b` / `npm run lint`.
 
 Baseline (worktree, before changes, 2026-09-25): full runtime suite **1772 tests, 2 pre-existing
@@ -99,8 +99,8 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
   `channel_a_bot.py` (`enable_voice_notes(notify_thinking=..., notify_cancelled=...)`,
   `_handle_voice_note`), `channel_a_activation.py` (thread both through), `local_presentation.py`
   (`build_channel_a_activation` wiring), `voice.types.ts`, `voiceEventListener.service.ts`,
-  `usePrismaOrbPresentation.ts`, and each file's tests. Route: delegated-writer-equivalent scope
-  (multi-file, behavior-changing, across both `services/prisma-runtime` and `hmi-app`) done as one
+  `useLedaOrbPresentation.ts`, and each file's tests. Route: delegated-writer-equivalent scope
+  (multi-file, behavior-changing, across both `services/leda-runtime` and `hmi-app`) done as one
   continuous writer pass by this bounded agent (no sub-delegation available to it).
 
 ## Acceptance criteria
@@ -111,8 +111,8 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
   explicit cancel signal.
 - A thinking/cancel signal never aborts an answer currently playing; a real answer arriving while one
   is active still queues, unchanged from `fix/voice-overlap`.
-- A thinking/cancel event id can never be used to trigger TTS via `/prisma/speak-live` or
-  `/internal/prisma/prefetch`.
+- A thinking/cancel event id can never be used to trigger TTS via `/leda/speak-live` or
+  `/internal/leda/prefetch`.
 - The Channel A prefetch is always dispatched before the owner's SSE/poll waiter is notified of the
   new answer event.
 - Runtime suite green (2 known pre-existing worktree-`.venv` environmental failures acceptable,
@@ -146,7 +146,7 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
   `publish()`; absent/`"answer"` never adds the key (verified: `test_the_default_answer_kind_never_adds_a_kind_key`).
   RED confirmed by temporarily reverting the file: `TypeError: publish() got an unexpected keyword
   argument 'kind'` on all 4 new tests.
-- **`voice_service.py`** — `/prisma/speak-live` and `/internal/prisma/prefetch` both reject
+- **`voice_service.py`** — `/leda/speak-live` and `/internal/leda/prefetch` both reject
   `event.get("kind", "answer") != "answer"` as `INVALID_VOICE_EVENT_REQUEST` (400) before ever calling
   `audio_coordinator.subscribe()`. RED: `coordinator.subscribe.assert_not_called()` failed (`Called 2
   times`) before the guard existed. GREEN: `test_voice_service.py` (90 tests).
@@ -174,20 +174,20 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
   the 3 new `test_runtime_safety.py` tests (production-wiring + both closures' actual publish
   behavior). GREEN: `test_runtime_safety.py` (56 tests, was 53, 1 known pre-existing environmental
   failure unrelated).
-- **Frontend (`voice.types.ts`, `voiceEventListener.service.ts`, `usePrismaOrbPresentation.ts`)** —
+- **Frontend (`voice.types.ts`, `voiceEventListener.service.ts`, `useLedaOrbPresentation.ts`)** —
   `VoiceEvent.kind?: 'thinking' | 'cancel'` (absent means answer); `normalizeVoiceEvent` passes through
   a recognized kind and drops an unrecognized one without rejecting the event (RED:
   `voiceEventListener.service.test.ts`'s new "passes through a thinking/cancel kind" test failed —
   `kind` field missing from the received payload — before the parser change; GREEN after, 39 tests).
-  `usePrismaOrbPresentation.ts`'s `presentVoiceEvent` branches on `event.kind`: `"thinking"` shows the
+  `useLedaOrbPresentation.ts`'s `presentVoiceEvent` branches on `event.kind`: `"thinking"` shows the
   `'thinking'` phase without calling `engine.play()` and starts a new bounded
-  `PRISMA_ORB_THINKING_SIGNAL_TIMEOUT_MS` (30 000 ms) wait for the real answer, returning to `'hidden'`
+  `LEDA_ORB_THINKING_SIGNAL_TIMEOUT_MS` (30 000 ms) wait for the real answer, returning to `'hidden'`
   if nothing follows; `"cancel"` clears that wait and hides immediately; either kind is a no-op while
   an answer is currently active (`isActiveRef`). RED confirmed: 4 of 8 new hook tests failed before the
   change (`engine.play` called for a thinking-kind event; phase stuck at `'thinking'` instead of
   reaching `'hidden'` on timeout/cancel) — the other 4 (queueing/no-abort-while-active tests) already
   passed by coincidence of the pre-existing queue mechanism, confirmed as a legitimate regression guard
-  rather than a false RED. GREEN after: `usePrismaOrbPresentation.test.ts` (34 tests, was 27).
+  rather than a false RED. GREEN after: `useLedaOrbPresentation.test.ts` (34 tests, was 27).
 
 ### Full verification (after both tasks)
 
@@ -203,7 +203,7 @@ pre-existing, not touched), 2 skipped. hmi-app `npx vitest run`: 221 files / 257
 - 2026-09-25: read-only investigation (AGENTS.md, docs/CONVENTIONS.md, docs/TESTING.md, the three
   referenced PW/voice-overlap feature documents; `voice_events.py`, `local_presentation.py`,
   `voice_service.py`, `event_audio.py`, `channel_a_bot.py`, `channel_a_activation.py`,
-  `voiceEventListener.service.ts`, `usePrismaOrbPresentation.ts`) confirmed U2's root cause (notify
+  `voiceEventListener.service.ts`, `useLedaOrbPresentation.ts`) confirmed U2's root cause (notify
   fires inside `publish()` before the prefetch is even minted) and designed U1's `kind`-discriminated
   signal event. Feature document created before the first source edit.
 - 2026-09-25: U2 and U1 implemented and verified (strict TDD throughout; every RED independently

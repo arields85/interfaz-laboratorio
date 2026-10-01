@@ -41,20 +41,20 @@ vi.mock('./ShaderSettingsPanel', () => ({
     default: () => null,
 }));
 
-// Isolation mock only: the real control is covered by PrismaPairingControl.test.tsx. The fake
+// Isolation mock only: the real control is covered by LedaPairingControl.test.tsx. The fake
 // is never rendered unconditionally at the root — it only appears where Topbar itself mounts
 // the control, so an un-integrated source fails the wiring assertions below instead of
 // passing through the mock.
-vi.mock('./PrismaPairingControl', () => ({
+vi.mock('./LedaPairingControl', () => ({
     default: () => (
         <button
             type="button"
-            aria-label="Prisma"
-            title="Prisma"
+            aria-label="Leda"
+            title="Leda"
             aria-haspopup="dialog"
             aria-expanded="false"
         >
-            Prisma
+            Leda
         </button>
     ),
 }));
@@ -413,33 +413,33 @@ describe('Topbar', () => {
         document.removeEventListener(SHIELD_REVEAL_REQUEST_EVENT, revealRequestSpy as EventListener);
     });
 
-    it('does not expose the retired Prisma Local indicator for legacy storage or query state', () => {
-        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
-        renderTopbar('/?prismaMode=local');
+    it('does not expose the retired Leda Local indicator for legacy storage or query state', () => {
+        localStorage.setItem('hmi:leda-runtime-mode', 'local');
+        renderTopbar('/?ledaMode=local');
 
-        expect(screen.queryByRole('status', { name: 'PRISMA LOCAL' })).not.toBeInTheDocument();
-        expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('local');
+        expect(screen.queryByRole('status', { name: 'LEDA LOCAL' })).not.toBeInTheDocument();
+        expect(localStorage.getItem('hmi:leda-runtime-mode')).toBe('local');
     });
 
-    it('places the Prisma pairing control immediately after Logs in the Core Topbar nav', () => {
+    it('places the Leda pairing control immediately after Logs in the Core Topbar nav', () => {
         renderTopbar('/explorer');
 
-        const prismaButton = screen.queryByRole('button', { name: 'Prisma' });
+        const ledaButton = screen.queryByRole('button', { name: 'Leda' });
         const logsButton = screen.getByRole('button', { name: 'Logs' });
 
         // Soft assertions keep BOTH wiring failures observable while the control is not yet
         // integrated. The unchanged Logs behavior is asserted first and must keep passing.
         expect.soft(logsButton).toBeDisabled();
-        expect.soft(prismaButton, 'the pairing control must render in the Core Topbar nav').not.toBeNull();
-        expect.soft(logsButton.nextElementSibling).toContainElement(prismaButton);
+        expect.soft(ledaButton, 'the pairing control must render in the Core Topbar nav').not.toBeNull();
+        expect.soft(logsButton.nextElementSibling).toContainElement(ledaButton);
     });
 
-    it('keeps the Prisma pairing control out of the EPPI route', () => {
+    it('keeps the Leda pairing control out of the EPPI route', () => {
         renderTopbar('/eppi/orders');
 
         // EPPI never mounts the Core pairing control; the component owns its open state
         // locally, so leaving EPPI unmounts it and nothing is persisted or auto-reopened.
-        expect(screen.queryByRole('button', { name: 'Prisma' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Leda' })).not.toBeInTheDocument();
         expect(screen.getByRole('navigation', { name: 'Navegación EPPI' })).toBeInTheDocument();
     });
 
@@ -448,11 +448,11 @@ describe('Topbar', () => {
             setHiddenAccessRevealed(false);
         });
 
-        it('shows neither the users icon nor the Prisma control by default', () => {
+        it('shows neither the users icon nor the Leda control by default', () => {
             renderTopbar('/explorer');
 
             expect(screen.queryByTitle('Usuario')).not.toBeInTheDocument();
-            expect(screen.queryByRole('button', { name: 'Prisma' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Leda' })).not.toBeInTheDocument();
         });
 
         it('shows both after Ctrl+Alt+A, hides them on the second press and remembers the state in this browser', () => {
@@ -465,12 +465,12 @@ describe('Topbar', () => {
 
             fireEvent.keyDown(document.body, REVEAL_COMBINATION);
             expect(screen.getByTitle('Usuario')).toBeInTheDocument();
-            expect(screen.getByRole('button', { name: 'Prisma' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Leda' })).toBeInTheDocument();
             expect(localStorage.getItem('hmi:hidden-access')).toBe('on');
 
             fireEvent.keyDown(document.body, REVEAL_COMBINATION);
             expect(screen.queryByTitle('Usuario')).not.toBeInTheDocument();
-            expect(screen.queryByRole('button', { name: 'Prisma' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Leda' })).not.toBeInTheDocument();
             expect(localStorage.getItem('hmi:hidden-access')).toBeNull();
         });
 
@@ -480,7 +480,7 @@ describe('Topbar', () => {
             renderTopbar('/explorer');
 
             expect(screen.getByTitle('Usuario')).toBeInTheDocument();
-            expect(screen.getByRole('button', { name: 'Prisma' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Leda' })).toBeInTheDocument();
         });
 
         it('ignores the combination while typing in the search field', () => {

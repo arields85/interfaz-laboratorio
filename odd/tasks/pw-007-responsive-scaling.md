@@ -1,7 +1,7 @@
 # PW-007 HMI responsive scaling across resolutions — ODD feature tracker
 
-> ODD feature task (not SDD). Branch `feat/prisma-responsiveness-and-scaling` (from `main` b20edba),
-> shared with PW-006 (`odd/tasks/pw-006-prisma-responsiveness.md`). Every commit belongs to one task
+> ODD feature task (not SDD). Branch `feat/leda-responsiveness-and-scaling` (from `main` b20edba),
+> shared with PW-006 (`odd/tasks/pw-006-leda-responsiveness.md`). Every commit belongs to one task
 > of one feature. Engram mirror: `odd/pw-007-responsive-scaling/tasks`. Backlog detail:
 > `backlog/hmi-responsive-scaling`.
 
@@ -157,12 +157,12 @@ end together with PW-006; NO push.
     var(--viewport-zoom)); --viewport-width: calc(100vw / var(--viewport-zoom)); }` and
     `.h-viewport`/`.min-h-viewport`/`.w-viewport` utilities — the single tokenized way to express
     viewport lengths, replacing every `vh`/`vw`/`h-screen` use found by a full re-grep (superset of
-    T3b's list): `MainLayout`, `AdminLayout`, `PrismaOrbOverlay`, `anchoredOverlayStyle` (`maxWidth`),
+    T3b's list): `MainLayout`, `AdminLayout`, `LedaOrbOverlay`, `anchoredOverlayStyle` (`maxWidth`),
     `EppiTopbarNavigation`, `ShaderSettingsPanel`, `GlobalSettingsDialog`, `RuntimeDialog`, plus
     `EppiTablePanel` (`35vw`/`45vw`), `DesignSettingsTab` (`55vh`), `NodeTypeConfigDialog` (`70vh`)
     which the T3b list had missed.
   - Coordinate conversions via `zoomCoordinates.ts`: `anchoredOverlayStyle.ts` (final
-    `left`/`top`/`bottom`/`minWidth`, +3 tests) — `PrismaPairingControl` needed no separate change,
+    `left`/`top`/`bottom`/`minWidth`, +3 tests) — `LedaPairingControl` needed no separate change,
     it flows through this same fix; `HoverTooltip.tsx` (final `top`/`left`, +1 test);
     `BuilderCanvas.tsx` (drag/resize `deltaX`/`deltaY` before `applyPointerDeltaToPixelBounds`, and
     `CursorTooltip` `x`/`y`, +2 tests) — the physical-mouse drag-threshold distance stays real-space
@@ -403,6 +403,6 @@ end together with PW-006; NO push.
 ## Next step
 
 **Feature closed (2026-09-24), accepted by the user.** T4 not needed. Remaining delivery: the
-shared branch `feat/prisma-responsiveness-and-scaling` is integrated into `main` by fast-forward
+shared branch `feat/leda-responsiveness-and-scaling` is integrated into `main` by fast-forward
 together with PW-006 (no push). Related but separate: PW-008 (activity index chart clipped, also
 at zoom 1).

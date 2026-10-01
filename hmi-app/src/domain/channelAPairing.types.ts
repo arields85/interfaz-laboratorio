@@ -20,13 +20,13 @@ export interface ChannelAPairingIssue {
     qr: ChannelAPairingQr;
 }
 
-// `runtime_unreachable` is distinct from `unavailable`: it means the Prisma runtime itself
+// `runtime_unreachable` is distinct from `unavailable`: it means the Leda runtime itself
 // could not be reached (a fetch rejection, or a non-2xx response with no valid JSON body — the
 // dev proxy's own failure page, never a body the runtime produced), while `unavailable` covers
 // every case where a real response was read, JSON or not, ok or not.
 export type ChannelAPairingErrorKind = 'session' | 'conflict' | 'unavailable' | 'runtime_unreachable';
 
-// Optional detail carried by a runtime_unreachable error when the Prisma dev proxy answered
+// Optional detail carried by a runtime_unreachable error when the Leda dev proxy answered
 // with its own structured JSON marker (T4b): the launcher detected a specific reason the
 // runtime could not start, currently only a busy port. Never present for a plain connectivity
 // failure (a rejected fetch, or the proxy's bodiless legacy error page).

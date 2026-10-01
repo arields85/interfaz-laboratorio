@@ -12,7 +12,7 @@ const nameBoundary = vi.hoisted(() => {
 // Keep local storage outside exporter tests; capture uses the real exporter and client.
 vi.mock('./hmiName.service', () => ({ readHmiName: nameBoundary.read }));
 
-import { prismaSessionClient } from './prismaSessionClient';
+import { ledaSessionClient } from './ledaSessionClient';
 
 import {
     exportDashboardSnapshot,
@@ -25,7 +25,7 @@ describe('dashboardSnapshotExport.service', () => {
         nameBoundary.read.mockReset().mockReturnValue({ ok: true, name: null });
         vi.stubGlobal('fetch', nameBoundary.refuseFetch);
         vi.useFakeTimers();
-        prismaSessionClient.reset({ close: false });
+        ledaSessionClient.reset({ close: false });
         vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
         vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
         vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -42,7 +42,7 @@ describe('dashboardSnapshotExport.service', () => {
     it('attaches the current local name to a copied snapshot at each capture', async () => {
         const snapshot = Object.freeze({ timestamp: '2026-07-07T10:00:00.000Z', widgets: [] });
         const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
-        const publish = vi.spyOn(prismaSessionClient, 'publishContext');
+        const publish = vi.spyOn(ledaSessionClient, 'publishContext');
         const getSnapshot = vi.fn(() => snapshot);
         nameBoundary.read.mockReturnValue({ ok: true, name: 'Panel recepción' });
         const stop = startDashboardSnapshotExporter({ getSnapshot, fetchImpl: fetchMock });
@@ -75,7 +75,7 @@ describe('dashboardSnapshotExport.service', () => {
 
         await expect(exportDashboardSnapshot(snapshot, undefined, fetchMock)).resolves.toBe(true);
 
-        expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/prisma/snapshot', {
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/leda/snapshot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: expect.any(String),
@@ -97,7 +97,7 @@ describe('dashboardSnapshotExport.service', () => {
         expect(failures[0]?.detail).toEqual({
             reason: 'request-failed',
             status: 503,
-            url: '/api/prisma/snapshot',
+            url: '/api/leda/snapshot',
         });
     });
 
@@ -254,7 +254,7 @@ describe('dashboardSnapshotExport.service', () => {
         const getSnapshot = vi.fn(() => ({ widgets: [], value }));
         const stop = startDashboardSnapshotExporter({ getSnapshot, fetchImpl: fetchMock });
         await vi.advanceTimersByTimeAsync(5_000);
-        prismaSessionClient.reset({ close: false });
+        ledaSessionClient.reset({ close: false });
         value = 'new';
         await vi.advanceTimersByTimeAsync(5_000);
         const published = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))
@@ -275,7 +275,7 @@ describe('dashboardSnapshotExport.service', () => {
                 if (!first) return { widgets: [], value: 'fresh' };
                 first = false;
                 if (change === 'reset') {
-                    prismaSessionClient.reset({ close: false });
+                    ledaSessionClient.reset({ close: false });
                 } else {
                     replacementStop = startDashboardSnapshotExporter({
                         fetchImpl: fetchMock, getSnapshot: () => ({ widgets: [], value: 'fresh' }),
@@ -335,7 +335,7 @@ describe('dashboardSnapshotExport.service', () => {
         });
         await vi.advanceTimersByTimeAsync(5_000);
         const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-        prismaSessionClient.reset({ close: false });
+        ledaSessionClient.reset({ close: false });
         value = 'after';
         await vi.advanceTimersByTimeAsync(5_000);
         const published = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))

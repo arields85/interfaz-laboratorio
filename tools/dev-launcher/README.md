@@ -13,7 +13,7 @@ is not part of the HMI application and is not built, packaged or deployed with i
 
 `CoreAnalytics.cmd` derives the project path from its own location (`%~dp0`), so it keeps working
 regardless of where the repository is cloned -- it never hardcodes an absolute path. It starts the
-dev server (`npm run dev`) in its own window and, once Prisma's local runtime and the Vite dev
+dev server (`npm run dev`) in its own window and, once Leda's local runtime and the Vite dev
 server are both actually ready, opens the HMI in a dedicated **CONTROL Chrome** window (see below).
 If readiness fails or times out, no browser window opens and the dev server's own window prints a
 clear message instead.
@@ -46,17 +46,17 @@ either `.cmd` file:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PRISMA_CREDENTIAL_MASTER_KEY_FILE` | `%LOCALAPPDATA%\CoreAnalytics\PrismaCredentialKey\master.key` | Same default the previous Desktop launcher used. |
-| `PRISMA_DEV_CHROME_PATH` | `%ProgramFiles%\Google\Chrome\Application\chrome.exe` | Path to the Chrome executable. Override for a per-user install (typically under `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`) or a non-standard location. |
-| `PRISMA_DEV_CHROME_USER_DATA_DIR` | `%LOCALAPPDATA%\CoreAnalytics\ChromeControl` | The CONTROL Chrome's own profile directory. |
-| `PRISMA_DEV_CHROME_DEBUG_PORT` | `9222` | The localhost-only remote debugging port. |
-| `PRISMA_DEV_HOST` (`OpenControlChrome.cmd` only) | `127.0.0.1` | Host used to build the URL when opening the browser standalone. |
-| `PRISMA_DEV_PORT` (`OpenControlChrome.cmd` only) | `5173` | Port used to build the URL when opening the browser standalone (or pass it as the first argument instead). |
+| `LEDA_CREDENTIAL_MASTER_KEY_FILE` | `%LOCALAPPDATA%\CoreAnalytics\LedaCredentialKey\master.key` | Same default the previous Desktop launcher used. |
+| `LEDA_DEV_CHROME_PATH` | `%ProgramFiles%\Google\Chrome\Application\chrome.exe` | Path to the Chrome executable. Override for a per-user install (typically under `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`) or a non-standard location. |
+| `LEDA_DEV_CHROME_USER_DATA_DIR` | `%LOCALAPPDATA%\CoreAnalytics\ChromeControl` | The CONTROL Chrome's own profile directory. |
+| `LEDA_DEV_CHROME_DEBUG_PORT` | `9222` | The localhost-only remote debugging port. |
+| `LEDA_DEV_HOST` (`OpenControlChrome.cmd` only) | `127.0.0.1` | Host used to build the URL when opening the browser standalone. |
+| `LEDA_DEV_PORT` (`OpenControlChrome.cmd` only) | `5173` | Port used to build the URL when opening the browser standalone (or pass it as the first argument instead). |
 
 None of these defaults hardcode a machine-specific absolute path in the repository -- they are all
 built from standard Windows environment variables (`%ProgramFiles%`, `%LOCALAPPDATA%`) at run time.
 
-`CoreAnalytics.cmd` itself always sets `PRISMA_DEV_AUTO_OPEN=1` before starting the dev server; this
+`CoreAnalytics.cmd` itself always sets `LEDA_DEV_AUTO_OPEN=1` before starting the dev server; this
 is the opt-in flag `hmi-app/scripts/dev.mjs` checks before opening a browser at all. Running
 `npm run dev` directly (without this launcher) never opens a browser, exactly as before.
 
@@ -67,8 +67,8 @@ is the opt-in flag `hmi-app/scripts/dev.mjs` checks before opening a browser at 
    `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\tools\dev-launcher\CoreAnalytics.cmd`.
 3. Start in: leave it as the folder containing the target (the script does not depend on the
    working directory it was launched from).
-4. Icon: Properties > Change Icon… > browse to `prisma-pyramid.ico` in this folder (the monochrome
-   Lucide pyramid the viewer topbar uses for Prisma; `prisma-pyramid.svg` is its editable source).
+4. Icon: Properties > Change Icon… > browse to `leda-pyramid.ico` in this folder (the monochrome
+   Lucide pyramid the viewer topbar uses for Leda; `leda-pyramid.svg` is its editable source).
 
 Or create it in one step from PowerShell (run from this folder):
 
@@ -77,7 +77,7 @@ $ws = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'CoreAnalytics.lnk'))
 $lnk.TargetPath = (Resolve-Path .\CoreAnalytics.cmd).Path
 $lnk.WorkingDirectory = (Get-Location).Path
-$lnk.IconLocation = (Resolve-Path .\prisma-pyramid.ico).Path + ',0'
+$lnk.IconLocation = (Resolve-Path .\leda-pyramid.ico).Path + ',0'
 $lnk.Save()
 ```
 
@@ -87,6 +87,6 @@ Replace the old `CoreAnalitycs.bat` Desktop launcher with this shortcut.
 
 `tools/dev-launcher/` is marked `export-ignore` in the repository's `.gitattributes`, so it is
 excluded from `git archive` exports. It is also never referenced by the HMI application build
-(`hmi-app`'s `vite build` only ever reads from `hmi-app/src`) or by Prisma's own runtime
-bootstrap/packaging scripts (`services/prisma-runtime/operations/bootstrap-local.*`) -- this
+(`hmi-app`'s `vite build` only ever reads from `hmi-app/src`) or by Leda's own runtime
+bootstrap/packaging scripts (`services/leda-runtime/operations/bootstrap-local.*`) -- this
 folder exists purely as a local development convenience.

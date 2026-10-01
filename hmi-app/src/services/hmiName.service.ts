@@ -2,7 +2,7 @@ import { normalizeHmiName } from '../domain/hmiName';
 import type { HmiNameReadResult, HmiNameSaveResult } from '../domain/hmiName';
 import { sharedConfigStorage } from './sharedConfigStorage.service';
 
-export const HMI_NAME_STORAGE_KEY = 'hmi:prisma-hmi-name';
+export const HMI_NAME_STORAGE_KEY = 'hmi:leda-hmi-name';
 
 export function readHmiName(): HmiNameReadResult {
     let raw: string | null;

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useDoubleRafFlip } from './useDoubleRafFlip';
 
 // `vi.useFakeTimers({ shouldAdvanceTime: true })` fakes `requestAnimationFrame` too (same
-// convention as PrismaOrbOverlay.test.tsx / PrismaPairingControl.test.tsx); advancing by two
+// convention as LedaOrbOverlay.test.tsx / LedaPairingControl.test.tsx); advancing by two
 // simulated frames' worth of time flushes both rAF calls in the double-rAF flip.
 function flushDoubleRaf(): void {
     act(() => {

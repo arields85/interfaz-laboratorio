@@ -1,4 +1,4 @@
-// Hidden access flag: whether this browser shows the users icon and the Prisma control in the
+// Hidden access flag: whether this browser shows the users icon and the Leda control in the
 // Topbar. Per browser on purpose (its own localStorage key, never the shared configuration): the
 // administrator reveals it where they work, and a plain viewer PC keeps it hidden. Hiding the
 // icons is not the security boundary: the admin routes stay protected by the server session.

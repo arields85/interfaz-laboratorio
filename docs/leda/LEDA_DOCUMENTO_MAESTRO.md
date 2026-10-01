@@ -1,0 +1,1940 @@
+# Leda — documento maestro
+
+> **Autoridad activa:** referencia funcional, arquitectónica y de entrega de Leda en este repositorio.
+>
+> **Versión documental:** 2.0.22
+>
+> **Fecha:** 2026-09-29
+>
+> **Estado vigente:** CL cerrado con aceptación manual del usuario: respuestas a las preguntas
+> ejercitadas, Telegram, voz HMI y orbe. PW-005 cerrado por decisión explícita sobre el camino
+> normal **Ctrl+C**; recuperación abrupta excluida, no aprobada. No repetir esas aceptaciones.
+>
+> **Evidencia:** los gates CL (1.121 backend, 2.188 frontend/209 suites, cobertura
+> 87,42/80,63/86,57/88,30 %, build/lint PASS) preceden PW-005. Sus 26 backend/14 Node
+> focalizados preceden la corrección de una línea de arranque frío, validada estáticamente y
+> mediante persistencia manual de identidad Node. No se ejecutaron gates completos finales
+> después de PW-005 ni pruebas en este cierre documental. Límites y cronología: §11.1.
+>
+> **Próximo paso:** diseño semántico acordado y [documentado](LEDA_SEMANTIC_QUERY_SERVICE.md);
+> prueba acotada pendiente, sin implementación autorizada. Respaldo inicial confirmado en `173bd86`:
+> documentación integrada por fast-forward y publicada en `origin/main`. El próximo paso de producto
+> requiere autorización explícita nueva. No iniciar pruebas, servicios ni proveedores; PW-002/PW-004
+> no cambian. El commit final de esta evidencia y su push aún no se afirman realizados.
+
+## 1. Objetivo y estado general
+
+Leda debe convertirse en el asistente de consulta de solo lectura de la HMI. Debe
+consultar datos consistentes de instalaciones autorizadas y ofrecer dos experiencias
+separadas:
+
+- **Canal A — HMI:** conversación por voz, búsqueda de equipos o variables aunque no
+  estén en la vista actual, aclaración de ambigüedades, navegación de la sesión que
+  originó la consulta y respuesta audible.
+- **Canal B — Telegram personal:** consultas a distancia por el bot dedicado sobre una
+  instalación autorizada; responde en el chat con texto y nota de voz, y nunca produce audio,
+  orbe ni navegación en la HMI (definición vigente en §6.3).
+
+El objetivo completo está **aprobado y parcialmente implementado**. El repositorio ya contiene un
+runtime de presentación y voz, integración HMI y contratos parciales, pero su flujo
+actual sigue dependiendo del último snapshot visible y no satisface el modelo completo de dos
+canales ni el despliegue remoto. La configuración protegida está cerrada offline (PAC-1 a PAC-5),
+pero su validación productiva sigue pendiente.
+
+### 1.1 Resumen de estado
+
+| Área | Estado (evidencia fechada en §11.1) | Conclusión |
+|---|---|---|
+| Runtime bajo propiedad del repositorio | Integrado localmente con evidencia offline | En Windows, `npm run dev` adquiere Leda antes de Vite con ownership exacto; bootstrap sigue siendo explícito. Faltan aceptación real de arranque e instalación limpia, despliegue/supervisión productivos y validación productiva del acceso protegido. El legado externo `C:\hmi_tts` quedó retirado el 2026-09-29. |
+| Voz HMI y orbe | Aceptación manual CL reportada por el usuario | Respuestas a las preguntas ejercitadas, Telegram, voz HMI y orbe aceptados (§11.1); sin prueba separada de cambio de vista/latencia ni garantía universal de continuidad, cancelación o recuperación. |
+| Consultas de datos | Implementación limitada | El parser responde por palabras clave sobre un único snapshot visible persistido. No consulta aún una instalación completa ni garantiza datos fuera de pantalla. |
+| Canal A — micrófono y navegación | Pendiente | No existe entrada STT/micrófono ni navegación solicitada por Leda. La HMI sí posee rutas publicadas que pueden ser una base futura. |
+| Canal A — QR/status y panel manual | Wiring y aceptación de respuestas/voz verificados en vivo | Proyección protegida, cliente/proxy y QR local desde Pyramid, a la derecha de Logs en Core; alcance manual acotado en §11.1, sin afirmar una matriz E2E integral. No hay auto-Apply. Desde el 2026-09-24 el bot dedicado también acepta preguntas por nota de voz, transcriptas con Gemini y respondidas igual que texto; verificado en vivo el 2026-09-25 (§11.1). |
+| Canal B — Telegram autónomo | Reactivado por el usuario el 2026-09-24; verificado en vivo el 2026-09-25 | Responde por chat con texto y **nota de voz** generada por el runtime, sin depender de una HMI abierta; **no** publica eventos de voz en la HMI. Fuente provisoria: la pantalla activa de la HMI; la fuente autónoma sigue pendiente (§4.2, PW-003). Desde el 2026-09-24 también recibe preguntas por nota de voz, transcriptas con Gemini; verificado en vivo el 2026-09-25 (§11.1). |
+| Datos reales | Disponibles en la HMI según reporte del usuario | El usuario reporta tres máquinas reales visualizables; esta revisión no accedió a ellas ni validó alcance histórico. |
+| Presentación simulada | Parcialmente implementada | Existen bindings simulados y fixtures determinísticos; todavía falta un modo demo unificado donde HMI y Leda compartan un dataset coherente. Nunca debe actuar como fallback silencioso ante una falla real. |
+| Configuración y diagnósticos | Cerrados offline con verificación independiente | Health expone configuración sin verificar proveedores y el runtime tolera secretos ausentes. El almacenamiento cifrado, la API protegida, el flujo de credenciales en Configuración general → Leda y el modelo separado de estados se cerraron offline (PAC-2 a PAC-4, verificación PAC-5); la aceptación real y el modelo completo de estados siguen pendientes. |
+| Seguridad de acceso | Protegida offline; insuficiente para despliegue remoto | La autenticación de administrador backend y el almacenamiento cifrado de credenciales se cerraron offline (PAC-1 a PAC-4, verificación PAC-5). El CORS wildcard histórico del servicio de voz y la autorización por instalación siguen sin resolver para un despliegue remoto productivo. |
+| Enrutamiento web de Leda | Cerrado offline con verificación independiente | El registro de sesión/voz contiene siete rutas same-origin fijas (§4.3), además de la administración protegida y los diagnósticos. Node-RED continúa como fuente de telemetría industrial, no como runtime Leda seleccionable. |
+
+La autoridad de descubrimiento del trabajo pendiente continúa en
+[`../PENDING_WORK.md`](../PENDING_WORK.md). El detalle se conserva en los topics
+estables `backlog/leda-runtime-monorepo-integration` y
+`backlog/leda-dual-channel-assistant`; este documento no crea un backlog paralelo.
+
+## 2. Cómo interpretar esta referencia
+
+Este documento separa cinco clases de información para evitar que una aspiración se
+lea como capacidad entregada:
+
+1. **Implementado:** existe en el repositorio y su comportamiento fue inspeccionado.
+2. **Verificado:** existe evidencia con fecha y alcance declarados.
+3. **Objetivo aprobado:** define el producto deseado, pero puede no existir aún.
+4. **Diseño propuesto:** recomendación pendiente de decisión o implementación.
+5. **Decisión abierta:** no debe cerrarse por inferencia.
+
+El código ordinario evidencia el comportamiento actual; no convierte un defecto en
+requisito correcto. Las pruebas aportan evidencia sobre los casos cubiertos; no
+reemplazan una aceptación de navegador, audio, proveedor o máquinas reales. El
+objetivo aprobado define hacia dónde debe evolucionar el producto.
+
+## 3. Límites invariantes
+
+### 3.1 Solo lectura industrial
+
+Leda puede consultar telemetría y navegar la interfaz, pero nunca controlar la
+planta. Quedan prohibidos en ambos canales:
+
+- arranque o parada de equipos;
+- cambios de setpoints, recetas o parámetros industriales;
+- actuación sobre PLC, actuadores o procesos;
+- reconocimiento, reseteo o confirmación de alarmas;
+- escrituras a endpoints de control industrial.
+
+La navegación por dashboard, vista o filtro es una acción de interfaz de solo lectura,
+no una orden de planta. La configuración de la propia HMI y sus integraciones también
+queda fuera del plano de control industrial.
+
+### 3.2 Separación entre datos y asistente
+
+La HMI consume un contrato JSON estable; no consume una tecnología específica. El
+contrato vigente está en [`../DATA_CONTRACT.md`](../DATA_CONTRACT.md). Node-RED u otra
+tecnología puede seguir aportando telemetría detrás de ese contrato. Lo retirado como
+objetivo es el antiguo **producto Leda Server/Node-RED**, no la posibilidad de usar
+Node-RED como fuente desacoplada de datos de solo lectura.
+
+### 3.3 Privacidad y credenciales
+
+Tokens, claves, identificadores privados de cuentas o chats, preguntas y contenido de
+audio no deben publicarse en documentación, logs ni exportaciones de diagnóstico. Los
+secretos tampoco pueden quedar en Git, `localStorage`, bundles del cliente, parámetros
+GET ni respuestas de lectura. El backend protegido puede conservar el estado operativo
+mínimo necesario para autenticación, pairing, autorización y revocación, con acceso y
+retención limitados. Las pruebas pagadas o que envían mensajes deben requerir una
+acción separada y explícita.
+
+### 3.4 Control de alcance y aprobación previa
+
+**Decisión explícita del usuario:** antes de implementar funcionalidades, mejoras, refactors o
+cambios de comportamiento no solicitados, el agente debe explicar qué propone, por qué, su impacto
+sobre el alcance y las alternativas, y **preguntar y esperar aprobación explícita**. No alcanza con
+anunciar que los va a implementar ni con considerarlos técnicamente convenientes.
+
+- Seguir las etapas y decisiones acordadas de este documento; una mejora futura o una limitación
+  detectada no se convierte automáticamente en requisito del incremento actual.
+- El incremento **QR → Canal A → circuito existente** y CL quedan cerrados en el alcance de
+  aceptación de §11.1. Su cierre no autoriza automáticamente las capacidades futuras de §8.
+- No agregar ahora nuevas políticas de descarte de respuestas, cancelación de audio por cambio de
+  vista u ocultamiento, ni infraestructura de disponibilidad/sincronización como prerrequisito.
+  Cualquier propuesta en ese sentido requiere consulta y aprobación separadas.
+- Verificar la conexión, el destino vinculado y las regresiones directamente relacionadas. Las
+  pruebas no autorizan ampliar la funcionalidad ni rediseñar componentes que ya funcionan.
+- Si aparece un impedimento técnico o de seguridad que exige salir del alcance, detener esa parte,
+  explicar el caso concreto y consultar antes de cambiar el comportamiento. No ignorarlo ni
+  resolverlo unilateralmente ampliando el trabajo.
+
+Esta regla prevalece sobre planes derivados que hayan incorporado requisitos no pedidos. No
+ordena borrar ni revertir automáticamente trabajo existente; cualquier ajuste necesario debe
+respetar el alcance autorizado.
+
+## 4. Implementación actual observada
+
+### 4.1 Runtime del repositorio
+
+El runtime actual vive en
+[`../../services/leda-runtime/`](../../services/leda-runtime/). Sus componentes
+principales son:
+
+| Componente actual | Responsabilidad observada |
+|---|---|
+| [`local_presentation.py`](../../services/leda-runtime/src/leda_runtime/local_presentation.py) | Recibe y persiste un snapshot visible, aplica un parser determinístico, coordina el bot y expone el último evento global. |
+| [`voice_service.py`](../../services/leda-runtime/src/leda_runtime/voice_service.py) | Genera TTS con Gemini, aplica DSP, transmite PCM y puede derivar audio para Telegram. |
+| [`paths.py`](../../services/leda-runtime/src/leda_runtime/paths.py) | Resuelve estado mutable fuera del código del servicio. |
+| [`operations/`](../../services/leda-runtime/operations/) | Bootstrap, inicio, preflight, detención y verificación locales. |
+
+La integración actual usa dos procesos locales:
+
+- presentación en `127.0.0.1:5057`;
+- voz en `127.0.0.1:5056`.
+
+Los endpoints ya inspeccionados y relevantes para describir el presente son:
+
+| Servicio | Método y ruta | Uso actual |
+|---|---|---|
+| Presentación | `GET /health` | Liveness y metadata del puente; su readiness de voz deriva del probe al proceso 5056. |
+| Presentación | `GET/POST /hmi/current-snapshot` | Lee o reemplaza el snapshot visible persistido. |
+| Presentación | `GET /hmi/voice/latest` | Devuelve un único último evento global. |
+| Presentación | `POST /local/ask` | Ejecuta el parser sin Telegram y publica un evento. |
+| Presentación | `GET/POST /hmi/channel-a/pairing` | Capability de sesión: estado seguro o deep link QR con TTL; no arranca ni aplica el Canal A. |
+| Presentación | `GET/PUT /hmi/leda-config` | Proxy de configuración de voz. |
+| Voz | `GET /health` | Liveness y metadata; `providerStatus` informa configuración y `verified:false` sin llamar al proveedor. |
+| Voz | `GET/PUT /leda/config` | Lee o reemplaza configuración local de voz. |
+| Voz | `POST /leda/speak-live` | Genera y transmite la locución. |
+
+Esta lista describe API existente; no es una instrucción para iniciar servicios ni
+autoriza pruebas contra proveedores.
+
+Los campos `ok` y `ready` del health de voz declaran readiness del proceso, no del
+proveedor. `providerStatus.configured` refleja solo presencia no vacía de la clave y
+`verified` permanece en `false`; health no solicita Gemini. El health de presentación
+confía en el `ok` del proceso local. Por tanto, prueban liveness y conectividad local,
+no autenticación ni readiness genuina del proveedor.
+
+### 4.2 Flujo actual de preguntas
+
+El flujo histórico anterior a la separación por sesión era, de forma simplificada
+(la conciliación posterior y el Canal A vigente se precisan debajo):
+
+```text
+dashboard visible
+  -> snapshot periódico al puente local
+  -> un archivo conserva el último snapshot
+  -> Telegram o /local/ask entrega texto
+  -> parser por palabras clave examina widgets[] visibles
+  -> se genera respuesta textual
+  -> se reemplaza un único evento de voz global
+  -> todos los navegadores que consultan el endpoint pueden observar ese evento
+  -> el navegador solicita TTS y presenta el orbe
+```
+
+[`answer_from_snapshot()`](../../services/leda-runtime/src/leda_runtime/local_presentation.py)
+reconoce intenciones específicas como producto, lote, OEE, estado, actividad,
+potencia, progreso, tiempo restante, alertas y resumen. No es un motor de consulta
+general, no usa Gemini para comprender la pregunta y no puede buscar por sí mismo
+equipos o variables fuera del snapshot visible.
+
+En aquel flujo, el snapshot persistía sin caducidad obligatoria después de cerrar el navegador
+y el último evento era global, con riesgo de respuestas obsoletas e interferencia entre contextos.
+Es evidencia histórica, no descripción del aislamiento documental actual ni contrato objetivo.
+
+**Conciliación de implementación 2.0.11 (2026-09-20).** El flujo anterior se conserva como
+evidencia histórica. La inspección de esta sesión precisa dos hechos que cambian cómo se lee
+el estado actual:
+
+- El `POST` de snapshot de la HMI persiste **por documento** en un registro en memoria del
+  backend (`HmiSessionRegistry`), mientras que el `/status` de Telegram y sus respuestas leen el
+  archivo de instalación (`JsonFileStore`), para el que no se localizó ningún escritor de runtime
+  vigente. En consecuencia, un `health.snapshotTimestamp` o un `/status` de Telegram obsoleto
+  **no** son evidencia del contexto HMI de la sesión.
+- La HMI **no** tiene UI de pregunta ni micrófono: el orbe es presentación hasta que llega un
+  evento. `/local/ask` (parser determinístico) publica un evento de voz por propietario y el
+  listener de la aplicación inicia el TTS automáticamente. El Telegram personal del **Canal B**,
+  en cambio, responde **solo texto** desde el archivo de instalación separado y **no** publica
+  eventos de voz en la HMI.
+
+**Canal A dedicado — checkpoint 2.0.17:** la composición ya aceptada offline conserva el
+propietario HMI emparejado y su contexto documental para el circuito de respuesta/voz existente.
+RCA-5l agrega la entrada QR/status y el panel manual; no cambia ese circuito ni vuelve a usar
+el archivo de instalación como fallback. La aceptación manual posterior de respuestas Telegram,
+voz HMI y orbe está registrada con sus límites en §11.1; el Canal B permanece aplazado.
+
+### 4.3 Integración HMI actual
+
+El registro canónico `LEDA_BROWSER_ROUTES` contiene siete rutas same-origin fijas:
+`/api/leda/snapshot`, `/api/leda/events/latest`, `/api/leda/session`, `/api/leda/ask`,
+`/api/leda/voice-config`, `/api/leda/tts/live` y `/api/leda/channel-a/pairing`.
+La última reenvía GET/POST a `/hmi/channel-a/pairing` en el runtime local 5057 y conserva
+la capability de sesión; no sustituye las rutas separadas de administración y diagnósticos.
+Las convenciones de forwarding se documentan en
+[`LEDA_BROWSER_ROUTING.md`](./LEDA_BROWSER_ROUTING.md). El navegador no conoce
+destinos de loopback, no selecciona runtimes y no acepta endpoints Leda editables.
+
+Durante desarrollo, Vite reenvía únicamente las rutas exactas configuradas a los servicios de
+loopback. En producción, el host administrado por IT deberá ofrecer forwarding
+equivalente, preservar headers y streaming progresivo de TTS, y excluir estas rutas del
+fallback de la SPA. El producto de proxy, autenticación, certificados y supervisión
+continúa pendiente; el proxy de desarrollo no constituye autorización backend.
+
+[`package.json`](../../hmi-app/package.json) enruta únicamente `dev` por un wrapper Node
+que intenta adquirir Leda en Windows y luego ejecuta el CLI instalado de Vite sin
+modificar sus argumentos. `build`, `preview` y tests no adquieren Leda. [`main.tsx`](../../hmi-app/src/main.tsx) y
+[`App.tsx`](../../hmi-app/src/App.tsx) inicializan exclusivamente el cliente del
+navegador: no existe allí un propietario del arranque del runtime ni el cierre de una
+pestaña invoca su detención. El router usa `createBrowserRouter`, por lo que el futuro
+host de producción también deberá resolver el fallback de la SPA. No se encontró en el
+repositorio un propietario del despliegue productivo, servicio del sistema operativo ni
+configuración de host: el pipeline administrado por IT sigue como objetivo y no debe
+confundirse con el servidor de desarrollo de Vite.
+
+La HMI ya puede consumir datos actuales mediante `/api/hmi-data`, resolviendo
+`unitId/machineId + variableKey`, y usa un contrato separado para histórico. El
+runtime Leda no implementa esa fuente industrial. Dashboards, jerarquía y catálogo
+se conservan hoy en el navegador; `catalogVariableId` aporta identidad canónica, pero
+todavía no existe un mapeo backend completo de instalaciones, alias y permisos.
+
+Las rutas de dashboard admiten `dashboardId` y `viewId` y ya validan destinos
+publicados. Esa capacidad puede soportar una futura navegación declarativa, pero
+Leda todavía no la solicita ni recibe confirmación de finalización.
+
+### 4.4 Configuración actual
+
+La configuración no sensible de efectos de voz se lee y escribe mediante la ruta fija
+same-origin `/api/leda/voice-config` y se administra desde **Configuración general →
+Voz**. El runtime también recibe configuración sensible mediante variables de proceso.
+El backend ya inicia sin Gemini ni Telegram configurados. Desde PAC-2 a PAC-4 el
+almacenamiento cifrado, la API protegida y la administración de credenciales desde
+**Configuración general → Leda** existen y fueron aceptados offline (ver §11); la
+aceptación real y el despliegue productivo siguen pendientes.
+
+El runtime del repositorio mantiene estado mutable bajo el directorio local de la
+aplicación y un entorno virtual propio bajo el servicio. Esto coincide con la decisión
+histórica de separar estado de máquina y estado derivado del checkout. El bootstrap
+explícito conserva la creación del entorno y reconciliación del lock.
+[`start-local.ps1`](../../services/leda-runtime/operations/start-local.ps1) ya no lo
+invoca: inicializa estado sin secretos, valida intérprete y dependencias propias, y falla
+antes de lanzar procesos con remedio hacia `bootstrap-local.ps1` cuando faltan. Bajo
+PowerShell 5.1, el stderr esperado de imports faltantes se normaliza sin ocultar
+excepciones no relacionadas. Aun así:
+
+- una instalación limpia reproducible no está aceptada en un entorno real;
+- el lock con hashes no implica eliminación exacta de paquetes extra ya presentes;
+- el arranque automático local está implementado y verificado offline, pero instalación
+  limpia, operación real, recuperación durable y despliegue productivo siguen pendientes
+  de aceptación.
+
+Sin clave Gemini o con una clave en blanco, ambos endpoints de voz devuelven HTTP 503
+con `GEMINI_API_KEY_MISSING` y remedio accionable, sin construir cliente ni llamar al
+proveedor. Telegram opt-in sin token se informa como habilitado pero no configurado; no
+construye ni inicia bot. Lo anterior describe la fuente legacy, vigente solo cuando el
+modo protegido no fue seleccionado; el almacenamiento cifrado de secretos y la UI de
+credenciales existen desde PAC-2–PAC-4 y se aceptaron offline (ver §11).
+
+El wrapper local reutiliza un runtime manual verificado sin asumir ownership ni
+detenerlo. Varias invocaciones de desarrollo comparten una generación y solo la última
+liberación normal detiene identidades exactas iniciadas por desarrollo. Ctrl+C converge
+en esa liberación; cerrar el navegador no detiene Leda. No se afirma durabilidad ante
+cierre abrupto de consola o reinicio del sistema operativo. `npm run dev` conserva esta
+orquestación previa y Vite expone las rutas same-origin configuradas sin requerir una selección
+en el navegador.
+
+El selector Server/Local, el tipo y perfil de runtime, la rama de query y los endpoints
+Leda editables ya no forman parte del flujo activo. Las claves de modo, parámetros de
+query y valores de endpoints anteriores pueden permanecer físicamente en el navegador,
+pero son inertes; no se migran ni se eliminan globalmente. La telemetría industrial y el
+resto de `localStorage` no fueron alterados por este retiro.
+
+No existe un requisito aprobado de bootstrap limpio completamente offline. Las
+dependencias de Internet continúan aplicando a Gemini y Telegram aun cuando la
+telemetría sea simulada.
+
+#### Entorno local actual del usuario — arranque conocido
+
+Antes de preguntar nuevamente cómo inicia el usuario la HMI/Leda al retomar una
+sesión, consultar esta nota. Volver a preguntar solo si el usuario informa un cambio
+o si aparece evidencia que la contradiga.
+
+- El usuario inicia manualmente
+  `C:\Users\Ariel De Simone\Desktop\CoreAnalitycs\CoreAnalitycs.bat`.
+- Ese launcher define `PROJECT_PATH` como
+  `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\hmi-app`, ejecuta
+  `npm run dev -- --host 127.0.0.1 --port 5173` y abre Chrome en
+  `http://127.0.0.1:5173` tras una espera de 3 segundos.
+- El script `dev` de [`package.json`](../../hmi-app/package.json) invoca
+  `node ./scripts/dev.mjs`. En Windows, `runDevelopment` en
+  [`dev.mjs`](../../hmi-app/scripts/dev.mjs) intenta adquirir Leda mediante
+  [`start-local.ps1`](../../services/leda-runtime/operations/start-local.ps1)
+  antes de lanzar Vite; si la adquisición falla, advierte y continúa con Vite.
+
+Esto registra el entorno local del usuario, no un requisito general de despliegue ni
+una identidad global del producto. La evidencia es lectura del launcher y del código,
+no ejecución: siguen sin identificarse la fuente, instalación y versión del backend
+realmente en ejecución. El launcher por sí solo no descarta otro arranque automático
+de Windows ni demuestra health exitoso o una causa raíz corregida.
+
+### 4.5 Frontera de acceso actual
+
+El servicio de presentación limita orígenes de desarrollo conocidos. El servicio de
+voz responde actualmente con CORS wildcard para `GET`, `POST`, `PUT` y `OPTIONS`; esto
+fue confirmado mediante probes Flask simulados sobre código preexistente en Git.
+La explotabilidad desde un navegador depende del despliegue, pero la protección debe
+resolverse antes de exponer credenciales o clientes web remotos.
+
+La lista actual de chats permitidos y la vinculación del primer `/start` no equivalen
+a autenticación de cuenta, autorización por instalación ni aislamiento de sesión.
+Bot, cuenta personal y chat autorizado son identidades diferentes y deben modelarse
+por separado.
+
+## 5. Evidencia y limitaciones verificadas
+
+### 5.1 Auditoría de 2026-09-17
+
+Los siguientes resultados pertenecen a una auditoría anterior de la misma fecha. No
+fueron reejecutados por esta actualización documental:
+
+| Comprobación | Resultado informado |
+|---|---|
+| Python | 74/74; incluye 27 pruebas de entorno aún no rastreadas. |
+| Python desde directorio alternativo | 27/27. |
+| HMI focalizada | 72/72 en 7 archivos. |
+| TypeScript | `noEmit` aprobado para app y Node. |
+| PowerShell | 7/7 archivos aceptados por el parser AST. |
+| Python en memoria | 21 archivos compilaron. |
+| Whitespace | `git diff --check` aprobado. |
+
+En esa auditoría, el checker de bindings terminó con código 1. El hash del archivo con
+CRLF fue distinto del hash del contenido de Git con LF: esto demuestra sensibilidad a
+finales de línea, no un cambio semántico posterior a la generación. El render TypeScript
+coincidió tras normalizar LF. Los validadores del generador Python aceptan un payload requerido
+ausente y un ID terminado en guion que TypeScript y el schema rechazan. Los productores
+normales cumplían, pero en ese momento faltaban propiedad clara del generador, paridad
+y tests reproducibles del checker. El cierre actual de ese subproblema se documenta a
+continuación; este registro no modifica el schema canónico.
+
+#### Incremento actual del contrato de audio
+
+El incremento acotado FND-1/FND-2 corrigió ese subproblema sin modificar el schema
+canónico ni ampliar requisitos de producto. El digest normaliza únicamente finales de
+línea; el checker compara en memoria el cuerpo completo de ambas proyecciones; y el
+validador generado Python aplica el patrón exacto de `run_id`, campos requeridos y
+números finitos. Python conserva enteros arbitrarios para secuencias y contadores. La
+proyección TypeScript continúa limitada al navegador y conserva la misma API pública;
+allí las secuencias y payloads de tipo entero deben ser enteros seguros representables
+por JavaScript mediante `Number.isSafeInteger`. Esta seguridad de representación no
+modifica el schema canónico ni establece un máximo universal entre lenguajes.
+
+La primera ejecución observó 14/14 pruebas Python de audio, 82/82 pruebas Python del
+runtime, 6/6 pruebas TypeScript focalizadas y 1964/1964 pruebas HMI, además de ambos
+typechecks y el checker con código 0. Son pruebas locales con estado temporal aislado:
+no prueban audio real, proveedor, acceso remoto, durabilidad ni aceptación operativa.
+
+La revisión independiente detectó después una ampliación involuntaria: cambiar
+`Number.isSafeInteger` por `Number.isInteger` había debilitado la validación TypeScript
+sin ser necesario para corregir la divergencia Python. La corrección restauró el límite
+seguro y agregó al discovery Python una comprobación contra las proyecciones reales del
+repositorio. La ejecución posterior observó 15/15 pruebas Python de audio, 83/83 del
+runtime, 9/9 TypeScript focalizadas y 1967/1967 de la HMI en 198 archivos; ambos
+typechecks y el checker finalizaron con código 0. El padre confirmó de forma
+independiente 83/83 pruebas Python y 9/9 TypeScript focalizadas, además de checker y
+`git diff --check` con código 0, schema y TypeScript generado sin diferencias, y hashes
+sin cambios para Gauge/Kpi. La HMI completa 1967/1967 y ambos typechecks permanecen como
+evidencia del escritor. Este cierre cubre solo hash, cuerpo generado, campos requeridos,
+paridad validada y discovery por defecto; no prueba todos los bordes numéricos ni
+constituye aceptación real de runtime, audio, proveedor o acceso. La Entrega 1.1
+permanece abierta.
+
+#### Incremento de inicio seguro sin configurar
+
+FND-6/FND-7/FND-8 separó bootstrap e inicio normal, habilitó el backend sin secretos y
+agregó diagnósticos pasivos sin llamadas a proveedor. La primera evidencia del escritor
+y del verificador aprobó 92/92 pruebas, pero fue insuficiente: un probe real de imports
+faltantes bajo Windows PowerShell 5.1 y `$ErrorActionPreference = 'Stop'` descubrió que
+`NativeCommandError` evitaba el remedio previsto. Esa evidencia se conserva como hito
+intermedio, no como cierre correcto.
+
+La corrección agregó una regresión real con el intérprete propio y `-B -S`, normalizó
+solo el error nativo esperado a resultado falso y conservó el rethrow de excepciones no
+relacionadas. El escritor observó 31/31 pruebas focalizadas y 93/93 del runtime. El
+verificador fresco confirmó 31/31, 93/93 y un probe separado con estos resultados:
+dependencias ausentes → `false`; assertion → remedio `bootstrap-local.ps1`; dependencias
+presentes → `true`; excepción ajena → rethrown. ScriptBlock, AST y `git diff --check`
+aprobaron.
+
+La aprobación es exclusivamente offline. No prueba listeners reales, arranque de
+servicios, proveedor, audio, red, instalación limpia, despliegue productivo ni acceso.
+RDD estuvo desactivado y no existe receipt.
+
+#### Incremento de desarrollo local con `npm run dev`
+
+FND-9/FND-10/FND-11 cerró offline el arranque local Windows mediante un wrapper Node y
+ownership en el manifiesto canónico. La evidencia inicial del escritor —104 pruebas
+Python, 1976 HMI y 9 del wrapper— fue insuficiente: PowerShell 5.1 emitía un BOM en el
+receipt y Node rechazaba el JSON después de registrar al owner. La corrección abarcó la
+clase completa de fallas de escritura, lectura y entrega: UTF-8 sin BOM, registro y
+receipt bajo el mismo lock, rollback específico para adquisición fría o compartida,
+recuperación estrecha por token de invocación e identidad viva canónica, release normal
+todavía ligado a generación y limpieza temporal incapaz de reemplazar el resultado.
+
+El escritor corregido aprobó Vitest 13, Python 107, HMI 1980/1980 en 199 archivos,
+ambos typechecks, build y lint; el build transformó 2722 módulos en 7,86 s. El
+verificador independiente aprobó 13/13, 107/107, cuatro ScriptBlock/AST, whitespace,
+bytes reales PowerShell→Node y casos adicionales de ownership. El spotcheck final del
+padre aprobó 13/13 en 274 ms y Python 107/107 en 12,278 s; no hubo cambios de fuente
+posteriores. Solo persistieron warnings conocidos de `grid.svg`, tamaño de chunks,
+Canvas de jsdom y LF/CRLF.
+
+La aprobación es offline: no cubre Vite o Leda reales, listeners, proveedor,
+instalación, producción, cierre abrupto ni reinicio del sistema. RDD permaneció
+desactivado; el rechazo del assessment nativo por tres archivos no rastreados se trató
+como riesgo HIGH y se compensó con verificación independiente, sin receipt RDD.
+
+### 5.2 Evidencia manual histórica
+
+El usuario aceptó manualmente en sesiones anteriores el circuito HMI, audio, orbe y
+Telegram. Esa evidencia demuestra valor de MVP y no debe descartarse. Tampoco debe
+elevarse a aceptación universal: pruebas posteriores observaron ausencia de listeners
+en 5056/5057 y un manifiesto obsoleto. No se reprodujo en vivo la causa durante la
+auditoría de 2026-09-17.
+
+El usuario aclaró posteriormente que Leda no se detuvo espontáneamente durante el
+uso: respondió en consultas posteriores mientras el launcher o su terminal no fueran
+cerrados. Por esa razón se retira del alcance activo la investigación propuesta sobre
+“por qué se detienen” los procesos. La observación de listeners ausentes y manifiesto
+obsoleto permanece como hecho histórico, pero no demuestra una caída espontánea, una
+causa ligada al terminal ni un bug corregido. Si aparece una falla real durante el uso,
+se registrará como un incidente nuevo con evidencia reproducible.
+
+La finalización del proceso iniciador bajo el ciclo de vida de un job de OpenCode es
+una hipótesis no probada. La terminación en el camino exitoso del wrapper ya fue
+corregida con pruebas en el commit `2bc7ff1`. La ausencia de identidad de creación del
+proceso es un borde de robustez acotado, no una causa demostrada. Comparar de forma
+exacta el binario del listener con el ejecutable del entorno virtual tampoco es seguro
+en Windows, donde puede existir handoff entre wrappers.
+
+### 5.3 Audio
+
+Una corrección histórica de la instalación externa evitó el corte reproducido en aquel
+escenario mediante buffering completo antes de reproducir, con el costo de aumentar el
+tiempo hasta el primer sonido. No demuestra continuidad universal. El navegador del
+repositorio actual usa transporte progresivo por defecto: encola PCM por chunks y
+comienza al alcanzar un umbral o al llegar EOF. Las muestras previas no forman un
+benchmark corto/medio/largo repetido; generación, decodificación y reproducción
+técnica tampoco prueban ausencia de cortes ni audibilidad humana.
+
+La autocalibración por dispositivo descrita en el documento externo fue una propuesta
+histórica. No es un prerrequisito automático para el nuevo Canal B de Telegram de
+texto, que no reproduce audio. Cualquier evolución futura de audio debe medirse y
+aprobarse por separado.
+
+## 6. Objetivo aprobado
+
+### 6.1 Un runtime y dos formas de despliegue
+
+El producto objetivo tiene un único Leda bajo propiedad del repositorio:
+
+- despliegue servidor para navegadores remotos;
+- notebook de presentación autónoma para demostraciones o uso local controlado.
+
+En ambos casos Leda debe iniciar automáticamente y de forma invisible como parte de
+la operación del despliegue HMI, no como un proceso manual por pestaña o navegador. El
+cierre de un navegador no debe detener el runtime y Telegram debe conservar su
+autonomía. Esto no define arranque automático del sistema operativo ni selecciona un
+servicio, framework de escritorio o administrador de procesos: primero debe elegirse el
+propietario real del despliegue.
+
+El navegador no debe conocer puertos de loopback como arquitectura final. Se
+recomienda una frontera backend del mismo origen para el cliente web. Los mecanismos
+exactos de autenticación, almacenamiento de secretos, proxy o gateway y despliegue aún
+no están seleccionados.
+
+El modo Leda Server/Node-RED anterior queda retirado como objetivo. Su requisito
+histórico de configuración administrada y respuesta 409 está **supersedido para el
+nuevo runtime**; no fue preservado ni corregido por esta documentación. El código o la
+instalación legado solo se eliminarán tras aceptación y decisión explícitas, nunca de
+forma automática. La instalación externa `C:\hmi_tts` se retiró el 2026-09-29 por decisión
+explícita del usuario, anticipada a la aceptación de producción.
+
+### 6.2 Canal A — HMI por voz
+
+El flujo objetivo es:
+
+```text
+usuario habla en una HMI
+  -> STT obtiene texto dentro de esa sesión
+  -> Leda identifica instalación, equipo, variable y rango
+  -> si hay ambigüedad, pregunta antes de actuar
+  -> consulta la fuente compartida, incluso fuera de la pantalla visible
+  -> si corresponde, solicita navegación declarativa
+  -> la HMI valida un destino publicado y confirma la nueva vista
+  -> Leda responde con datos frescos y procedencia
+  -> solo la sesión solicitante reproduce la respuesta
+```
+
+Reglas obligatorias:
+
+- la navegación solo afecta a la sesión que hizo la pregunta;
+- el destino debe estar publicado y validado mediante IDs estables;
+- no se responde desde el contexto anterior si falla o vence la navegación;
+- una nueva pregunta puede cancelar o reemplazar el trabajo anterior;
+- la respuesta conserva alcance, timestamp, frescura y procedencia;
+- no existe ningún comando industrial en el mismo canal.
+
+**Entrada remota del Canal A (acuerdo histórico 2.0.12; implementación y aceptación posterior en §11.1).** El Canal A admite
+además una entrada desde el teléfono del observador físico, sin mouse, teclado, touch ni clic en la
+HMI. La HMI muestra un QR cuando está libre y ese QR abre un **bot dedicado del Canal A** —nunca un
+modo ni un comando dentro del bot del Canal B— con un token opaco de un solo uso y vida corta. La
+activación del bot en Telegram es un paso propio del cliente (el usuario puede tener que tocar
+«Iniciar»/`Start`) y es independiente del emparejamiento de la aplicación: no se exige `/start`
+manual ni un comando escrito. La confirmación del destino ocurre **en el teléfono, nunca en la HMI**,
+y tocar `Start` por sí solo no prueba presencia física ni aprobación del usuario. La asociación es
+exclusiva y temporal: un controlador por sesión HMI, una HMI activa por teléfono, sin toma de
+control ni cambio automático de destino, y desvincular libera la HMI para el siguiente observador.
+Un reloj humano de inactividad de 10 minutos libera el vínculo y ningún snapshot ni sondeo de
+eventos lo renueva. El primer incremento responde por texto sobre el snapshot visible actual con el
+parser determinístico existente, y presenta la misma respuesta como texto y audio en la HMI. Esta
+entrada es de solo lectura y nunca habilita comandos industriales.
+
+**Preguntas por nota de voz (2026-09-24, decisión del usuario, PW-013).** El bot dedicado del Canal A
+también acepta una nota de voz de Telegram como pregunta, además de texto: se transcribe con Gemini
+(mismo cliente/credencial que la síntesis de voz) y el texto resultante se responde exactamente igual
+que si se hubiera escrito, sin repetir ni mostrar la transcripción. Reglas: máximo 30 segundos,
+verificados con el dato `duration` del propio mensaje **antes** de descargar el archivo; límite
+independiente de tamaño de archivo; la vinculación teléfono-propietario existente se valida antes de
+cualquier descarga; toda falla (proveedor caído, transcripción vacía o ilegible, descarga fallida) se
+responde con un mensaje breve de usted y nunca deja caer el sondeo. La descarga ocurre en el proceso
+de presentación (bot dedicado); la llamada a Gemini ocurre en el proceso de voz, igual que la nota de
+voz de respuesta del Canal B (PW-012). El mismo soporte se agregó al Canal B (ver §6.3).
+
+**Registro y recuperación automática de fallas del Canal A (2026-09-23, decisión de usuario).**
+El hilo de sondeo propio del Canal A (`channel_a_lifecycle.py`, `ChannelARunner`) podía fallar en
+segundo plano sin que el administrador ni el usuario lo notaran: la falla terminal solo se reflejaba
+como `phase: 'failed'`, pero `lastError` permanecía en `None` porque nada observaba esa transición
+desde el hilo propio del runner. El bot quedaba caído hasta que el administrador volvía a guardar el
+token manualmente. La corrección distingue dos causas por código, en vez del único código genérico
+previo:
+
+- **Permanentes** (nunca se reintentan; el estado queda fallido con su código exacto hasta una
+  acción del administrador): `LEDA_CHANNEL_A_UNAUTHORIZED` (token rechazado por Telegram con
+  401), `TELEGRAM_BOT_IDENTITY_RESERVED` (identidad reservada por el otro canal),
+  `LEDA_CHANNEL_A_CREDENTIAL_MISSING` (credencial ausente) y
+  `LEDA_CHANNEL_A_CONFIGURATION_INVALID` (configuración inválida).
+- **Transitorias** (se reintentan indefinidamente mientras la credencial siga configurada):
+  `LEDA_CHANNEL_A_POLL_FAILED` (falla del propio `getUpdates`: red, timeout, 5xx, o el 409 nativo
+  de Telegram por otro sondeo concurrente con el mismo token) y cualquier otro código no listado como
+  permanente (por ejemplo `LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE`, un administrador ocupado, o una
+  detención sin confirmar).
+
+El runner notifica la falla mediante un observador (`on_terminal`/`set_on_terminal`), ejecutado fuera
+de su propio lock, en lugar de que el administrador tenga que sondear el estado periódicamente. Para
+una causa transitoria, el `ChannelAManager` agenda un reintento con backoff exponencial —constantes
+`CHANNEL_A_RETRY_INITIAL_DELAY_SECONDS = 5`, `CHANNEL_A_RETRY_BACKOFF_FACTOR = 2`,
+`CHANNEL_A_RETRY_MAX_DELAY_SECONDS = 300` (5 s, 10 s, 20 s, ... hasta un techo de 5 minutos)—
+reutilizando el mismo camino de `apply()` (asentar la activación vieja, publicar una candidata
+nueva) bajo la disciplina de mutación existente del administrador. Cualquier acción explícita del
+administrador (guardar, borrar o aplicar) cancela y reinicia el contador de reintentos; una
+detención del runtime (`main()`) también cancela el temporizador pendiente antes de salir. El estado
+expone `retrying`/`retryAttempt` para que el panel muestre «Reconectando…» mientras el reintento
+está en curso. Esta corrección es solo para el Canal A: el Canal B (`telegram_lifecycle.py`) ya
+refleja su propio `lastError` de forma reactiva al consultar `status()`, pero tiene una composición
+sustancialmente distinta (un objeto `TelegramLocalBot` monolítico sin el mismo seno de
+manager/activación/generación intercambiable ni un observador equivalente), así que no recibió el
+mismo reintento automático en este cambio; queda como una extensión futura separada si se decide
+extenderla.
+
+### 6.3 Canal B — Telegram personal autónomo
+
+El Canal B es la consulta personal a distancia: la persona ya tiene acceso al bot dedicado
+del Canal B (no se vincula desde la HMI; el QR pertenece solo al Canal A). Recibe texto **y notas de
+voz** (PW-013) y responde en el chat con **texto y nota de voz**. El audio llega a
+Telegram porque la persona está lejos: la HMI nunca reproduce ni muestra nada por el Canal B.
+Debe funcionar sin navegador, snapshot o publicador de pantalla. Consulta una instalación
+previamente autorizada mediante la misma frontera de datos que el Canal A.
+
+Reglas obligatorias:
+
+- no publica eventos globales de HMI;
+- no reproduce audio en la HMI ni la navega (la nota de voz se entrega solo en el chat);
+- separa credencial del bot, cuenta personal y asociación de chat;
+- autoriza explícitamente qué instalación puede consultar cada identidad;
+- impide mezcla de datos entre usuarios, instalaciones y sesiones;
+- aplica límites, cancelación, auditoría redactada y revocación.
+
+Esta definición reemplaza la interpretación provisional anterior de “Telegram remoto
+vinculado al navegador activo”.
+
+**Aclaración 2.0.12.** El Canal B conserva el bot existente, su limitación actual de un único chat
+emparejado y su fuente de archivo obsoleta: este acuerdo **no** habilita ampliar su admisión ni
+integrar su código. El bot dedicado del Canal A es un proveedor y una entrada separados; nunca es un
+modo, comando o bandera dentro del bot del Canal B, y el Canal B sigue sin poder afectar el
+contexto, la voz ni la navegación de la HMI.
+
+**Aclaración 2026-09-24 (decisión del usuario, PW-012).** Mientras no exista la fuente de datos
+autónoma, el Canal B responde de forma **provisoria** según la pantalla que la HMI muestra en ese
+momento (el contexto más reciente de una sesión HMI viva; sin sesión viva informa que no hay datos
+cargados), como antes de la migración. Cada respuesta se envía como texto y, a continuación, como
+nota de voz de Leda en respuesta al mismo mensaje, generada por el runtime (fila de hasta 3
+notas pendientes por chat). Cuando exista la fuente autónoma (PW-003), ambos canales migran a
+ella. Detalle y evidencia: `odd/tasks/leda-channel-b-voice-replies.md`.
+
+**Preguntas por nota de voz (2026-09-24, decisión del usuario, PW-013).** El Canal B también acepta
+una nota de voz de Telegram como pregunta, con las mismas reglas que el Canal A (§6.2): transcripción
+con Gemini, sin repetir ni mostrar la transcripción, límite de 30 segundos verificado antes de
+descargar el archivo, límite independiente de tamaño, la vinculación de chat único existente se
+valida antes de cualquier descarga, y toda falla responde con un mensaje breve de usted sin afectar
+el sondeo del bot. El nombre de máquina/pantalla de la pantalla activa (cuando está disponible) se
+usa como pista de vocabulario adicional para la transcripción, sin agregar una fuente de datos nueva.
+La transcripción resultante se responde exactamente igual que una pregunta escrita, incluida la nota
+de voz de respuesta (PW-012). Detalle y evidencia: `odd/tasks/pw-013-voice-note-questions.md`.
+
+### 6.4 Datos reales y presentación
+
+El usuario informa tres máquinas reales visualizables actualmente. La primera entrega
+de datos debe probar una máquina real y luego las tres, sin IDs especiales ni lógica
+hardcodeada por máquina. No se asume que todas las instalaciones ofrecen histórico o
+los mismos rangos de consulta.
+
+La presentación simulada debe seleccionar explícitamente un catálogo y dataset
+coherentes. HMI y Leda deben observar los mismos valores, timestamps y procedencia.
+Una falla de datos reales debe mostrarse como falla; no puede activar simulación en
+silencio.
+
+La frontera compartida de datos deberá resolver como mínimo:
+
+- instalación y autorización;
+- equipos, alias y variables canónicas;
+- valor actual, unidad, timestamp, estado y fuente;
+- histórico disponible y rangos admitidos, cuando existan;
+- frescura y motivo de indisponibilidad.
+
+Se propone un catálogo compartido de instalaciones y una frontera de consulta común.
+La dirección acordada, sus alternativas y la prueba inicial pendiente están en
+[Servicio de consulta semántica](LEDA_SEMANTIC_QUERY_SERVICE.md): interpretación HMI compartida,
+consultas actuales tipadas por demanda y manifiesto derivado aún no implementado. La procedencia
+se conserva internamente; no se exige al modelo ni implica avisos automáticos de simulación.
+Esto no autoriza reescribir la persistencia ni crear un framework genérico de plugins.
+
+### 6.5 Configuración en la HMI
+
+**Configuración general → Leda** será propietaria de la experiencia de configuración
+de Gemini, Telegram opcional y las integraciones que realmente necesite el runtime.
+El flujo normal no debe pedir edición manual de `.env`.
+
+Requisitos:
+
+- el runtime inicia sin configurar y lo declara de forma segura;
+- secretos guardados y leídos exclusivamente por el backend protegido;
+- la UI puede recibir una credencial de forma transitoria para enviarla por un canal
+  protegido, pero no persistirla ni volver a mostrarla;
+- nunca se devuelven secretos en GET ni se almacenan en Git o `localStorage`;
+- reemplazar y eliminar una credencial son operaciones explícitas;
+- Guardar persiste; no afirma que el proveedor quedó verificado;
+- Aplicar o reconectar informa qué proceso o sesión adoptó la configuración;
+- una integración opcional deshabilitada no es un error;
+- los tests pagos de audio o mensajería se activan por separado de los checks pasivos.
+
+### 6.6 Diagnósticos honestos
+
+Cada integración debe distinguir, como mínimo:
+
+| Estado | Significado |
+|---|---|
+| `missing` | Falta configuración requerida. |
+| `configured` | Existe configuración, aún no verificada. |
+| `checking` | Hay una comprobación en curso. |
+| `verified` | Una comprobación definida tuvo éxito para un alcance y momento concretos. |
+| `failing` | La comprobación falló con razón y remedio. |
+| `disabled` | Integración opcional deshabilitada deliberadamente. |
+| `not-tested` | No se ejecutó la comprobación correspondiente. |
+| `stale` | La última verificación perdió vigencia. |
+
+El diagnóstico debe incluir timestamp, alcance, razón y acción correctiva. “Proceso
+listo” no prueba autenticación. “Guardado” no prueba conexión. “Audio generado”,
+“decodificado” o “reproducido” no prueba que una persona lo oyó.
+
+## 7. Diseño propuesto y decisiones abiertas
+
+### 7.1 Recomendaciones vigentes
+
+- Enrutar navegadores remotos hacia un backend del mismo origen.
+- Separar sesión HMI, identidad Telegram e instalación autorizada.
+- Compartir catálogo y consultas de datos, no el estado de presentación.
+- Correlacionar cada interacción con un ID opaco y conservar solo evidencia redactada.
+- Usar navegación declarativa validada por el router; nunca clics por coordenadas.
+- Aplicar TTL y procedencia a snapshots, valores actuales y resultados históricos.
+- Mantener telemetría real y simulada detrás del mismo contrato, con modo explícito.
+
+### 7.2 Decisiones aún abiertas
+
+- proveedor y política de STT del Canal A;
+- política, proveedor o modelo para interpretar lenguaje natural textual, como
+  decisión separada de STT y sin elegir todavía un framework;
+- autenticación y autorización del despliegue web;
+- almacenamiento seguro y rotación de credenciales;
+- modelo definitivo del catálogo de instalaciones, alias y permisos;
+- API de consulta actual/histórica y límites por fuente;
+- transporte de eventos por sesión y estrategia de cancelación;
+- proceso de servicio durable, recuperación y actualización;
+- criterios y momento de eliminación del legado externo (resuelto: retirado el 2026-09-29 por
+  decisión explícita del usuario);
+- estrategia de audio que cumpla latencia, continuidad y audibilidad.
+
+Ninguna decisión abierta debe presentarse como diseño final o estado SDD.
+
+## 8. Plan unificado de entrega
+
+La implementación funcional completa requiere autorización futura. El orden evita
+construir canales nuevos sobre una frontera de datos, acceso y operación inestable.
+
+### Entrega 0 — reconciliación documental y evidencia
+
+**Objetivo:** establecer una autoridad vigente y conservar historia útil sin importar
+requisitos obsoletos como presentes.
+
+**Salida:** este documento, el ledger histórico y el backlog sincronizado.
+
+### Entrega 1 — fundamentos, setup protegido y consulta textual independiente
+
+Esta entrega reúne la base necesaria antes de habilitar canales autónomos. Se divide
+en tres incrementos verificables, sin convertirlos en backlogs independientes.
+
+#### Entrega 1.1 — fundamentos de runtime, contratos y acceso
+
+**Alcance:**
+
+- cerrar ownership y portabilidad del runtime del repositorio;
+- integrar inicio automático en segundo plano con el propietario del despliegue HMI;
+- separar instalación reproducible de operación normal y definir salud, detención y
+  recuperación verificables;
+- corregir paridad y ownership de bindings generados;
+- establecer frontera de acceso antes de credenciales o navegadores remotos;
+- retirar el modo Leda Server/Node-RED como objetivo sin borrar automáticamente el
+  legado;
+- definir contratos por sesión e instalación.
+
+**Prueba de cierre:** instalación reproducible en entorno autorizado; inicio automático
+e invisible con el host HMI seleccionado, también sin configurar; salud con identidad
+de proceso; detención, reinicio y recuperación; acceso no autorizado rechazado; schemas
+y generados reproducibles; rollback o retiro explícitamente aceptado.
+
+**Progreso actual:** los bindings de audio y generados quedaron corregidos en
+FND-1/FND-2/FND-3. FND-6–FND-11 cerró offline el inicio sin secretos, la separación
+bootstrap/inicio normal y la integración Windows con `npm run dev`, incluidas las
+correcciones PowerShell 5.1. No cierra la entrega: faltan aceptación real de instalación
+y operación, pipeline productivo administrado por IT, supervisión durable y frontera
+backend protegida antes de secretos. No se selecciona todavía sistema operativo o
+supervisor y no queda pendiente un experimento de caída espontánea.
+
+#### Entrega 1.2 — configuración, secretos y diagnósticos
+
+**Alcance:**
+
+- UX en Configuración general → Leda;
+- almacenamiento backend seguro, reemplazo y eliminación de secretos;
+- estados `missing/configured/checking/verified/failing/disabled/not-tested/stale`;
+- checks pasivos separados de pruebas pagadas;
+- protección CORS, autenticación y autorización acorde al despliegue seleccionado.
+
+**Prueba de cierre:** runtime inicialmente sin configurar; una credencial puede
+transitar de forma controlada desde el campo de entrada al backend, pero no persiste en
+`localStorage`, bundle, GET, logs ni exportaciones de diagnóstico; estados con tiempo,
+alcance, razón y remedio; guardar no se confunde con verificar; una integración
+opcional deshabilitada permanece saludable.
+
+#### Entrega 1.3 — lenguaje natural textual y datos compartidos
+
+**Incremento acotado documentado:** [diseño semántico](LEDA_SEMANTIC_QUERY_SERVICE.md) y
+[QRY-1–QRY-4](../../odd/tasks/leda-semantic-query-service.md), pendientes de autorización nueva.
+No equivalen al cierre de esta entrega ni habilitan Canal B o histórico.
+
+**Alcance:**
+
+- catálogo y frontera de datos comunes para HMI y Leda;
+- pipeline de intención textual → consulta estructurada y validada, con instalación,
+  entidad, variable y rango explícitos;
+- resolución de entidades y alias, aclaración de ambigüedades y fallas determinísticas
+  antes de habilitar Telegram autónomo;
+- política de intérprete/proveedor/modelo aún abierta, separada de STT y obligada a
+  fundamentar cada respuesta en la consulta validada;
+- una máquina real primero y luego las tres reportadas, sin hardcode;
+- valores fuera de pantalla con procedencia y frescura;
+- histórico solo cuando la fuente declare disponibilidad y rango;
+- modo de presentación explícito y coherente, sin fallback silencioso.
+
+**Prueba de cierre:** lenguaje natural ambiguo se aclara o falla sin inventar; la
+consulta estructurada validada puede trazarse hasta la respuesta; la misma consulta
+devuelve datos consistentes en HMI y Leda; el alcance de instalación se respeta;
+datos vencidos o no disponibles no se presentan como actuales; una máquina real y
+luego las tres reportadas pasan los mismos escenarios sin ramas especiales; el modo
+demo comparte un dataset coherente entre HMI y Leda.
+
+### Entrega 2 — Telegram autónomo
+
+**Alcance:** Canal B de texto, sin navegador, snapshot, audio ni navegación global;
+pairing personal revocable; autorización por instalación; aislamiento multiusuario y
+multiinstalación.
+
+**Prueba de cierre:** consultas actuales autorizadas funcionan con el navegador
+cerrado; las históricas funcionan solo cuando la fuente anuncia capacidad y rango, y
+en caso contrario informan honestamente que no están soportadas; identidades no
+autorizadas no reciben datos; ningún mensaje crea un evento HMI; rotación o revocación
+corta acceso de forma verificable.
+
+### Entrega 3 — micrófono, navegación HMI y voz por sesión
+
+**Alcance:** STT, ambigüedad, resolución de catálogo, navegación a destino publicado,
+confirmación del nuevo contexto y TTS exclusivo de la sesión solicitante.
+
+**Prueba de cierre:** una consulta a equipo fuera de pantalla aclara si corresponde,
+navega solo la sesión solicitante y responde después de confirmar contexto fresco;
+timeout o cancelación nunca reutilizan contexto anterior; no hay acciones industriales.
+
+### Entrega 4 — cierre operacional y aceptación
+
+**Alcance:** despliegue servidor y notebook, concurrencia, reinicio, recuperación,
+errores sin Internet, cancelación, frescura, observabilidad y decisión de limpieza del
+legado.
+
+**Prueba de cierre:** matriz multiusuario/multiinstalación; reinicios y cierres
+inesperados; indisponibilidad de Gemini, Telegram y datos; aceptación humana de audio;
+evidencia de ausencia de writes industriales; decisión explícita sobre rollback y
+eliminación.
+
+### 8.1 Trazabilidad de brechas
+
+| Brecha o cierre verificado | Entrega | Evidencia requerida |
+|---|---:|---|
+| Inicio automático integrado, operación/detención/recuperación e instalación reproducible | 1.1 y 4 | **Parcial:** `npm run dev` Windows, inicio sin configurar y ownership verificados offline; faltan aceptación real, pipeline IT, supervisión durable, reinicio/recuperación e instalación limpia. |
+| **Resuelto — bindings de audio: newline, cuerpo generado, campos requeridos y paridad** | 1.1 | checker 0; Python 83/83 y TypeScript 9/9 confirmados independientemente; TypeScript generado sin diff. |
+| CORS wildcard y autorización frontend insuficiente | 1.1 y 1.2 | acceso permitido/rechazado desde los despliegues reales. |
+| Secretos y configuración manual | 1.2 | almacenamiento backend, tránsito controlado, redacción, reemplazo y eliminación. |
+| Diagnósticos que mezclan guardado, proceso y proveedor | 1.2 | estados y timestamps independientes. |
+| Snapshot visible único, persistente y sin TTL | 1.3 | consultas compartidas con frescura y procedencia. |
+| Falta de catálogo backend, alias y permisos | 1.3 | resolución uniforme de instalación/equipo/variable. |
+| Parser limitado a keywords, sin consulta estructurada | 1.3 | intent → query validada, ambigüedad y fallas trazables. |
+| Telegram ligado al snapshot y evento global | 2 | consulta con navegador cerrado y cero eventos HMI. |
+| Sin micrófono/STT | 3 | entrada de voz aceptada con política de privacidad. |
+| Sin navegación solicitada por Leda | 3 | destino publicado, confirmación y aislamiento por sesión. |
+| Evento global consumido por todos los navegadores | 3 | transporte y deduplicación por sesión solicitante. |
+| Latencia y audibilidad de respuestas largas | 3 y 4 | corpus medido y aceptación humana, sin universalizar muestras. |
+| Tres máquinas reales no verificadas por esta auditoría | 1.3 y 4 | aceptación sobre una y luego las tres en entorno autorizado. |
+| Histórico no universal | 1.3 | capacidades y rangos declarados por fuente. |
+| Limpieza del legado | 4 | resuelta el 2026-09-29: `C:\hmi_tts` retirado por decisión explícita del usuario, anticipada a la aceptación. |
+
+## 9. Criterios de aceptación transversales
+
+Toda entrega funcional futura debe demostrar:
+
+- solo lectura industrial mediante inventario y evidencia de red;
+- separación de usuarios, sesiones e instalaciones;
+- valores con timestamp, frescura y procedencia;
+- errores explícitos, sin simulación o fallback silencioso;
+- cancelación sin trabajo ni eventos tardíos;
+- reinicio sin estado obsoleto presentado como actual;
+- secretos ausentes de artefactos versionados y respuestas de lectura;
+- pruebas automáticas más aceptación real cuando intervengan navegador, proveedor,
+  Telegram, micrófono, audio o datos reales;
+- checks de diagnóstico que generan audio, envían mensajes o consumen cuota se ejecutan
+  solo mediante una acción de prueba explícita; la operación normal aprobada conserva
+  su consumo esperado del proveedor.
+
+## 10. Historia, fuentes y mantenimiento
+
+El resumen curado de decisiones y evidencia histórica está en
+[`LEDA_HISTORIAL_CURADO.md`](LEDA_HISTORIAL_CURADO.md). No es un segundo maestro.
+El documento externo 1.1.4 permanece como respaldo histórico sin modificar fuera del
+repositorio; no debe copiarse ciegamente ni mantenerse en paralelo.
+
+Al actualizar este documento:
+
+1. conservar la separación entre presente, evidencia, objetivo y propuesta;
+2. actualizar el backlog por sus topics estables, no por IDs numéricos de memoria;
+3. enlazar archivos existentes y marcar rutas futuras como planificadas;
+4. no afirmar aceptación real a partir de tests simulados;
+5. añadir una entrada breve al changelog y mover detalle histórico al ledger.
+
+## 11. Cierre de etapa y reanudación
+
+Los once incrementos FND y los tres incrementos UNI están completos offline: contratos de
+audio, inicio seguro sin configurar, separación instalación/arranque e integración local
+Windows con `npm run dev`, además del enrutamiento same-origin y el retiro del selector
+legacy, cuentan con verificación independiente. Ese cierre corresponde a la etapa previa
+registrada en el commit local `36eeaa4`.
+
+Sobre esa base, `PAC-1`, `PAC-1a`, `PAC-2`, `PAC-3A`, `PAC-3A-S1`, `PAC-3B` y `PAC-3` están completos y aceptados
+offline. Leda dispone de autenticación backend propia, recuperación offline y almacenamiento
+cifrado AES-256-GCM para credenciales Gemini/Telegram, con clave de instalación separada y API
+administrativa protegida. La API solo expone estado configurado; no devuelve secretos ni afirma
+que estén verificados, aplicados o en ejecución.
+
+Gemini ya consume la credencial almacenada cuando el modo protegido está seleccionado. Ese modo
+es autoritativo: una ausencia, eliminación, indisponibilidad o corrupción no vuelve a
+`GEMINI_API_KEY`. La variable de entorno permanece únicamente como fuente legacy cuando el modo
+protegido no fue seleccionado. Health, guardado y arranque no contactan al proveedor.
+
+Cada documento HMI recibe una capacidad anónima emitida por el servidor y conservada solo en
+memoria. Esa capacidad separa consultas, contexto de vista, respuestas, eventos, audio, replay,
+cancelación y navegación. Dos navegadores pueden compartir backend, clave, catálogo, telemetría y
+pools acotados sin compartir conversación. No existe fallback desde el contexto de una vista al
+snapshot global de instalación. La capacidad no es una cuenta de usuario, identidad de dispositivo
+ni protección frente al robo del bearer; una recarga obtiene otra sesión, el cierre es best effort
+y el estado expira y no es durable ni multiworker.
+
+La aceptación independiente final aprobó 63 pruebas backend focalizadas, 53 HMI focalizadas,
+209 backend completas y 1844 HMI completas. La cobertura HMI fue 86,64 % statements, 80,00 %
+branches, 85,87 % functions y 87,46 % lines. También aprobaron 40 archivos AST, `pip check`,
+dos verificaciones TypeScript, build, lint y diff. Se conservaron las pruebas reales offline de
+privacidad A/B mediante Flask y bridge/proveedor falsos, y las correcciones previas de recursos.
+No se ejecutaron proveedores, FFmpeg, servicios, red, claves reales ni validaciones productivas.
+
+### Base de código registrada al cerrar esta etapa
+
+| Commit local | Alcance |
+|---|---|
+| `13f1822` | Cambios previos de Gauge/KPI revisados e incorporados; 63 pruebas focalizadas y ESLint correctos. |
+| `f8cc42e` | Corrección de generación, checker y validación del contrato de audio con sus regresiones. |
+| `43d8e02` | Entorno Python propio, dependencias bloqueadas y operaciones del runtime; 27 pruebas de entorno correctas en el cierre. |
+
+Estos commits registran trabajo local; no implican publicación remota ni aceptación
+del ciclo de vida de los servicios. Los cambios previos de Gauge/KPI no quedan como
+modificaciones ajenas pendientes de resolver.
+
+El próximo trabajo debe partir de este maestro, de
+[`../../odd/tasks/leda-runtime-foundations.md`](../../odd/tasks/leda-runtime-foundations.md)
+y de los topics estables `backlog/leda-runtime-monorepo-integration` y
+`backlog/leda-dual-channel-assistant`. `PAC-3B` y `PAC-3` están completos y aceptados offline,
+con un commit local y cierre de sesión autorizados en `feat/leda-telegram-credentials` sobre
+`b5fcaf2`. La identidad de entrega se registra en Git y en el checkpoint canónico de Engram una vez
+confirmado el commit, sin incrustar un SHA autorreferencial en este árbol. La verificación final aprobó
+27 pruebas Telegram focalizadas, 236 backend completas, `pip check`, diff y los escenarios de
+ownership, retry, DELETE, shutdown, thread bloqueado, migración, offsets y no pérdida.
+
+`PAC-4A` también está completo y aceptado offline. La autoridad administrativa proviene únicamente
+de la sesión backend validada. Cerrar **Configuración general** conserva esa sesión; salir del modo
+administrador elimina la autoridad local y mantiene una barrera durable hasta un nuevo login
+explícito validado. Un `204` de logout confirma solo la revocación de la cookie presentada: no afirma
+que un login anterior abortado haya dejado de ejecutarse en el servidor. La barrera impide que una
+cookie tardía restaure automáticamente el rol HMI.
+
+La aceptación final conservó **80 pruebas focalizadas en 9 archivos**, **1885 pruebas HMI en 199
+archivos**, build, lint y diff correctos, además de **40 pruebas parentales en 3 archivos**. El gate
+backend vigente aprobó **236 pruebas en 15,056 s**. Una ejecución anterior expuso una carrera
+preexistente de check-then-copy durante el sembrado concurrente de estado; el diagnóstico de solo
+lectura la dejó visible bajo PW-002 y no afirmó haberla corregido — cierre posterior registrado en
+la conciliación 2.0.9 de este mismo §11.
+
+`PAC-4B` y el paquete `PAC-4` están completos y aceptados offline tras una verificación independiente
+COMPLETE PASS que cerró los cuatro hallazgos sin regresiones. **Configuración general → Leda**
+incorpora campos transitorios para las credenciales Gemini y Telegram, metadatos y diagnósticos
+separados, y acciones explícitas de guardar, eliminar y aplicar que reutilizan la misma sesión
+administrativa. Los secretos no ingresan en
+TanStack Query, Zustand, almacenamiento del navegador ni el guardado global de efectos/orbe. Un
+DELETE Telegram con `409 TELEGRAM_STOP_TIMEOUT` conserva la ausencia confirmada, actualiza estado
+pasivo y ofrece un nuevo DELETE iniciado por el usuario; no aplica un token ausente ni repite acciones
+automáticamente.
+
+La prueba final aprobó **125 pruebas focalizadas en 10 archivos**, **1922 pruebas HMI en 202 archivos**,
+cobertura de **86,79 % statements, 80,11 % branches, 86,07 % functions y 87,66 % lines**, build, lint,
+diff y **236 pruebas backend**. El verificador externo añadió **6 pruebas** con cliente real, hook,
+QueryClient y RTL; el padre confirmó **51 pruebas en 3 archivos** y la lectura estructural del cliente
+y del hook. Se conservaron la barrera manual PAC-4A, R1/R2, proxies, Viewer/Voice, el guardado global
+solo para efectos y el cierre de Settings sin cerrar la sesión administrativa.
+
+Esto constituye aceptación offline, no prueba de navegador o captura real, proveedor, red, proxy
+productivo, seguridad de despliegue ni readiness de producción. No se añade un segundo login, UI de
+chat, historial persistido ni identidad de cuenta. La política existente de acceso a
+`/hmi/leda-config` tampoco quedó protegida por estos cambios y requiere tratamiento separado.
+
+`PAC-5` cerró el paquete protegido offline. La verificación independiente integrada
+(`mu7e3sey-q-bwyw`) aprobó una vez los seis gates con Git y `HEAD` sin cambios: **1924 pruebas HMI
+en 202 archivos** con cobertura de **86,79 % statements, 80,12 % branches, 86,07 % functions y
+87,66 % lines** (umbral global exigido de 70, cumplido; la capa `services` queda en 80,92 %
+branches y no alcanza el objetivo del 90 % de `docs/TESTING.md`), build de **2734 módulos**, lint,
+`git diff --check`, el gate backend canónico con **240 pruebas en 16,673 s** y `pip check`. Se
+conservan las advertencias conocidas (`canvas.getContext` en jsdom, `/grid.svg` sin resolver,
+chunk `main 1592,99 kB`, avisos CRLF) y la carrera preexistente de `PW-002`, que no se repitió
+pero no fue corregida. El gate ambiente no se ejecutó: por una clave legacy heredada y una
+configuración de voz real en import, la verificación corrió en un supervisor hijo aislado
+(`TemporaryDirectory`) con variables ambiente sensibles limpiadas y el entorno del padre intacto;
+el README del runtime documenta el wrapper reproducible de verificación offline.
+
+**Conciliación 2.0.9:** el párrafo `PAC-5` anterior se conserva como evidencia histórica con fecha.
+La carrera de sembrado concurrente que registra ya no está abierta: los commits `f865e79`
+(sembrado atómico) y `855c26b` (endurecimiento ante temporarios huérfanos y pérdida de energía)
+la corrigieron y verificaron; la evidencia histórica se conserva en
+[`../../odd/tasks/leda-seed-atomicity.md`](../../odd/tasks/leda-seed-atomicity.md) y
+[`../../odd/tasks/leda-seed-hardening.md`](../../odd/tasks/leda-seed-hardening.md).
+`PW-001` está cerrado en `f964113`.
+
+Dos correcciones acotadas posteriores a `PAC-4`, aceptadas con evidencia local limitada confirmada
+por el padre y no repetidas en la verificación `PAC-5`, quedan registradas en
+[`../../odd/tasks/windows-acl-helper-remediation.md`](../../odd/tasks/windows-acl-helper-remediation.md)
+(helper ACL con lecturas Owner+Access y persistencia `Directory.SetAccessControl`, reparación real
+del directorio de autenticación sin elevación) y en
+[`../../odd/tasks/leda-admin-fetch-receiver.md`](../../odd/tasks/leda-admin-fetch-receiver.md)
+(`fetch.bind(globalThis)` conservando el transporte inyectado, login Chrome nativo confirmado por
+el usuario). Con aprobación explícita separada se aprovisionó una clave maestra protegida nueva
+con su almacén de cifrado vacío; ambos proveedores iniciaron «Sin configurar» y Telegram quedó
+habilitado pero detenido. Ninguna de estas evidencias afirma verificación de proveedor,
+despliegue ni readiness de producción.
+
+El pipeline productivo administrado por IT sigue como objetivo posterior sin seleccionar
+todavía OS o supervisor. Cualquier readiness adicional del loader del navegador es UX
+opcional y no bloqueante, no un requisito obligatorio aprobado.
+
+Esto no constituye aceptación de producción. PW-002 y PW-003 continúan activos para
+instalación limpia y arranque real, forwarding, despliegue y
+supervisión administrados por IT, recuperación durable, retiro explícito de la instalación legacy
+y el trabajo posterior del asistente. La validación Linux real, el SACL nativo, los reparse
+points nativos, backup/restore, TLS, proxy y el entorno productivo también permanecen abiertos.
+
+### 11.1 Próximo paso vigente (checkpoint 2.0.21; registros anteriores históricos)
+
+**Checkpoint vigente 2.0.21 (2026-09-22) — diseño documentado; prueba inicial no implementada.**
+
+La dirección acordada y su evolución están en [Servicio de consulta semántica](LEDA_SEMANTIC_QUERY_SERVICE.md);
+DOC-1 y las cuatro pruebas futuras se registran en el [tracker único](../../odd/tasks/leda-semantic-query-service.md).
+QRY-1–QRY-4 requieren autorización explícita nueva: no iniciar implementación, pruebas, servicios
+ni proveedores. Canal B sigue aplazado. PW-003 conserva el roadmap amplio; PW-002/PW-004 son independientes.
+
+El cierre estable observado por el padre es `19adf7d`. CL (preguntas ejercitadas, Telegram, voz HMI y
+orbe) y PW-005 (Ctrl+C normal) permanecen aceptados con los límites y cronología de 2.0.20 debajo;
+no se repiten ni se afirma una suite completa nueva. Esta actualización es exclusivamente documental.
+
+**Respaldo observado:** DOC-1 cerrado en `173bd8640aaba588da609e3caabc43f9f3708209`, integrado
+por fast-forward y publicado por el padre; main y origin/main coinciden, solo `.gga` sin rastrear.
+Los checks documental y staged aprobaron (331 líneas autorales); evaluación nativa pasiva, sin review
+ni receipt y con RDD desactivado. El permiso nuevo de omitir GGA se limita a los dos commits de este
+respaldo, sin cambios persistentes ni herencia futura. El primero ya se realizó; el segundo registra
+esta evidencia y su hash/push se informarán tras observarlos. Sin PR ni nuevas pruebas funcionales.
+**Próximo paso de producto:** autorización explícita nueva para la prueba acotada; no otra integración
+ni repetición de CL/Ctrl+C. Solo el padre realiza el commit/push final de evidencia pendiente.
+
+**Checkpoint histórico 2.0.20 (2026-09-22) — CL aceptado y PW-005 cerrado; permisos y próximos pasos sustituidos por 2.0.21.**
+
+- **CL6 aceptado por reporte del usuario:** «si, loacabo de comprobar y ahora si responde bien, no se evita ninguna pregunta y responde por telegram y por voz en la hmi mostrando el orbe.» Esto acepta las preguntas ejercitadas, las respuestas Telegram, la voz HMI y el orbe; no es una prueba ejecutada por el agente, una garantía sobre cualquier pregunta ni evidencia separada de navegación entre vistas o latencia.
+- **PW-005 cerrado por decisión explícita:** «listo asunto terminado, se cierra con ctrl+c y listo, no damos mas vueltas». El snapshot comunicado por el padre de `2026-09-22T19:47:25Z` no mostró listeners 5056/5057/5173 ni procesos Leda ni errores. La recuperación tras cierre abrupto no fue demostrada independientemente: queda excluida de esta aceptación, no aprobada ni propuesta como próxima tarea.
+- **Cronología de verificación:** los gates completos CL de 2.0.19 preceden PW-005. Los 26 backend/14 Node focalizados de PW-005 preceden el arreglo de una línea `[pscustomobject][ordered]`; ese follow-up tiene readback estático independiente y persistencia manual de PID/birth Node coincidente, sin pruebas automatizadas nuevas. No hay un gate completo final del árbol posterior a PW-005. Detalle: [task CL](../../odd/tasks/leda-channel-a-context-lifetime.md) y [task PW-005](../../odd/tasks/leda-development-shutdown-recovery.md).
+- **Entrega:** el usuario autorizó UN commit local y eligió `skip_hook_this_commit` para omitir GGA únicamente en ese commit, sin editar hooks/configuración. El padre lo ejecutará; está pendiente, sin hash inventado ni autorreferencial. `.gga` permanece sin rastrear y excluido. No push/PR ni nuevas pruebas, proveedores o servicios.
+
+**NEXT SESSION — una primera acción concreta:** después de reconciliar este maestro completo, índice, tasks y Git, presentar una propuesta acotada de **planificación de la frontera semántica compartida HMI/Leda** (catálogo, interpretación de widgets, frescura y procedencia; §6.4, decisiones abiertas §7.2 y Entrega 1.3 de §8). Pedir una elección: **aprobar esa planificación o aplazarla**. La secuencia de §11.1/2.0.11 ya priorizaba planificar mejoras del Canal A tras su aceptación; no se retoma Canal B ni se elige STT/LLM o implementación por inferencia. §3.4 exige aprobación separada antes de fuente. Sin auto-tests, push, arranque de servicios ni llamadas a proveedor; no repetir audio/orbe/Ctrl+C aceptados.
+
+PW-003 conserva el backlog amplio porque el objetivo completo sigue parcialmente implementado (§1, §6 y §8); su antigua aceptación CL pendiente queda cerrada. PW-005 se retira del índice tras cerrar su detalle en Engram. PW-002/PW-004 no cambian. Los próximos pasos, estados y permisos de todos los registros anteriores son históricos y no se heredan.
+
+**Checkpoint histórico 2.0.19 (2026-09-22) — contrato CL del tiempo de vida de contexto implementado y aceptado offline con verificación independiente completa.** La respuesta capturada del Canal A ya no queda invalidada por un refresco de rutina de la misma vista: el publicador del navegador emite un `frameGeneration` opcional por visita de vista (uno por instancia del exportador, reutilizado en ticks, reanudaciones y reset; contador cliente-global sin reset por epoch) y el backend usa un highwater por sesión — misma generación con contexto preexistente renueva la frescura sin bump de revisión, generación mayor o contexto ausente hace bump, la herencia legacy se mantiene verbatim y la invalidez conserva el highwater. Además, cada respuesta capturada lleva un `captured_deadline` interno (no es campo de wire) verificado contra el mismo reloj monotónico inyectado, con igualdad exacta fallando cerrado y recheck de testigo solo-referencial tras la muestra. El emparejamiento productivo no cambió: la corrección de las 11 fallas del harness de clock es solo-de-tests (helper de gate y agregación de causas en `test_channel_a_pairing.py`; cuerpos de aserción del oráculo intactos). Detalle, evidencia y contracto completo: [`../../odd/tasks/leda-channel-a-context-lifetime.md`](../../odd/tasks/leda-channel-a-context-lifetime.md).
+
+| Verificación independiente completa (`muctg3tg-7-tbg4`, cada gate una vez) | Resultado observado |
+|---|---|
+| Gate backend README PAC-5 (verbatim, sandbox fresco, once overrides ausentes) | 1.121 pruebas, 23,299 s, exit 0. |
+| Cobertura estándar completa | 209 suites, 2.188 pruebas PASS, 67,18 s, exit 0. |
+| Cobertura cargada | Statements 87,42 %; branches 80,63 %; functions 86,57 %; lines 88,30 %. Cuatro umbrales 70 intactos; cobertura estándar, sin afirmar inclusión exhaustiva de fuente. |
+| Build y lint | PASS (build 10,03 s); lint PASS; `git diff --check` PASS, exit 0. |
+
+Los avisos canvas, `/grid.svg`, tamaño de chunks y LF/CRLF son no fatales. El baseline independiente (`mucselsk-5-1sas`) confirmó en un archivo aislado de `1731350` las 11 fallas históricas de `test_channel_a_pairing_clock_cleanup` como preexistentes (14 pruebas, 11 fallas idénticas, 3 pases, 0 errores); quedan resueltas por CL5 y **no hay gate pendiente de confirmación**. TDD estricto con RED/GREEN observados por ola (task §10); limitación residual honesta: un arranque hipotético no ejecutado que falla después de la identidad no está cubierto — solo-de-tests, no defecto de producción. RDD desactivado y evaluación nativa no disponible: esto es verificación independiente, **no aprobación nativa**. Dif pre-documentación: 17 archivos modificados, 1180+/121− (producción 103+/6−, pruebas 517+/42−, task 560+/73−); `.gga` sin tocar; sin commit ni push.
+
+**Reporte histórico previo a CL6 (supersedido por aceptación 2.0.20):** el vínculo de Telegram y las respuestas fueron confirmados con capturas tras configurar el nombre; se reportó audio/orbe intermitente incluso con HMI visible, no atribuible solo a calentamiento. En ese checkpoint la aceptación manual seguía pendiente. El reporte posterior de éxito está arriba; no constituye causa raíz completa demostrada en vivo.
+
+**Checkpoint histórico 2.0.18 (2026-09-22) — preflight de nombre HMI aceptado solo offline; sustituido como vigente por 2.0.19.** El panel de emparejamiento exige un nombre HMI configurado antes de emitir peticiones de pairing: ante nombre ausente muestra una copia accionable antes del QR y no envía solicitudes; ante nombre ilegible usa una copia distinta y veraz («No se pudo leer el nombre guardado»); la lectura se repite en cada apertura. Respuesta, audio, backend y contratos de pairing no cambiaron. Detalle y evidencia: [`../../odd/tasks/leda-pairing-name-preflight.md`](../../odd/tasks/leda-pairing-name-preflight.md).
+
+| Verificación independiente (`muc76rbg-g-87k1`, una vez cada gate) | Resultado observado |
+|---|---|
+| Frontend enfocado | 6 suites, 58 PASS, 2,76 s. |
+| Cobertura estándar completa | 209 suites, 2.184 pruebas únicas PASS, 80,29 s; las 58 anteriores se repiten, no se suman. |
+| Cobertura cargada | Statements 87,42 %; branches 80,64 %; functions 86,56 %; lines 88,30 %. Cuatro umbrales 70 intactos; cobertura estándar, sin afirmar inclusión exhaustiva de fuente. |
+| Build y lint | TypeScript + Vite PASS (Vite 9,94 s); lint PASS. Códigos de salida numéricos no expuestos. |
+
+Los avisos jsdom canvas, `/grid.svg` y tamaño de chunks son no fatales. RDD desactivado y evaluación nativa no disponible: esto es verificación independiente, **no aprobación nativa**. La aceptación manual de los avisos en navegador sigue pendiente.
+
+**Reportes reales del usuario (evidencia de usuario, no verificación de agente):** el 404 histórico del runtime se resolvió con el stop de la identidad oficial y un relanzamiento por el usuario; el nombre sin configurar dejó el documento de Telegram indisponible y configurar el nombre permitió el emparejamiento; capturas confirman el vínculo y varias respuestas de Telegram. El audio/orbe funciona de forma intermitente incluso con la HMI visible y tras cambiar de dashboard: **no está totalmente aceptado ni es solo calentamiento**. El legado `C:/hmi_tts` funcionaba de manera confiable según el usuario; eso no es prueba de agente. No hubo reinicios de credenciales ni consultas pagadas del agente. El diagnóstico offline de coordinador/almacén (`mucm74ng-i-40ua`, exit 0) confirmó dos casos: una publicación idéntica durante el envío simulado a Telegram impide generar el envelope HMI; en otro caso, una publicación posterior retira un evento ya generado. **No** es causa raíz completa en vivo ni RED de TDD.
+
+**Contrato CL del tiempo de vida de contexto — registro histórico del gate (2.0.18; supersado por 2.0.19).** El borrador en [`../../odd/tasks/leda-channel-a-context-lifetime.md`](../../odd/tasks/leda-channel-a-context-lifetime.md) era entonces DRAFT/DOCUMENTATION-ONLY (CL1): sin pruebas (CL2), fuente (CL3) ni verificación (CL4) de esa propuesta. El usuario pidió «avisame antes de implementar» y aplazó ese punto exacto a la sesión siguiente. Ese gate fue descargado después por la elección fresca `authorize_context_lifetime_implementation`; la implementación offline, el follow-up del harness de pruebas (CL5) y la verificación independiente completa quedan registrados en el checkpoint vigente 2.0.19 y en el task.
+
+**Cierre de sesión (2026-09-22; histórico):** a pedido explícito del usuario se autorizó UN único commit local de checkpoint con base pre-commit `c82fe44` (rama `feat/leda-telegram-credentials`). El commit resultante es `1731350`, confirmado por Git y hoy baseline del checkpoint vigente 2.0.19. Push/PR/servicios/proveedores siguen sin autorización; las pruebas no se reejecutaron en ese cierre documental.
+
+**Checkpoint histórico 2.0.17 (2026-09-22) — RCA-5l aceptado solo offline; sustituido como vigente por 2.0.18.** El usuario aprobó
+la implementación con pruebas offline y la dependencia local `qrcode.react@4.2.0`.
+GET/POST protegidos por capability proyectan solo el estado de emparejamiento o el deep link
+con TTL; el cliente/proxy, el hook efímero y el panel manual Core completan el wiring QR/status.
+`Pyramid` está inmediatamente a la derecha de Logs (que sigue deshabilitado); EPPI no cambia.
+La confirmación pertenece al teléfono: abrir el panel no aplica ni arranca el Canal A.
+Se preserva el circuito de respuesta/audio existente, sin ampliar B/Gemini ni agregar frameworks.
+
+| Verificación independiente | Resultado observado |
+|---|---|
+| Backend, `mubxc48f-g-3xla` | 156 PASS: HTTP 10, pairing 57, activation 23, manager 37, root 14, admin HTTP 15. |
+| Frontend enfocado, `muc375jj-13-xccb` | 8 suites, 189 PASS (36 UI), 2,96 s. |
+| Cobertura estándar completa, mismo verificador | 209 suites, 2.181 pruebas únicas PASS, 59,79 s; las 189 anteriores se repiten, no se suman como únicas. |
+| Cobertura de módulos cargados | Statements 87,42%; branches 80,62%; functions 86,57%; lines 88,31%. Cuatro umbrales 70 intactos; no prueba inclusión de fuente no importada. |
+| Build y lint | `tsc -b && vite build` PASS (Vite 11,35 s); lint PASS sin diagnósticos. Build no acredita tipado de fixtures de prueba. |
+
+Los gates frontend se ejecutaron una vez cada uno, en orden, sin cambios de configuración de
+cobertura. Los códigos de salida numéricos no fueron expuestos. Avisos jsdom canvas, `/grid.svg`
+y tamaño de chunks no impidieron el pase; no se afirma su antigüedad respecto del baseline.
+Los RED y correcciones de cierre inmediato, medida exterior y estado del hook, así como el fallo
+previo de cobertura filtrada, quedan en el
+[tracker](../../odd/tasks/leda-channel-a-remote.md). La revisión estática acotada no halló
+bloqueadores; la evaluación nativa no estuvo disponible y esto no es aprobación nativa.
+
+**Pendiente y sin autorización nueva:** acordar la aceptación real QR → confirmación en Telegram
+→ consulta → respuesta/audio en la HMI vinculada. No se ejecutaron navegador/teléfono reales,
+servicios, proveedores, cambios de credenciales ni aceptación productiva. Consultar y esperar
+según §3.4 antes de ese trabajo; no introducir scheduler, STT/NLU, cancelación u otros extras.
+PW-003 continúa pendiente; PW-002/PW-004 no cambian. Leer el maestro completo al reanudar,
+recuperar `checkpoint/leda-channel-a-manager-resume` y contrastar tracker, índice y Git.
+Base `bffe4ed`, rama `feat/leda-telegram-credentials`, cambios actuales sin commit/push/PR.
+El permiso de un commit del checkpoint anterior se consumió en `bffe4ed`; no se hereda.
+
+**Cierre de sesión histórico (2026-09-22, estado PRE-COMMIT):** a pedido explícito del usuario se autorizó
+UN único commit local de checkpoint de los 30 paths ya verificados, con base pre-commit `bffe4ed`
+(no es el hash resultante). El hash real lo confirma el padre y se registra en Engram
+`checkpoint/leda-channel-a-manager-resume` tras el éxito; no se fabrica dentro del propio commit.
+El estado "sin commit" de este bloque y del encabezado es el PREVIO al cierre; solo este commit
+queda autorizado (push/PR/servicios/proveedores siguen sin autorización).
+
+**Registros históricos siguientes:** sus próximos pasos y permisos describen aquel checkpoint,
+no el estado ni la autorización actuales.
+
+**Checkpoint histórico 2.0.16 (2026-09-21).** La administración de credenciales del Canal A está
+aceptada **solo offline** en sus dos etapas admin, con aceptaciones separadas: el backend RCA-5j
+(`ChannelAManager`, guardar/borrar y Apply/status con auth/CSRF/origin existentes, manager ausente
+rechaza cerrado) conserva su aceptación previa (48 métodos únicos y repeat final de 15), y su
+**integración frontend RCA-5k** en la tarjeta de credencial A existente pasó los cinco gates
+finales independientes —
+status con query A separada, su propia clave y guard de sesión/autoridad que no contamina la
+metadata existente de Gemini/B; Apply explícito deshabilitado sin credencial guardada o ante A no
+disponible; parser/cliente de dominio estrictos con errores públicos canónicos; warning+reintento
+provider-safe tras un borrado exitoso del A con stop no confirmado, apuntando **solo al Canal A,
+nunca al B**; y las dos rutas proxy A exactas (status GET y apply POST ancladas al 5057 local,
+stripping de capability de sesión, B y su PUT/DELETE preservados). Dos regresiones adicionales de
+autoridad/staleness se observaron RED y se corrigieron con el refresh conjunto bajo el guard
+existente y el etiquetado veraz de los datos anteriores conservados cuando el refetch de A falla,
+sin framework nuevo de disponibilidad/cancelación. B, Gemini y la respuesta/audio existentes no
+cambiaron. Evidencia del candidato previo a la corrección (verificador `mubsaz3o-s-zxko`, comandos
+congelados una vez cada uno): 153 pruebas focalizadas PASS, 25 de integración PASS, cobertura
+filtrada con los cuatro umbrales 70 intactos, build y lint con exit 0. Tras la corrección de
+rotulado, la verificación independiente final (`mubszah4-y-q5gq`, los cinco gates congelados una
+vez cada uno) aprobó 155 focalizadas y 25 de integración (180 únicas en total), cobertura con
+umbrales intactos, build de 2737 módulos con sus warnings conocidos y lint sin diagnósticos, con
+exit codes no expuestos por la herramienta; sin
+navegador real, Telegram, Gemini, QR, audio ni aceptación de
+producto. Detalle y evidencia:
+[`../../odd/tasks/leda-channel-a-remote.md`](../../odd/tasks/leda-channel-a-remote.md).
+
+**Corrección de rotulado — completada y verificada; RCA-5k aceptado offline.** La revisión estática
+del padre había encontrado un caso no cubierto: la tarjeta A rotulaba `activa` solo con fase
+`running` y `detenida` en cualquier otra, mientras el backend deja fase `stopping` con actividad en
+curso (`channel_a_lifecycle.py`, `stop()` ~523–527 devuelve `False`) y `quiescent: false` (~550); el
+caso conocido podía mostrarse como `detenida` junto al aviso de stop no confirmado. El usuario
+aprobó «Corregir ahora» y la corrección se completó: pruebas de regresión (`mubsq4p7-u-zb19` y un
+follow-up tipado/comentario con dos casos adicionales) y RED independiente (`mubsvn4h-w-zxd5`,
+comando 1 una vez: 155 pruebas, 153 PASS/2 FAIL esperadas por ausencia de los rótulos
+stopping/failed, con el DOM mostrando `detenida`); luego el parche solo de tarjeta
+(`mubswysz-x-gd9a`, cero comandos): import de tipo, helper puro de rótulo y un JSX — `running`→
+`activa`; `null`/`idle`/`stopped`→`detenida`; `stopping`→«Detención en curso»; otros no-running→
+«Estado de ejecución no confirmado» — sin cambios de runtime ni controles. Los cinco gates finales
+independientes (`mubszah4-y-q5gq`) aprobaron; el verificador leyó el helper y confirmó el uso
+exclusivo de A con el rótulo booleano de B preservado y sin efectos de control en runtime. Fuente y
+pruebas quedan congeladas; las revisiones documentales parental e independiente aprobaron. Sin
+trabajo QR todavía.
+
+El próximo paso pendiente, **no implementado por este cierre y sin concesión de fuente nueva**, es
+la proyección **QR/status por capability** con las rutas proxy/cliente y la apertura **manual** del
+QR desde `Pyramid`, inmediatamente a la derecha de Logs, reutilizando la respuesta y el audio
+existentes, con la corrección de rotulado ya completada. Ese siguiente incremento requiere su
+propio mapeo/contrato/TDD cuando el usuario lo autorice. `PW-003` sigue pendiente con este
+próximo paso; `PW-002` y `PW-004` no cambian. Base actual `9864c25`, sin commit nuevo; sin push ni PR.
+La regla ask-and-wait de §3.4 sigue vigente y no se agregan extras ni cambios de respuesta/audio.
+La instrucción de **leer este documento maestro completo antes de planificar o escribir** se
+conserva para la próxima sesión.
+
+**Cierre de sesión documental (a pedido del usuario).** Para este checkpoint únicamente, el
+usuario autorizó **un commit local único** sobre los 20 paths actuales (código backend y frontend,
+pruebas y documentación); esta autorización reemplaza la regla de «sin commit» solo en este caso,
+y las concesiones anteriores quedan como historia. El parent ejecuta el commit desde la base
+`9864c25` (pre-commit, no el HEAD final) y su hash real se registra en Engram tras el éxito —
+nunca un SHA autorreferencial inventado; al escribir esta nota el commit puede estar pendiente y
+este documento no afirma que ya exista. Las pruebas existentes no se reejecutaron en este cierre
+documental; la evidencia vigente sigue siendo la aceptación offline de RCA-5k descripta arriba.
+
+**Checkpoint histórico 2.0.15 (2026-09-21) — aceptación backend RCA-5j; precisado por 2.0.16, que
+agrega la integración frontend aceptada.** La administración backend de las credenciales del
+Canal A (RCA-5j) quedó **aceptada solo offline**: guardar/borrar credenciales y Apply/status
+explícitos pasan por el `ChannelAManager` y su generación, con la auth/CSRF/origin admin existente.
+El root normal inyecta A antes de su frontera admin sin Apply de arranque; la ausencia del manager
+rechaza cerrado con `LEDA_CHANNEL_A_MANAGER_UNAVAILABLE`/503 sin mutar el almacén (decisión del
+usuario, sin fallback de escrituras directas). `GET .../telegram_channel_a/status` proyecta
+exactamente seis claves con la activación anidada de cuatro, `POST .../apply` exige un objeto JSON
+vacío, los errores de dominio mapean a `{ok: false, error}` cerrados y las rutas A usan
+`Cache-Control: no-store`; B mantiene sus nueve campos y sus rutas, la salud pública no se amplía y
+el root queda inerte. Evidencia independiente: RED inicial antes de la fuente, implementación solo
+en `admin_http.py`/`local_presentation.py`, GREEN de 48 métodos únicos en cuatro patrones y un
+repeat final del patrón A admin de 15 PASS; sin UI ni conexión real. Esto **no** completa la UI
+admin ni el circuito QR completo.
+
+El próximo paso pendiente es la **integración frontend**: la tarjeta de credencial A existente con
+Apply/status, el parser/cliente de dominio y la allowlist exacta de proxy. El mapper read-only
+completó su mapeo sin cambiar archivos frontend; el contrato y las pruebas frontend siguen
+pendientes y aún no hay autorización de escritura frontend. Decisión de UI ya **aprobada** por el
+usuario: ante borrado exitoso del Canal A con stop del bot no confirmado, el alcance frontend puede
+reutilizar la UI de warning+reintento existente (la opción estilo B "Aviso y reintento"), y el
+reintento debe apuntar **solo al Canal A, nunca al B**. Las pruebas/fuente frontend siguen sin
+iniciar ni congelar. Después sigue la proyección QR/status por capability con las rutas proxy/cliente y la
+apertura **manual** del QR desde `Pyramid`, reutilizando la respuesta y el audio existentes. Detalle
+y checklist: [`../../odd/tasks/leda-channel-a-remote.md`](../../odd/tasks/leda-channel-a-remote.md);
+pendiente activo `PW-003`. Base actual `9864c25`, sin commit nuevo; sin push ni PR. La regla
+ask-and-wait de §3.4 sigue vigente y no se agregan extras ni cambios de respuesta/audio. La
+instrucción de **leer este documento maestro completo antes de planificar o escribir** se conserva
+para la próxima sesión.
+
+**Checkpoint histórico 2.0.14 (2026-09-21) — precisado por 2.0.15; la composición raíz queda aceptada offline.** El primer incremento acotado de composición raíz del
+Canal A quedó **aceptado solo offline**: el `ChannelAManager` real y su factory de activación por
+defecto se componen en el root existente `local_presentation.py`, con la ruta canónica de
+configuración en `paths.py`, el mismo almacén protegido del Canal B, la reserva compartida A+B, el
+registro/sesión reales y el guard de elegibilidad existente; el apagado del root detiene A y B. La
+evidencia independiente fue RED 11 métodos / 0 PASS / 10 fallas / 1 error, luego GREEN de 13 métodos
+únicos (root 11 + paths 2) y un spotcheck de root de 11 PASS, sin intentos de HTTP, adaptador ni
+hilos. Esto es composición raíz offline, **no** activación real del bot, ni Telegram/QR/audio reales,
+ni conexión de punta a punta.
+
+El próximo paso pendiente, **no autorizado por este incremento**, es administrar las credenciales del
+Canal A (guardar/borrar y Apply/status explícitos) a través del manager y su generación, reutilizando
+la autenticación/CSRF admin existente; después, la proyección QR/status por capability con las rutas
+proxy/cliente y la apertura **manual** del QR desde `Pyramid` inmediatamente a la derecha de Logs,
+reutilizando la respuesta y el audio existentes. La conexión sigue incompleta y la prioridad vigente
+no cambia. Detalle y checklist: [`../../odd/tasks/leda-channel-a-remote.md`](../../odd/tasks/leda-channel-a-remote.md);
+pendiente activo `PW-003`. Sin push ni PR.
+
+**Cierre de sesión a pedido del usuario (2026-09-21).** La sesión se cerró a pedido del usuario con un
+único permiso nuevo: un **commit local de checkpoint** de los seis archivos cambiados (dos de fuente,
+una prueba nueva y estos tres documentos), a realizar por el agente coordinador. Ese hash se registra en Engram una
+vez creado y **no se incrusta** en este árbol: no se inventa un SHA autorreferencial. No hay push, PR,
+proveedor ni acción operativa. **Próxima sesión: leer este documento maestro completo antes de
+planificar o escribir**, con prioridad en este §11.1 y en la regla de aprobación previa de §3.4, y
+distinguiendo los bloques de checkpoint históricos; recuperar el checkpoint de Engram
+`checkpoint/leda-channel-a-manager-resume` y reconciliarlo con `git HEAD` y el estado real del árbol; después
+leer `PW-003` y `odd/tasks/leda-channel-a-remote.md` y contrastarlos con el código real. RCA-5i ya
+está aceptado offline y no se rehace: el primer paso pendiente sigue siendo admin A (guardar/borrar
+credencial y Apply/status por el manager/generación con la auth/CSRF existente) y luego QR/status por
+capability con proxy/cliente y apertura manual del QR en `Pyramid`. Sin comportamiento nuevo, sin
+cancelación/disponibilidad, sin transcript/STT/NLU, sin ampliación del Canal B y sin refactor no
+solicitado: preguntar y esperar ante cualquier extra o bloqueo técnico/de seguridad. Ninguna autoridad
+de proveedor o runtime vivo se hereda, y una prueba offline nunca se reporta como bot, Telegram, QR o
+audio reales. La verificación de esta actualización documental es estática: no ejecuta pruebas,
+servicios ni proveedores.
+
+**Checkpoint histórico 2.0.13 (2026-09-21) — continuación precisada por 2.0.14; la conexión completa sigue pendiente.** El usuario pide terminar la conexión
+**QR → Canal A → circuito Leda existente**, siguiendo las etapas acordadas, sin sumar por ahora
+cambios al comportamiento de respuesta o audio. Rige la aprobación previa de §3.4.
+
+Reutilizar los componentes ya implementados y localizar únicamente el cableado pendiente:
+vinculación QR con la HMI, entrada por el bot A y entrega al circuito existente de consulta y
+respuesta de esa HMI. No continuar por inercia el plan adicional RCA-5h.3 de disponibilidad y
+cancelación frontend. La apertura del QR sigue la decisión posterior ya registrada: **manual**, con
+`Pyramid` inmediatamente a la derecha de Logs; no la apertura automática del registro 2.0.12.
+
+El detalle de avances y evidencia offline está en
+[`../../odd/tasks/leda-channel-a-remote.md`](../../odd/tasks/leda-channel-a-remote.md) y el
+pendiente activo en `PW-003`. Esa evidencia no significa que la conexión de punta a punta esté
+terminada. Esta actualización documental no ejecuta pruebas ni servicios y no autoriza commits,
+proveedores o acciones operativas. Las instrucciones de cierre y permisos antiguos que siguen son
+históricos y no se renuevan.
+
+**Checkpoint histórico 2.0.12 (2026-09-20).** Sesión de **planificación documental** del acceso remoto
+del Canal A. Este cierre es **solo documental**: no ejecuta código, servicios, pruebas, proveedores,
+Telegram, Gemini ni instalaciones, y **no** afirma compilación ni suites aprobadas. El alcance se
+acordó con el usuario y la implementación queda diferida a la próxima sesión. Durante la
+planificación sí se realizó **una lectura pública** de la documentación oficial de Telegram en
+<https://core.telegram.org/bots/features#deep-linking> para confirmar el comportamiento de los deep
+links y de `Start`; eso **no** fue uso del proveedor, de credenciales ni de red operativa, y el
+parche de cierre en sí no hizo ninguna llamada de red. La aceptación acotada 2.0.11 registrada más
+abajo se conserva como evidencia histórica válida.
+
+Alcance de producto acordado (autoriza planificar; no autoriza escrituras de fuente por sí solo: la
+implementación empieza solo cuando el usuario pide avanzar):
+
+1. **Canal B.** Sigue siendo el bot existente de Telegram, autónomo y sin HMI abierta para usuarios
+   admitidos. Se preservan su limitación actual de **un único chat emparejado** y su `JsonFileStore`
+   obsoleto; este incremento no corrige, integra ni amplía la admisión del Canal B.
+2. **Canal A remoto.** Usa un **bot y una entrada separados** (bot A dedicado), nunca un modo o
+   comando dentro del bot del Canal B. El observador físico está frente a la HMI y su **único
+   dispositivo de entrada es el teléfono**: no hay mouse, teclado, touch ni clic de confirmación en
+   la HMI. El QR se muestra automáticamente cuando la HMI está libre; no hace falta un botón local
+   «Vincular».
+3. **Emparejamiento.** El QR es de un solo uso y vida corta (60 s) y **rota automáticamente** mientras
+   la HMI está libre. Abre un enlace profundo del bot A con un token opaco —nunca la capacidad
+   anónima de sesión HMI (bearer de sesión), ni la credencial de administrador, ni el secreto del
+   bot—. El QR transporta el código de emparejamiento y no exige escribir `/start`; la activación del
+   bot en Telegram es un paso propio del cliente (puede requerir tocar «Iniciar»/`Start`) y no es el
+   emparejamiento de la aplicación. La confirmación del destino ocurre **en el teléfono, nunca en la
+   HMI**, y tocar `Start` por sí solo no prueba presencia física ni aprobación. La posesión del QR
+   **no** prueba presencia física: una foto o su reenvío son un riesgo conocido que debe contemplarse
+   en el diseño.
+4. **Asociación exclusiva temporal.** Un controlador por sesión HMI y una HMI activa por teléfono, con
+   muchos pares independientes en paralelo. Sin toma de control ni cambio automático de destino:
+   cambiar de objetivo exige desvincular y escanear de nuevo. El QR se oculta mientras la HMI está
+   ocupada y se muestra el estado vinculado. «Desvincular» desde el teléfono libera la HMI. Recarga,
+   reinicio o vencimiento exigen re-vincular: no hay identidad de dispositivo persistente.
+5. **Reloj humano de inactividad.** 10 minutos de inactividad humana liberan el vínculo. Los
+   snapshots y el sondeo de eventos **no** renuevan el reloj. Aviso previo en Telegram con «Seguir
+   conectado» aceptado explícitamente por el usuario, con anticipación configurable (no fija). El
+   reloj de 60 s del QR y el de 10 min son independientes; la desvinculación manual sigue disponible.
+6. **Primer incremento.** Consulta de texto desde el teléfono vinculado sobre el snapshot visible
+   actual, con el parser determinístico existente. La HMI renderiza la respuesta como **texto** más el
+   audio existente, y el teléfono recibe el mismo texto. Sin audio de respuesta por Telegram y sin
+   revivir el camino latente basado en destinatario. El render de texto es UI nueva: hoy solo hay
+   audio y log. Se conservan el audio acotado existente y la separación del Canal B.
+7. **Incrementos posteriores.** Nota de voz/STT, comprensión de lenguaje natural, datos semánticos
+   ampliados fuera de pantalla o históricos y navegación declarativa de vistas publicadas, siempre
+   acotada a la misma HMI. Nunca comandos industriales. La distinción entre el **Canal A remoto vinculado** y el
+   **Canal B autónomo** no difiere la navegación legítima posterior del Canal A, que es una acción de
+   solo UI.
+8. **Proveedores.** No se seleccionan proveedores de STT ni de LLM más allá del TTS existente; las
+   notas de voz no se implementan ahora. El TTS puede generar gasto de Gemini o fallback con más de
+   una llamada por consulta. No hay permiso nuevo de pago y las pruebas en vivo requieren
+   autorización explícita; los checks de desarrollo son offline o simulados.
+
+Mapa técnico y cautelas para la próxima sesión:
+
+- El token del bot A debe reutilizar el almacén protegido y la sesión administrativa única existente,
+  **no** un segundo login. La forma nueva de proveedor atraviesa el almacén
+  [`credential_store.py`](../../services/leda-runtime/src/leda_runtime/credential_store.py)
+  (`ALLOWED_PROVIDERS`), [`admin_http.py`](../../services/leda-runtime/src/leda_runtime/admin_http.py),
+  el parser exacto de [`adminCredential.types.ts`](../../hmi-app/src/domain/adminCredential.types.ts)
+  y la UI de administración.
+- El Canal A necesita resolver, ciclo de vida y estado **independientes**. Un registro de vínculos
+  separado puede evitar una migración de esquema del Canal B: no afirmar un aumento de esquema
+  forzado.
+- `HmiSessionRegistry` y el `VoiceEventStore` por propietario son reutilizables, pero el Canal A
+  necesita una búsqueda de propietario interna autorizada sin entregar esa capacidad a Telegram.
+- El `pagehide` de [`main.tsx`](../../hmi-app/src/main.tsx) →
+  `ledaSessionClient.reset` ([`ledaSessionClient.ts`](../../hmi-app/src/services/ledaSessionClient.ts))
+  con DELETE keepalive es **best effort**; `on_remove` por sí solo no garantiza un cierre puntual ante
+  pérdida de red. Se requieren presencia
+  y frescura de contexto acotadas: rechazar contexto no disponible o vencido, sin fallback global,
+  obsoleto ni de otra HMI.
+- El reloj de inactividad humana es nuevo y separado de la actividad técnica de sesión. La generación
+  y correlación del vínculo deben proteger resultados y audio tardíos tras desvincular y re-vincular
+  (el mismo propietario puede sobrevivir). Los offsets de Telegram, por sí solos, no garantizan
+  exactamente-una-vez.
+- El primer incremento es una funcionalidad sustancial de varias unidades, **no** un parche pequeño.
+  Las estimaciones son provisionales; no canonizar pronósticos de líneas de código.
+
+Camino rápido para la próxima sesión:
+
+1. `mem_context` → búsqueda de memoria acotada al proyecto y recuperación de registros completos →
+   leer este checkpoint vigente del maestro → `git status`.
+2. Reanudar con **ODD**, no con SDD: no repetir el cuestionario de producto, ni la prueba pagada del
+   65 %, ni reabrir el diagnóstico de credenciales de Telegram.
+3. Una petición vaga de «seguir» **no** autoriza por sí sola escrituras de fuente: primero se
+   recupera el checkpoint y se prepara la tarea ODD; la implementación comienza cuando el usuario pide
+   explícitamente avanzar con ella, sin repetir el cuestionario de producto. Al implementar: derivar
+   tareas y estrategia de entrega acotadas, crear `odd/tasks/<feature>.md` y su espejo completo en
+   Engram **antes** de la primera escritura de fuente, y delegar un escritor por vez. TDD estricto
+   para lógica y bugs según `AGENTS.md` y la configuración; `npm run test` en `hmi-app` para frontend
+   y el runner exacto `unittest` del backend, a revalidar. No hace falta `sdd-init`: el usuario
+   rechazó SDD.
+
+Localizadores de memoria para reanudar:
+`decision/leda-channel-a-channel-separation`, `decision/leda-channel-a-inputless-pairing`,
+`decision/leda-channel-a-link-inactivity`, `decision/leda-channel-a-one-active-target`,
+`architecture/leda-channel-a-separate-bot-map` y `decision/leda-channel-a-workflow`. El
+checkpoint `checkpoint/leda-channel-a-remote-odd` lo crea el padre.
+
+Cierre de esta sesión: **un solo commit local de documentación**, sin push ni PR, sobre
+`feat/leda-telegram-credentials`; el único archivo autorizado es este documento. Base observada al
+planificar: `39c7712` (`chore(harness): ignore local Pi runtime state`), que solo agrega líneas de
+`.gitignore`. Este parche de cierre no ejecuta red, servicios ni proveedores. El hash del commit de
+este cierre se registra en Engram **después** de confirmarlo; su
+localizador es `git log -1 --format=%H -- docs/leda/LEDA_DOCUMENTO_MAESTRO.md` y esta versión no
+incrusta un SHA autorreferencial ni afirma que el commit ya exista.
+
+**Checkpoint 2.0.11 (histórico, se conserva con su fecha; sustituido para próximas acciones por el
+checkpoint 2.0.12).** Sesión de validación acotada del Canal A y de
+conciliación de implementación. Este cierre es exclusivamente documental: no hay cambios de código
+fuente. La sesión de validación sí se ejecutó: dos GET pasivos de salud y una prueba de voz manual
+autorizada por el usuario; no se reejecutaron suites automatizadas ni builds.
+
+Decisiones del usuario:
+
+- **Canal B aplazado.** Se difiere tras comprobar que el procesamiento y la semántica de los
+  widgets hacen insuficiente el consumo directo de endpoints crudos. La secuencia preferida pasa
+  a validar el Canal A existente y, solo después del éxito, **planificar** sus mejoras completas.
+  Una futura frontera semántica compartida debe preservar la interpretación y la configuración de
+  cada widget; no debe duplicar reglas arbitrarias ni copiar globalmente snapshots de sesión.
+- **Una sola consulta técnica autorizada** desde la sesión HMI existente, con posible TTS pagado
+  de Gemini. Esa autorización de prueba ya está consumida: cualquier llamada pagada adicional
+  requiere aprobación explícita nueva.
+
+Evidencia observada en esta sesión:
+
+- Dos GET pasivos locales respondieron accesibles: presentación `127.0.0.1:5057` con `ok` y
+  `ready:true`; voz `127.0.0.1:5056` con `ok` y `ready:true`, `providerStatus.configured:true` y
+  `verified:false` **antes** de la prueba de voz.
+- El usuario emparejó el bot con `/status` → `/start` y luego `/status` respondió
+  `2026-09-01T01:35:47.423Z`, desactualizado. Junto con el mapeo de fuentes de §4.2, esto confirma
+  que ese `/status` y `health.snapshotTimestamp` **no** son evidencia del contexto HMI.
+- El usuario confirmó el dashboard visible. Capturas de navegador mostraron `snapshot` 202
+  recurrente y `latest` `204` sin eventos **antes** de la consulta; después se recibió el evento de
+  voz. Marcas de tiempo de request `2026-09-20T02:54:03.107Z` y `2026-09-20T03:02:38.106Z`.
+- El widget de snapshot mostró lote 65 %, `unit` en %, y `dataSummary.source` `simulated`,
+  coherente con el 65 % visible. Una marca de generación fresca **no** equivale a frescura
+  industrial real: la fuente declarada es simulada.
+- La HMI no tiene UI de pregunta ni micrófono; el orbe es presentación hasta que llega un evento.
+  `/local/ask` ejecuta el parser determinístico y produce un evento de voz por propietario; el
+  listener de la aplicación inicia el TTS automáticamente.
+- Consulta autorizada: se usó temporalmente el singleton exacto del módulo Vite ya cargado desde
+  DevTools, con guarda y sin reenvío, sin cambios de código fuente ni extracción de tokens. La
+  revisión de fuente advirtió que el fallback de audio del backend puede producir más de una
+  llamada al proveedor; el conteo y la facturación **no** fueron inspeccionados. El usuario ejecutó
+  la consulta: la captura muestra respuesta 65 %, `source` `leda_local_snapshot_parser`, evento
+  de voz de la HMI con la misma respuesta y orbe activo, y el usuario reporta «funcionó perfecto».
+  El éxito de audio es **reportado por el usuario, no escuchado por el agente**.
+
+Alcance de la aceptación — lo que sí cierra y lo que no:
+
+- Cierra una aceptación **acotada** de `contexto → respuesta → voz` sobre **un widget simulado**
+  desde una sesión HMI existente.
+- **No** cierra paridad completa, E2E completo, máquinas reales, aislamiento multi-sesión, todos
+  los widgets, cancelación, recuperación, micrófono, navegación ni producción.
+- La fuente industrial fue identificada en la UI, pero el `GET` se canceló sin consentimiento:
+  **no** se probó ningún endpoint industrial y no se documentan direcciones de red privada ni
+  credenciales. Sigue siendo trabajo futuro y **no** es una corrección del Canal B.
+- No hubo cambios de código, configuración ni credenciales; no se reejecutaron pruebas ni builds.
+  Las cifras previas de **285 backend / 38 frontend** pertenecen al commit anterior y no se
+  volvieron a correr aquí.
+
+Próximo paso 2.0.11 (histórico, sustituido para próximas acciones por el checkpoint 2.0.12):
+**planificar, no implementar**.
+
+1. Leer el bloque 2.0.11 de este §11.1 y los topics de Engram
+   `checkpoint/leda-channel-a-acceptance`, `decision/leda-channel-a-first` y
+   `architecture/leda-shared-data-semantics`; inspeccionar Git.
+2. Planificar las mejoras completas del Canal A: mapear lo entregado y lo faltante, y acordar un
+   siguiente incremento acotado. La planificación **no** es permiso de implementación general.
+3. No resetear administrador, clave ni almacén; no reaplicar las correcciones cerradas del
+   diagnóstico de Telegram; no hacer llamadas pagadas nuevas. El Canal B queda aplazado,
+   `PW-002`, `PW-003` y `PW-004` siguen abiertos, y el `PW-003` amplio del asistente no se cierra.
+   No actualizar ahora los estados del índice de [`../PENDING_WORK.md`](../PENDING_WORK.md).
+
+No hace falta repetir el `/status` ni la prueba pagada para reanudar.
+
+Cierre de esa sesión: **un solo commit local de documentación**, sin push ni PR, sobre
+`feat/leda-telegram-credentials`. Base previa al cierre 2.0.11: `6f7ae5f`. El único archivo
+autorizado en ese cierre fue este documento. El hash observado del commit se registra en Engram
+**después** de confirmarlo, y su localizador en el repositorio es
+`git log -1 --format=%H -- docs/leda/LEDA_DOCUMENTO_MAESTRO.md`; esta versión documental no
+incrusta un SHA autorreferencial ni afirma que el commit ya exista.
+
+**Corrección 2.0.12:** la atribución previa de `.gitignore` «propiedad del usuario y excluido» se
+conserva solo como histórica y queda corregida. Esas líneas de `.gitignore` las agrega
+**automáticamente** el skill-registry instalado de gentle-pi; no son una edición del usuario. El
+commit `39c7712` (`chore(harness): ignore local Pi runtime state`) las registra.
+
+**Nota de vigencia 2.0.12:** el bloque 2.0.11 de arriba y los bloques 2.0.10 rotulados «histórico»
+que aparecen más abajo —próximo paso, límites del registro y cierre acordado— se conservan con su
+fecha como evidencia histórica válida, pero quedan **sustituidos para próximas acciones** por el
+checkpoint 2.0.12, ubicado al inicio de este §11.1.
+
+**Registro 2.0.9 (histórico, se conserva con su fecha):** comprobar el funcionamiento local de punta
+a punta, sin borrar la instalación vieja ni regenerar claves. Este registro solo documenta el próximo
+paso acordado; no ejecuta servicios, pruebas ni proveedores y no afirma haber realizado la
+comprobación.
+
+Lo que la aceptación local futura debe observar:
+
+- arranque automático de HMI y Leda desde el launcher del usuario en Windows (`hmi-app npm run
+  dev` → `scripts/dev.mjs` →
+  [`start-local.ps1`](../../services/leda-runtime/operations/start-local.ps1) → `.venv` propio de
+  `services/leda-runtime/`);
+- configuración protegida operada desde **Configuración general → Leda**;
+- el camino implementado de snapshot, consulta y voz.
+
+Condiciones y límites ya establecidos:
+
+- la adquisición automática aplica a `npm run dev` en Windows; `build`, `preview`, tests y
+  plataformas no-Windows no adquieren Leda;
+- no existe dependencia activa de fuente ni fallback a `C:\hmi_tts`; ese directorio se retiró el
+  2026-09-29 por decisión explícita del usuario y ya no hay camino de rollback hacia él;
+- los secretos de proveedor se administran desde la HMI; la clave maestra protegida y su almacén
+  permanecen fuera de Git por diseño, y el aprovisionamiento inicial de clave y administrador ya
+  está hecho: no repetirlo ni resetearlo;
+- la aceptación offline `PAC-1`–`PAC-5` más el login local y la visibilidad del almacén no prueban
+  aceptación real de proveedor de punta a punta;
+- llamadas pagadas al proveedor y mensajes salientes requieren autorización explícita separada;
+- `PW-002`, `PW-003` y `PW-004` permanecen pendientes o aplazados;
+  [`../PENDING_WORK.md`](../PENDING_WORK.md) sigue siendo la autoridad de descubrimiento y sus tres
+  filas no cambian.
+
+La rama vigente es `feat/leda-telegram-credentials` con `HEAD` `f964113` (cierre de `PW-001`).
+
+**Conciliación 2.0.10 (2026-09-20):** el registro 2.0.9 anterior se conserva como evidencia histórica
+con fecha. La comprobación local sigue incompleta, pero avanzó y ya no depende solo del launcher y de
+credenciales sin probar. El detalle canónico está en
+[`../../odd/tasks/leda-telegram-poll-diagnostics.md`](../../odd/tasks/leda-telegram-poll-diagnostics.md).
+
+Cerrado en esta sesión (incidente de sondeo de Telegram, sobre `feat/leda-telegram-credentials`):
+
+- Diagnóstico y corrección del falso aviso de credencial protegida ausente cuando el estado ya estaba
+  configurado.
+- Telemetría de salud saneada y solo en memoria (`stage`, `category`, `httpStatus`, `failureAt`,
+  `lastSuccessAt`, enums fijos, enteros 100..599, fechas UTC ISO-Z o `null`), sin excepciones, URLs,
+  cuerpos, tokens, IDs ni rutas.
+- El sondeo recurrente `getUpdates`/HTTP 409 quedó identificado; el usuario corrigió el token del bot
+  correcto y lo revocó/regeneró personalmente, tras lo cual el sondeo se recuperó. El consumidor
+  competidor anterior exacto **no** fue identificado; solo se descartó una segunda familia de runtime
+  local duplicada.
+- Regresión introducida por nuestro propio diagnóstico en el esquema estricto de la respuesta
+  administrativa: `apply` de éxito y de error vuelven a proyectar exactamente los nueve campos
+  existentes (`source`, `enabled`, `configured`, `desiredGeneration`, `appliedGeneration`, `running`,
+  `verified`, `restartRequired`, `lastError`), sin exponer campos internos ni mutar el estado; la
+  telemetría de salud permanece disponible por su vía propia.
+- Verificación final independiente: 114 pruebas backend focalizadas, 285 backend completas y 38
+  frontend aprobadas. Una respuesta Flask 200 simulada fue aceptada por el parser TypeScript real y
+  los esquemas anidados 409/502 se comprobaron como esquema, no como trazas de respuesta viva. Las
+  pruebas corrieron en un hijo aislado con directorio temporal nuevo y once variables de entorno
+  anuladas según el README del runtime, sin credenciales reales ni llamadas a proveedores. Las
+  revisiones anteriores fallidas quedaron corregidas.
+- **Aceptación real de UI (D7):** la captura `pi-clipboard-80477efc-dfea-4fd2-9aca-70e3ac0190af.png`
+  muestra «Cambio de Telegram aplicado y estado actualizado.», generación 1/1, activo, habilitado y
+  verificado, sin cambios pendientes ni errores después del `Apply` solicitado. Resuelve el pie
+  administrativo falso para la operación observada.
+- Evidencia de proceso (histórica, no valores esperados permanentes): los reintentos de relanzamiento
+  reutilizaron `PID 24560`; el padre ejecutó el `stop-local.ps1` oficial validado por identidad
+  (autorizado) y, tras el relanzamiento del usuario, el nuevo proceso de presentación `PID 22060`
+  arrancó el 2026-09-20T00:59:49Z, posterior a la edición de `admin_http.py` del 2026-09-20T00:21:06Z,
+  con salud 1/1 y éxito registrado el 2026-09-20T01:03:07.752649Z. Ningún agente envió mensajes
+  salientes: las acciones de proveedor las inició el usuario desde la UI o Telegram.
+
+**Registro 2.0.10 (histórico):** lo que **no** estaba cerrado era la comprobación local de punta a
+punta. En ese registro, el próximo paso vigente ya no era launcher y credenciales sin probar, sino la
+prueba de mensaje propiedad del usuario y la verificación fresca observable.
+
+**Próximo paso vigente 2.0.10 (histórico, sustituido para próximas acciones; se conserva con su
+fecha):**
+
+1. Recuperar este maestro, el tracker
+   [`../../odd/tasks/leda-telegram-poll-diagnostics.md`](../../odd/tasks/leda-telegram-poll-diagnostics.md)
+   y el checkpoint de Engram, e inspeccionar Git. No repetir aprovisionamiento de credenciales ni de
+   administrador, ni las correcciones ya completadas.
+2. El usuario envía `/status` desde su propio chat al bot corregido (`/start` primero solo si se pide
+   emparejamiento). Esta prueba de mensaje **no fue ejecutada ni observada** todavía.
+3. Verificar después una captura fresca del dashboard visible, la consulta y la voz.
+
+**Límites del registro 2.0.10 (histórico):** la última captura observada del dashboard (1 de septiembre) está vencida y no prueba
+una sesión nueva; Gemini está configurado pero su verificación no se realizó, y las llamadas pagadas
+siguen requiriendo autorización explícita separada. El usuario permite reinicios necesarios y pruebas
+mínimas contra su propio bot, no contacto arbitrario ni reinicio de claves. Los refinamientos de UI
+pedidos ahora esperan a la primera aceptación local; `PW-002`, `PW-003` y `PW-004` continúan aplazados
+y [`../PENDING_WORK.md`](../PENDING_WORK.md) sigue siendo la autoridad de descubrimiento, sin cambios.
+
+**Registro 2.0.10 (histórico, no aplica a este cierre):** el cierre acordado de esa sesión fue **un commit local completo** con código, pruebas y documentación
+juntos, con excepción de tamaño aceptada explícitamente por el usuario (~1300+ líneas, en su mayoría
+la matriz de regresión); sin push ni PR. La línea 2.0.9 de arriba, con `HEAD` `f964113`, se conserva
+como historia. El `HEAD` previo al cierre 2.0.10 es `fe39ffe`; el hash observado del commit que
+contiene este checkpoint se registra en Engram después de confirmarlo, y su localizador en el
+repositorio es `git log -1 --format=%H -- odd/tasks/leda-telegram-poll-diagnostics.md`, para no
+incrustar un SHA autorreferencial. Esta versión documental no afirma que ese commit ya exista.
+
+## 12. Changelog
+
+### 2.0.22 — 2026-09-29
+
+- Legado externo `C:\hmi_tts` retirado por decisión explícita del usuario, junto con la tarea
+  programada `HMI - Mantener VPN Steigen`, que dependía de él y ya no se usaba. Verificado antes:
+  ningún proceso ni puerto del runtime lo usaba. Sus archivos, sin el entorno virtual, quedaron
+  archivados fuera del repositorio. Ya no hay camino de rollback hacia él.
+- Las variables de entorno de usuario `GEMINI_API_KEY` y `TELEGRAM_BOT_TOKEN` creadas por el
+  legado no se tocaron: `GEMINI_API_KEY` sigue siendo la fuente legacy cuando el modo protegido
+  no está seleccionado.
+
+### 2.0.21 — 2026-09-22
+
+- Diseño semántico acordado documentado con alternativas, límites y cuatro pruebas futuras;
+  sin implementación autorizada ni cambios funcionales. PW-003 conserva el roadmap amplio.
+- Cierre estable `19adf7d`, CL y Ctrl+C preservados; respaldo inicial `173bd86` confirmado en main
+  y origin/main. Registro final de evidencia pendiente de commit/push, sin afirmar nuevas pruebas.
+
+### 2.0.20 — 2026-09-22
+
+- CL6 aceptado por reporte del usuario para preguntas ejercitadas, Telegram, voz HMI y orbe;
+  sin atribuir prueba separada de cambio de vista/latencia o garantía universal.
+- PW-005 cerrado sobre Ctrl+C normal; recuperación abrupta excluida, no pasada. Evidencia
+  focalizada anterior al cold fix separada del readback y la persistencia manual posterior.
+- Próxima sesión: presentar para aprobación la planificación de la frontera semántica compartida
+  de Entrega 1.3; no iniciar implementación, pruebas, servicios ni proveedores por inferencia.
+- Un commit local autorizado y pendiente del padre, con omisión de GGA solo para ese commit;
+  sin cambios de hooks/configuración ni push. PW-003 conserva roadmap amplio; PW-002/PW-004 intactos.
+
+### 2.0.19 — 2026-09-22
+
+- Contrato del tiempo de vida de contexto del Canal A **implementado y aceptado offline con
+  verificación independiente completa** (`muctg3tg-7-tbg4`): `frameGeneration` opcional por
+  visita de vista (publish-only, highwater por sesión, misma generación renueva sin bump,
+  generación mayor/contexto ausente hace bump, legacy verbatim, invalidez conserva highwater)
+  + `captured_deadline` interno de la respuesta capturada contra el reloj monotónico inyectado
+  (igualdad exacta falla cerrado; recheck de testigo solo-referencial tras la muestra) (§11.1).
+- Corrección acotada **solo-de-tests** del harness de clock de pairing: las 11 fallas fueron
+  confirmadas preexistentes en base `1731350` por baseline independiente (`mucselsk-5-1sas`)
+  y quedan resueltas; cuerpos de aserción del oráculo intactos. Sin cambios de emparejamiento
+  productivo. Limitación residual solo-de-test documentada en el task.
+- Verificación independiente completa PASS: gate backend README PAC-5 verbatim 1.121 pruebas
+  exit 0; cobertura estándar 209 suites / 2.188 PASS con umbrales 70 intactos; build y lint
+  PASS; `git diff --check` PASS. Base `1731350` sin commit ni push; RDD desactivado: no es
+  aprobación nativa.
+- Próximo paso: **aceptación manual real de audio/orbe con el usuario** (sin proveedores ni
+  servicios automáticos); el commit work-unit es decisión separada del usuario (§3.4).
+
+### 2.0.18 — 2026-09-22
+
+- Preflight de nombre HMI del panel de emparejamiento aceptado **solo offline**: nombre ausente
+  con copia accionable antes del QR y sin peticiones de pairing; nombre ilegible con copia
+  distinta y veraz; relectura en cada apertura. Respuesta, audio, backend y contratos de pairing
+  sin cambios (§11.1).
+- Verificación independiente (`muc76rbg-g-87k1`): 58 PASS enfocadas en 6 suites y 2.184 frontend
+  únicas PASS con los umbrales 70 intactos; build y lint PASS. RDD desactivado: no es aprobación
+  nativa.
+- Reportes reales del usuario: vínculo Telegram confirmado con capturas tras configurar el nombre;
+  audio/orbe intermitente incluso con HMI visible — no totalmente aceptado ni solo calentamiento
+  (§11.1).
+- El contrato CL1 del tiempo de vida de contexto queda como DRAFT documental con gate: el usuario
+  aplazó su implementación a la próxima sesión; este cierre no otorga permiso (§3.4, §11.1).
+  (Registro histórico: ese gate fue descargado y la implementación verificada en 2.0.19.)
+- Cierre de sesión: UN único commit local de checkpoint autorizado desde `c82fe44`; hash real en
+  Engram tras el éxito. Sin push, PR, servicios ni proveedores.
+
+### 2.0.17 — 2026-09-22
+
+- RCA-5l aceptado solo offline: QR/status por capability, cliente/proxy estrictos, hook efímero
+  y QR local de apertura manual en Core, inmediatamente a la derecha de Logs. EPPI y el
+  comportamiento existente de respuesta/audio y B/Gemini permanecen sin cambios.
+- TDD con RED independiente y correcciones acotadas; 156 pruebas backend y 2.181 frontend
+  únicas PASS, cobertura estándar con umbrales 70 intactos, build y lint PASS (§11.1).
+- PW-003 pasa de wiring pendiente a aceptación real pendiente, sujeta a autorización explícita.
+  Maestro, índice y tracker reconciliados; checkpoint anterior y su permiso de commit son historia.
+  Base `bffe4ed`, sin nuevo commit, push, PR, servicios ni proveedores reales.
+
+### 2.0.16 — 2026-09-21
+
+- RCA-5k **aceptado solo offline**: integración frontend de la administración del Canal A en su
+  tarjeta existente, sobre el backend RCA-5j ya aceptado — status con query A separada y guard de
+  sesión/autoridad, Apply explícito, parser/cliente de dominio estrictos, warning+reintento
+  provider-safe tras borrado con stop no confirmado (solo Canal A, nunca B) y rutas proxy A exactas.
+  Dos regresiones de autoridad/staleness observadas RED y corregidas con el refresh conjunto y el
+  etiquetado veraz de los datos anteriores conservados, sin framework nuevo. B/Gemini y
+  respuesta/audio sin cambios.
+- **Corrección de rotulado completada** (aprobada por el usuario como «Corregir ahora»): RED
+  independiente (`mubsvn4h-w-zxd5`, comando 1 una vez: 155 pruebas, 153 PASS/2 FAIL esperadas por
+  ausencia de los rótulos stopping/failed, DOM mostrando `detenida`) y parche solo de tarjeta
+  (`mubswysz-x-gd9a`, cero comandos): import de tipo, helper puro de rótulo y un JSX —
+  `running`→`activa`; `null`/`idle`/`stopped`→`detenida`; `stopping`→«Detención en curso»; otros
+  no-running→«Estado de ejecución no confirmado» — sin cambios de bot, borrado, audio ni runtime.
+- Verificación final independiente (`mubszah4-y-q5gq`): los cinco gates congelados una vez cada
+  uno — 155 focalizadas PASS, 25 de integración PASS, cobertura filtrada con umbrales 70 intactos
+  (statements 82,68 %, branches 73,84 %, functions 80,87 %, lines 84,46 %), build de 2737 módulos
+  con sus warnings conocidos y lint sin diagnósticos (exit codes no expuestos por la herramienta).
+  Sin navegador real, Telegram, Gemini, QR, audio ni aceptación de producto.
+- §11.1 fija el próximo paso pendiente, no implementado por este cierre y sin concesión de fuente
+  nueva: proyección QR/status por capability con proxy/cliente y apertura manual del QR en
+  `Pyramid`, inmediatamente a la derecha de Logs, reutilizando respuesta/audio. `PW-003` sigue
+  pendiente; `PW-002` y `PW-004` no cambian.
+- Cierre de sesión a pedido del usuario: autorización de **un commit local único de checkpoint**
+  sobre los 20 paths actuales (backend, frontend, pruebas y documentación) desde la base `9864c25`;
+  el parent lo ejecuta y el hash real se registra en Engram tras su éxito. Supera la regla de
+  «sin commit» solo para este checkpoint; las pruebas existentes no se reejecutaron en este cierre.
+- Actualización documental únicamente; sin pruebas nuevas, servicios, proveedores, commits ni push.
+  Base `9864c25`, sin commit nuevo. La regla de aprobación previa (§3.4) y la lectura completa del
+  maestro antes de la próxima sesión no cambian.
+
+### 2.0.15 — 2026-09-21
+
+- RCA-5j aceptado **solo offline**: administración backend de credenciales del Canal A (guardar/borrar
+  y Apply/status explícitos por el `ChannelAManager`/generación con la auth/CSRF/origin admin
+  existente; manager ausente rechaza cerrado con `LEDA_CHANNEL_A_MANAGER_UNAVAILABLE`/503 sin mutar
+  el almacén y sin fallback de escrituras directas; proyección de seis claves para A con activación
+  anidada, nueve campos de B sin cambios; salud pública sin ampliación; root inerte y sin Apply de
+  arranque). Evidencia independiente RED→GREEN de 48 métodos únicos en cuatro patrones y repeat final
+  del patrón A admin. **No** completa la UI admin ni el circuito QR.
+- §11.1 fija el próximo paso pendiente: integración frontend de la tarjeta de credencial A existente
+  con Apply/status, parser/cliente de dominio y allowlist exacta de proxy (mapper read-only
+  completado sin cambios frontend; contrato y pruebas frontend pendientes; aviso y reintento
+  aprobados ante borrado exitoso con stop no confirmado, apuntando solo al Canal A), y luego QR/status por capability con
+  apertura manual del QR en `Pyramid`, reutilizando respuesta/audio.
+- Actualización documental únicamente; sin pruebas nuevas, servicios, proveedores, commits ni push.
+  Base `9864c25`, sin commit nuevo. La regla de aprobación previa (§3.4) no cambia.
+
+### 2.0.14 — 2026-09-21
+
+- RCA-5i aceptado **solo offline**: composición raíz del Canal A (`ChannelAManager` y factory de
+  activación por defecto en `local_presentation.py`, ruta de configuración en `paths.py`, mismo
+  almacén protegido, reserva A+B, guard de elegibilidad y apagado A/B en el root). Evidencia
+  independiente RED→GREEN de 13 métodos únicos y spotcheck de root, sin HTTP, adaptador ni hilos. No
+  es activación real del bot ni conexión completa.
+- §11.1 fija el próximo paso pendiente y no autorizado por ese incremento: admin A (guardar/borrar y
+  Apply/status por el manager/generación con la auth/CSRF existente) y luego QR/status por capability
+  con proxy/cliente y apertura manual del QR en `Pyramid`, reutilizando respuesta/audio. El
+  checkpoint 2.0.13 queda como routing histórico.
+- Actualización documental únicamente; sin pruebas nuevas, servicios, proveedores, commits ni push en
+  ese incremento.
+- **Cierre de sesión a pedido del usuario:** único permiso nuevo, un commit local de checkpoint de los
+  seis archivos cambiados, con el hash registrado en Engram y no incrustado aquí. Próxima sesión: leer
+  este maestro completo (prioridad §11.1/§3.4), recuperar el checkpoint
+  `leda-channel-a-manager-resume` y reconciliar `PW-003` y `odd/tasks/leda-channel-a-remote.md`
+  con el código real. Sin push, PR, proveedores ni pruebas nuevas.
+
+### 2.0.13 — 2026-09-21
+
+- Regla explícita de aprobación previa (§3.4): preguntar y esperar autorización antes de implementar
+  funcionalidades, mejoras o cambios no solicitados; no convertirlos en prerrequisitos por cuenta
+  del agente.
+- Prioridad vigente (§11.1): terminar QR → Canal A → circuito existente, reutilizando respuesta y
+  audio sin agregar cambios de comportamiento. El plan adicional de disponibilidad/cancelación
+  frontend no continúa sin aprobación. Se distingue la apertura manual del QR del acuerdo histórico.
+- Actualización documental únicamente; no afirma integración terminada ni nuevas pruebas ejecutadas.
+
+### 2.0.12 — 2026-09-20
+
+- Checkpoint de planificación del **acceso remoto del Canal A**
+  (`checkpoint/leda-channel-a-remote-odd`), con alcance de producto acordado y sin implementación:
+  bot A dedicado y separado del bot del Canal B, emparejamiento por QR de un solo uso y 60 s sin
+  entrada ni confirmación en la HMI (la activación del bot en Telegram puede requerir tocar
+  «Iniciar»/`Start` y es distinta de la confirmación del vínculo, que ocurre en el teléfono, nunca en
+  la HMI), token opaco que nunca expone ni la capacidad anónima de sesión HMI (bearer de sesión) ni
+  la credencial administrativa ni el secreto del bot, asociación exclusiva temporal de un controlador
+  por sesión HMI, reloj humano de inactividad de 10 min que no renueva ningún snapshot ni sondeo, y
+  primer incremento de consulta textual sobre el snapshot visible con la respuesta como **texto y el
+  audio existente en la HMI**, y el mismo texto en el teléfono.
+- Canal B sin cambios: conserva el bot existente, su limitación de un único chat emparejado, su
+  `JsonFileStore` obsoleto y su imposibilidad de afectar la HMI. El bot del Canal A no es un modo ni
+  un comando dentro del bot del Canal B; no se amplía la admisión ni se integra código del Canal B.
+- Mapa técnico y cautelas registrados para la próxima sesión: reutilizar el almacén protegido y la
+  sesión administrativa única, atravesar `ALLOWED_PROVIDERS`/`admin_http`/parser de credenciales/UI
+  admin con una forma de proveedor nueva, resolver y estado independientes, registro de vínculos
+  separado sin afirmar migración de esquema, búsqueda de propietario interna autorizada, presencia y
+  frescura de contexto acotadas sin fallback global, y correlación del vínculo ante desvincular y
+  re-vincular.
+- Próximo paso vigente actualizado (§11.1): reanudar por **ODD** —no SDD—, sin repetir el
+  cuestionario de producto, ni la prueba pagada del 65 %, ni reabrir el diagnóstico de credenciales;
+  crear `odd/tasks/<feature>.md` y su espejo en Engram antes de la primera escritura de fuente.
+  `PW-002`, `PW-003` y `PW-004` siguen abiertos.
+- Cierre exclusivamente documental, con implementación diferida a la próxima sesión: no ejecuta
+  servicios, pruebas, proveedores, Telegram ni Gemini, y no afirma compilación ni suites aprobadas. La
+  planificación sí incluyó **una lectura pública** de la documentación oficial de Telegram
+  (deep links/`Start`), sin uso de proveedor ni red operativa. Cierre: un solo commit local de
+  documentación, sin push ni PR; base
+  observada `39c7712`. Se corrige como histórica la atribución previa de `.gitignore` al usuario: esas
+  líneas las agrega automáticamente el skill-registry de gentle-pi.
+
+### 2.0.11 — 2026-09-20
+
+- Aceptación acotada del Canal A sobre un widget simulado: `contexto → respuesta → voz` desde una
+  sesión HMI existente. Respuesta 65 % (`source` `leda_local_snapshot_parser`), evento de voz con
+  la misma respuesta y orbe activo; el éxito de audio es reportado por el usuario, no escuchado por
+  el agente. **No** cierra paridad, E2E completo, máquinas reales, multi-sesión, todos los widgets,
+  cancelación, recuperación, micrófono ni navegación.
+- Reconciliación de implementación: el `POST` de snapshot HMI persiste por documento en un registro
+  en memoria (`HmiSessionRegistry`), mientras que el `/status` de Telegram y sus respuestas leen el
+  archivo de instalación (`JsonFileStore`) sin escritor de runtime vigente localizado. Un `/status`
+  obsoleto (`2026-09-01T01:35:47.423Z`) o un `health.snapshotTimestamp` no son evidencia del
+  contexto HMI (ver §4.2).
+- Canal B aplazado por decisión del usuario: el consumo directo de endpoints crudos no alcanza por
+  el procesamiento y la semántica de los widgets. Se prioriza validar el Canal A existente y
+  **planificar** sus mejoras completas después del éxito; la planificación no es permiso de
+  implementación.
+- Prueba industrial no realizada: la fuente se identificó en la UI pero el `GET` se canceló sin
+  consentimiento; no se documentan direcciones privadas ni credenciales. Sin cambios de código,
+  configuración ni credenciales y sin reejecutar pruebas ni builds.
+- Próximo paso vigente actualizado (§11.1): planificar las mejoras del Canal A; no resetear
+  administrador, clave ni almacén, no reaplicar correcciones cerradas de Telegram y no emitir
+  llamadas pagadas nuevas. `PW-002`, `PW-003` y `PW-004` siguen abiertos.
+- Cierre: un solo commit local de documentación, sin push ni PR; base previa `6f7ae5f`.
+
+### 2.0.10 — 2026-09-20
+
+- Cierre de la sesión de diagnóstico del sondeo de Telegram en `feat/leda-telegram-credentials`:
+  falso aviso de credencial protegida ausente corregido, telemetría de salud saneada y solo en memoria,
+  y sondeo `getUpdates`/HTTP 409 recuperado tras la corrección del token del bot por parte del usuario.
+  El consumidor competidor anterior exacto no fue identificado.
+- Regresión propia del esquema estricto administrativo corregida: `apply` de éxito y de error vuelven a
+  proyectar exactamente los nueve campos existentes; verificación final de 114 pruebas backend
+  focalizadas, 285 backend completas y 38 frontend, con parser TypeScript real y esquema anidado 409/502.
+- Aceptación real de UI registrada (D7): `Apply` de Telegram aplicado y estado actualizado, generación
+  1/1, activo, habilitado y verificado, sin pendientes ni errores.
+- Próximo paso vigente actualizado (§11.1): ya no es solo launcher y credenciales sin probar; pasa a la
+  prueba de mensaje propiedad del usuario (`/status`), todavía no ejecutada, y a la verificación fresca
+  de dashboard, consulta y voz. `PW-002`, `PW-003` y `PW-004` siguen aplazados.
+- Cierre acordado: un commit local completo con código, pruebas y documentación, con excepción de tamaño
+  aceptada; sin push ni PR. Cambio exclusivamente documental: no ejecuta servicios, pruebas ni
+  proveedores y no afirma aceptación local completa.
+
+### 2.0.9 — 2026-09-19
+
+- Conciliación documental de la carrera de sembrado concurrente: `f865e79` la corrigió y `855c26b`
+  la endureció; la evidencia histórica queda en `odd/tasks/leda-seed-atomicity.md` y
+  `odd/tasks/leda-seed-hardening.md`. `PW-001` está cerrado en `f964113`.
+- Registro del próximo paso vigente (§11.1): comprobación local de punta a punta, sin borrar la
+  instalación vieja ni regenerar claves; `PW-002`, `PW-003` y `PW-004` permanecen pendientes o
+  aplazados.
+- Cambio exclusivamente documental: no ejecuta servicios, pruebas ni proveedores y no afirma
+  aceptación real.
+
+### 2.0.8 — 2026-09-17
+
+- Cierre offline del paquete protegido: verificación independiente integrada `PAC-5` aprobada
+  (1924 pruebas HMI, 240 pruebas backend, build, lint, diff y `pip check`) y documentación
+  conciliada; el cierre fue aceptado offline por el padre tras el readback documental
+  `mu7f1mcu-v-6et3`.
+- Registro de las correcciones acotadas de helper ACL y receptor `fetch`, y del aprovisionamiento
+  controlado de la clave maestra protegida, como evidencia local limitada confirmada por el padre.
+- El gate ambiente no se ejecutó; la verificación usó un supervisor hijo aislado documentado en el
+  README del runtime. No se afirma aceptación de producción ni cobertura completa por capa.
+
+### 2.0.7 — 2026-09-17
+
+- Registro de la implementación UNI-1/UNI-2: cuatro rutas Leda same-origin fijas,
+  proxy Vite exacto de desarrollo y retiro del selector y endpoints editables.
+- Node-RED continúa soportado como fuente de telemetría industrial; ya no es un runtime
+  Leda seleccionable por el navegador.
+- Cierre offline UNI-3 tras corrección y verificación independiente: `140/140` pruebas
+  focalizadas en `19` archivos, Dashboard `22/22`, ambos chequeos TypeScript y whitespace
+  aprobados; confirmación final del padre `140/140` en `4.36s`.
+- La evidencia inicial `1818` completa y `129` focalizada se conserva como historial
+  insuficiente porque había perdido cobertura retenida; la corrección restauró `11`
+  casos significativos y reemplazó espera temporal de Dashboard por una espera semántica.
+- No se afirma aceptación real de Vite, backend, navegador, proveedores o forwarding
+  productivo. Python `107/107` continúa como evidencia histórica FND, no como evidencia UNI.
+
+### 2.0.6 — 2026-09-17
+
+- Cierre offline independiente de FND-9/FND-10/FND-11: `npm run dev` integra Leda
+  local en Windows con ownership exacto, sin alterar build, preview ni tests.
+- Corrección del receipt PowerShell 5.1 y de toda la clase de pérdida de ownership tras
+  registro; evidencia final 13/13, 107/107 y spotchecks del padre aprobados.
+- PW-002/PW-003 permanecen abiertos para aceptación real, acceso protegido, Voice,
+  despliegue/supervisión administrados por IT y aceptación live; los cambios siguen sin
+  commit.
+
+### 2.0.5 — 2026-09-17
+
+- Cierre offline independiente de FND-6/FND-7/FND-8: runtime sin secretos y separación
+  entre bootstrap e inicio normal, sin aceptación live ni productiva.
+- Evidencia corregida: el primer 92/92 fue insuficiente; tras cubrir el borde
+  `NativeCommandError` de PowerShell 5.1, 31/31 focalizadas, 93/93 completas y probes
+  missing/present/rethrow aprobaron junto con ScriptBlock, AST y diff check.
+- PW-002 permanece abierto para instalación limpia, integración automática con
+  `npm run dev`/pipeline IT, operación, recuperación y acceso protegido. PW-003 continúa
+  abierto; no existe receipt RDD.
+
+### 2.0.4 — 2026-09-17
+
+- Retiro de la investigación de caída espontánea del alcance activo tras la aclaración
+  del usuario; no se afirma causa reproducida ni bug corregido.
+- Continuidad reorientada a inicio automático e invisible con el despliegue HMI,
+  instalación separada, operación/recuperación y configuración/diagnósticos protegidos.
+- Registro del único bloqueo de diseño vigente: elegir el propietario real del
+  despliegue sin inventar plataforma ni requisito de arranque del sistema operativo.
+
+### 2.0.3 — 2026-09-17
+
+- Cierre de sesión con el incremento FND-1/FND-2/FND-3 completo y la Entrega 1.1
+  todavía abierta.
+- Próxima investigación limitada a una prueba local controlada del ciclo de vida,
+  previa a cualquier cambio de launchers y sin asumir causa raíz.
+
+La próxima investigación de esta entrada quedó supersedida por 2.0.4; se conserva solo
+como historia de la recomendación anterior.
+
+### 2.0.2 — 2026-09-17
+
+- Corrección acotada de identidad, ownership y paridad de los bindings de audio, con
+  evidencia automatizada y verificación independiente confirmada.
+- La Entrega 1.1 permanece abierta; no se afirma aceptación real ni acceso remoto.
+
+### 2.0.1 — 2026-09-17
+
+- Corrección de semántica de health, procedencia de probes CORS y alcance histórico
+  del audio según la verificación independiente.
+- Precisión de privacidad: se permite estado operativo mínimo protegido y tránsito
+  controlado de credenciales, sin persistencia ni exposición en cliente o diagnósticos.
+- Reagrupación cosmética del plan en E0–E4 y agregado del pipeline textual validado
+  previo a Telegram, sin cambiar el backlog ni autorizar implementación.
+
+### 2.0.0 — 2026-09-17
+
+- Reconciliación documental del runtime actual, auditoría y dirección aprobada.
+- Definición de Canal A HMI por voz y Canal B Telegram de texto autónomo.
+- Retiro del antiguo Leda Server/Node-RED como objetivo, sin eliminación automática
+  del legado ni de su valor histórico.
+- Incorporación de despliegue web remoto, notebook de presentación, configuración
+  protegida, diagnósticos honestos, aislamiento y fuente de datos compartida.
+- Sustitución de hojas de ruta competidoras por un único plan de entregas y pruebas.
+- Creación de un ledger histórico curado; el original externo 1.1.4 permanece intacto.
+- Cambio exclusivamente documental: toda implementación funcional continúa pendiente
+  de autorización.

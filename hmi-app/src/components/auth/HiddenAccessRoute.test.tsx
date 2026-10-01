@@ -13,8 +13,8 @@ vi.mock('../../services/adminSession.controller', () => ({
     adminSessionController: { login: vi.fn(), refresh: vi.fn(), exit: vi.fn() },
 }));
 vi.mock('../layout/ShaderSettingsPanel', () => ({ default: () => null }));
-vi.mock('../layout/PrismaPairingControl', () => ({
-    default: () => <button type="button" aria-label="Prisma">Prisma</button>,
+vi.mock('../layout/LedaPairingControl', () => ({
+    default: () => <button type="button" aria-label="Leda">Leda</button>,
 }));
 
 function Layout() {
@@ -62,7 +62,7 @@ describe('HiddenAccessRoute', () => {
         expect(await screen.findByTestId('path')).toHaveTextContent('/');
         expect(localStorage.getItem(HIDDEN_ACCESS_STORAGE_KEY)).toBe('on');
         expect(screen.getByTitle('Usuario')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Prisma' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Leda' })).toBeInTheDocument();
         expect(screen.getByLabelText('Contraseña')).toBeInTheDocument();
     });
 

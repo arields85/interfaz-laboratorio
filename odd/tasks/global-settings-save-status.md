@@ -19,8 +19,8 @@ Reporting is in Spanish; this artifact stays in English per the repository langu
 
 ## Approved pattern to replicate (already implemented for the reference tab)
 
-Naming note: this tab is the one whose visible label was renamed from `Voz` to `Prisma`
-mid-cycle at the user's request, because it now covers everything Prisma-related (voice,
+Naming note: this tab is the one whose visible label was renamed from `Voz` to `Leda`
+mid-cycle at the user's request, because it now covers everything Leda-related (voice,
 Telegram, credentials) and `Voz` predated the product name. Its internal id stays `voice` so
 the persisted tab preference and the per-tab status keys do not break, and its icon changed
 from `Mic2` to Lucide's `Pyramid`. References below to "VOZ" mean this tab.
@@ -88,10 +88,10 @@ from `Mic2` to Lucide's `Pyramid`. References below to "VOZ" mean this tab.
   does not.
 
 Every unit ends with the canonical gates green and a Conventional Commit on
-`feat/prisma-telegram-credentials`, staged narrowly (no `.gitignore`).
+`feat/leda-telegram-credentials`, staged narrowly (no `.gitignore`).
 
 - **U2b — tab rename (user-requested mid-cycle).** Rename the reference tab's visible label
-  from `Voz` to `Prisma` and switch its icon from `Mic2` to `Pyramid`, updating the test
+  from `Voz` to `Leda` and switch its icon from `Mic2` to `Pyramid`, updating the test
   references and the living master document's navigation paths. Internal id and feature names
   stay as they are; historical task documents are left untouched because they record what was
   true when they were written.
@@ -126,7 +126,7 @@ Every unit ends with the canonical gates green and a Conventional Commit on
 
 - [x] U1 — Shared primitive plus dialog generalization; the reference tab unchanged and green. Commit `17a9064`.
 - [x] U2 — CONEXIÓN projects the shared status. Commit `19afc71`.
-- [x] U2b — Reference tab renamed `Voz` → `Prisma` with the `Pyramid` icon (this commit).
+- [x] U2b — Reference tab renamed `Voz` → `Leda` with the `Pyramid` icon (this commit).
 - [x] U3 — DISEÑO projects the shared status (this commit), including both branches of the typography-reset projection and the finding that both reset paths persist while the revert ref does not.
 - [x] U4 — OPCIONES projects the shared status. Commit `891bd6a`.
 - [x] U5 — AJUSTES projects the shared status, keeping its in-content validation alert. Commit `e3ec798`.

@@ -5,12 +5,12 @@
 // Arquitectura Técnica v1.3 §7.1
 // =============================================================================
 import AppRouter from './app/router';
-import PrismaOrbOverlay from './components/PrismaOrbOverlay';
+import LedaOrbOverlay from './components/LedaOrbOverlay';
 import { useAutomaticViewportZoom } from './hooks/useAutomaticViewportZoom';
 import { useBootShield } from './hooks/useBootShield';
 import { useHiddenAccessShortcut } from './hooks/useHiddenAccessShortcut';
-import { usePrismaOrbPresentation } from './hooks/usePrismaOrbPresentation';
-import { usePrismaOrbVisualConfig } from './hooks/usePrismaOrbVisualConfig';
+import { useLedaOrbPresentation } from './hooks/useLedaOrbPresentation';
+import { useLedaOrbVisualConfig } from './hooks/useLedaOrbVisualConfig';
 import { useReloadShield } from './hooks/useReloadShield';
 import { useVoiceEventListener } from './hooks/useVoiceEventListener';
 import type { VoiceEvent } from './domain/voice.types';
@@ -20,8 +20,8 @@ function logVoiceEvent(event: VoiceEvent): void {
 }
 
 export default function App() {
-    const prismaOrb = usePrismaOrbPresentation();
-    const prismaOrbVisualConfig = usePrismaOrbVisualConfig();
+    const ledaOrb = useLedaOrbPresentation();
+    const ledaOrbVisualConfig = useLedaOrbVisualConfig();
 
     useAutomaticViewportZoom();
     useBootShield();
@@ -29,16 +29,16 @@ export default function App() {
     useHiddenAccessShortcut();
     useVoiceEventListener((event) => {
         logVoiceEvent(event);
-        prismaOrb.presentVoiceEvent(event);
+        ledaOrb.presentVoiceEvent(event);
     });
 
     return (
         <>
             <AppRouter />
-            <PrismaOrbOverlay
-                phase={prismaOrb.phase}
-                orbRef={prismaOrb.orbRef}
-                config={prismaOrbVisualConfig}
+            <LedaOrbOverlay
+                phase={ledaOrb.phase}
+                orbRef={ledaOrb.orbRef}
+                config={ledaOrbVisualConfig}
             />
         </>
     );

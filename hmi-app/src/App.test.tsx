@@ -18,8 +18,8 @@ vi.mock('./vendor/leda-orb.js', () => ({}));
 vi.mock('./hooks/useBootShield', () => ({ useBootShield: useBootShieldMock }));
 vi.mock('./hooks/useReloadShield', () => ({ useReloadShield: useReloadShieldMock }));
 vi.mock('./hooks/useVoiceEventListener', () => ({ useVoiceEventListener: useVoiceEventListenerMock }));
-vi.mock('./hooks/usePrismaOrbPresentation', () => ({
-    usePrismaOrbPresentation: () => ({
+vi.mock('./hooks/useLedaOrbPresentation', () => ({
+    useLedaOrbPresentation: () => ({
         phase: 'hidden',
         orbRef: { current: null },
         presentVoiceEvent: presentVoiceEventMock,

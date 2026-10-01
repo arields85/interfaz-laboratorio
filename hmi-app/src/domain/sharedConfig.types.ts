@@ -1,6 +1,6 @@
 // Shared HMI configuration: the document every browser reads from the runtime and
 // that the administrator writes back in batches. Wire contract and bounds mirror
-// services/prisma-runtime/src/prisma_runtime/hmi_config_store.py.
+// services/leda-runtime/src/leda_runtime/hmi_config_store.py.
 
 export const SHARED_CONFIG_CACHE_VERSION = 1;
 export const MAX_SHARED_CONFIG_KEY_LENGTH = 128;
@@ -20,7 +20,7 @@ export const SHARED_CONFIG_PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set(
 
 // The single list of localStorage keys that belong to the shared configuration: the five
 // content stores plus the HMI configuration (data connection, name, loader and temporal
-// options, Prisma orb, theme, design and shader). A pinning test ties it to the modules'
+// options, Leda orb, theme, design and shader). A pinning test ties it to the modules'
 // own key constants. Per-browser state must never be added here: hierarchy expanded nodes,
 // dialog tab, ui store, voice prebuffer, auth keys, alert history, the hidden-access flag,
 // the adapter cache and the device-level exporter and runtime-mode keys.
@@ -34,10 +34,10 @@ export const SHARED_CONFIG_KEYS: readonly string[] = [
     'hmi:node-red-endpoint',
     'hmi:data-history-endpoint',
     'hmi:activity-series-endpoint',
-    'hmi:prisma-hmi-name',
+    'hmi:leda-hmi-name',
     'hmi:loader-options',
     'hmi:temporal-settings',
-    'hmi:prisma-orb-visual-config',
+    'hmi:leda-orb-visual-config',
     'hmi-theme-style',
     'hmi-theme-frame-radius',
     'hmi-viewer-entrance',

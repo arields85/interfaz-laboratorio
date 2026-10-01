@@ -1,0 +1,1665 @@
+import ctypes
+import ctypes.wintypes
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from leda_runtime import local_presentation, voice_service
+from leda_runtime.telegram_config import read_telegram_config
+
+
+RUNTIME_ROOT = Path(__file__).resolve().parents[1]
+OPERATIONS_ROOT = RUNTIME_ROOT / "operations"
+
+
+class TelegramOptInTests(unittest.TestCase):
+    def test_token_alone_is_disabled_and_does_not_construct_or_call_telegram(self) -> None:
+        with patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "secret-token"}, clear=True):
+            config = read_telegram_config()
+            self.assertFalse(config.enabled)
+            self.assertFalse(config.configured)
+            self.assertIsNone(local_presentation.build_telegram_bot(Mock(), Mock(), Mock(), Mock()))
+            self.assertEqual(voice_service._telegram_token(), "")
+
+    def test_enabled_telegram_without_token_is_reported_without_bot_or_requests(self) -> None:
+        with patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_ENABLED": "1"}, clear=True), patch.object(local_presentation.requests, "Session") as session:
+            config = read_telegram_config()
+            bot = local_presentation.build_telegram_bot(Mock(), Mock(), Mock(), Mock(), config=config)
+        self.assertTrue(config.enabled)
+        self.assertFalse(config.configured)
+        self.assertEqual(config.configuration_error, "LEDA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING")
+        self.assertIsNone(bot)
+        session.assert_not_called()
+
+    def test_explicit_opt_in_constructs_bot_and_preserves_normal_behavior(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"LEDA_LOCAL_TELEGRAM_ENABLED": "1", "LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "secret-token"},
+            clear=True,
+        ):
+            config = read_telegram_config()
+            bot = local_presentation.build_telegram_bot(Mock(), Mock(), Mock(), Mock())
+            self.assertTrue(config.enabled)
+            self.assertTrue(config.configured)
+            self.assertEqual(config.token, "secret-token")
+            self.assertIsInstance(bot, local_presentation.TelegramLocalBot)
+            self.assertEqual(bot.token, "secret-token")
+
+    def test_production_factory_wires_the_session_registry_for_channel_b(self) -> None:
+        """B1c: the production TelegramLifecycleManager factory (built by
+        create_app) must thread its session_registry into every
+        TelegramLocalBot it constructs, so Channel B answers from the
+        active HMI screen instead of the retired file-based snapshot
+        store (leda_local_snapshot.json)."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["telegram_manager"]
+            bot = manager.bot_factory("some-token")
+        self.assertIs(bot.session_registry, app.config["session_registry"])
+
+    def test_production_factory_enables_the_channel_b_typing_indicator(self) -> None:
+        """Live test 2026-09-25 (F6): the production TelegramLifecycleManager
+        factory must turn typing_enabled on, mirroring the session_registry
+        wiring test above -- every direct test construction elsewhere keeps
+        its default (disabled) unless it opts in explicitly."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["telegram_manager"]
+            bot = manager.bot_factory("some-token")
+        self.assertTrue(bot.typing_enabled)
+
+    def test_production_factory_wires_transcribe_for_channel_a(self) -> None:
+        """PW-013: the production ChannelAManager activation factory (built
+        by create_app) must thread a real transcribe callable into every
+        ChannelAActivation it constructs, so Channel A voice notes are
+        transcribed via the voice process instead of silently staying
+        unsupported."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        self.assertTrue(callable(kwargs["transcribe"]))
+
+    def test_production_factory_wires_notify_thinking_and_notify_cancelled_for_channel_a(self) -> None:
+        """voice-ux U1: the production ChannelAManager activation factory
+        must also thread the two orb-signal callables into every
+        ChannelAActivation it constructs -- same wiring precedent as
+        transcribe above."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        self.assertTrue(callable(kwargs["notify_thinking"]))
+        self.assertTrue(callable(kwargs["notify_cancelled"]))
+
+    def test_channel_a_notify_thinking_publishes_a_thinking_kind_event_for_the_owner(self) -> None:
+        """voice-ux U1: the production closure publishes a signal-only
+        "thinking" event through the exact same voice_events store the HMI's
+        SSE/poll channel already reads -- no answer text, never eligible for
+        TTS (see voice_service.py's kind guard)."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        notify_thinking = kwargs["notify_thinking"]
+        voice_events = app.config["voice_events"]
+
+        notify_thinking("owner-1")
+
+        event = voice_events.latest("owner-1")
+        self.assertIsNotNone(event)
+        self.assertEqual(event["kind"], "thinking")
+        self.assertEqual(event["text"], "")
+
+    def test_channel_a_notify_cancelled_publishes_a_cancel_kind_event_for_the_owner(self) -> None:
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        notify_cancelled = kwargs["notify_cancelled"]
+        voice_events = app.config["voice_events"]
+
+        notify_cancelled("owner-1")
+
+        event = voice_events.latest("owner-1")
+        self.assertIsNotNone(event)
+        self.assertEqual(event["kind"], "cancel")
+        self.assertEqual(event["text"], "")
+
+    def test_channel_a_transcribe_adds_the_owners_active_machine_and_screen_names_as_extra_terms(self) -> None:
+        """F7 (live test 2026-09-25): the production channel_a_transcribe
+        closure must bias the transcription prompt with the owner's own
+        active machine/screen names, read through the SAME guarded,
+        freshness-bound session_registry.capture_owner_context the query
+        coordinator's own read_context seam already uses -- not a second,
+        weaker read path. A live benchmark found a machine name
+        ("Reiner") misheard without this hint."""
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        fake_voice_response = Mock(status_code=200)
+        fake_voice_response.json.return_value = {"transcript": "lote 42"}
+        fake_http.post.return_value = fake_voice_response
+        session_registry = Mock()
+        session_registry.capture_owner_context.return_value = (
+            1.0,
+            {"machine": {"name": "Reiner"}, "screen": {"ownerNodeName": "Pantalla 1"}},
+            7,
+        )
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None, session_registry=session_registry)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        transcribe = kwargs["transcribe"]
+        voice_events = app.config["voice_events"]
+
+        with patch.object(voice_events, "mint_voice_transcription_token", wraps=voice_events.mint_voice_transcription_token) as mint:
+            transcript = transcribe(b"audio-bytes", "audio/ogg", owner_id="owner-1")
+
+        self.assertEqual(transcript, "lote 42")
+        session_registry.capture_owner_context.assert_called_once_with(
+            "owner-1", max_age_seconds=local_presentation.CHANNEL_A_OWNER_NAME_MAX_AGE_SECONDS
+        )
+        mint.assert_called_once()
+        self.assertEqual(mint.call_args.args[2], ("Reiner", "Pantalla 1"))
+
+    def test_channel_a_transcribe_never_fails_when_the_owner_context_is_unavailable(self) -> None:
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        fake_voice_response = Mock(status_code=200)
+        fake_voice_response.json.return_value = {"transcript": "lote 42"}
+        fake_http.post.return_value = fake_voice_response
+        session_registry = Mock()
+        session_registry.capture_owner_context.side_effect = local_presentation.HmiSessionContextUnavailable("x")
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), \
+                patch.object(local_presentation.requests, "Session", return_value=fake_http), \
+                patch.object(local_presentation, "ChannelAActivation") as activation_cls:
+            app = local_presentation.create_app(telegram_bot=None, session_registry=session_registry)
+            manager = app.config["channel_a_manager"]
+            manager._factory("fake-channel-a-token", desired, "epoch-1", manager._reservation)
+        _, kwargs = activation_cls.call_args
+        transcribe = kwargs["transcribe"]
+
+        transcript = transcribe(b"audio-bytes", "audio/ogg", owner_id="owner-1")
+
+        self.assertEqual(transcript, "lote 42")
+
+    def test_voice_delivery_is_blocked_when_opt_in_is_disabled(self) -> None:
+        job = {
+            "telegram_chat_id": 12345,
+            "telegram_encoder": None,
+            "telegram_pcm_parts": [b"pcm"],
+            "cancelled": Mock(is_set=Mock(return_value=False)),
+            "event_id": "safety-check",
+        }
+        with patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "secret-token"}, clear=True), patch.object(voice_service, "_telegram_post") as telegram_post:
+            voice_service._send_same_leda_audio_to_telegram(job)
+        telegram_post.assert_not_called()
+
+
+class PresentationHealthTests(unittest.TestCase):
+    def test_disabled_health_reports_telegram_not_configured_or_connected(self) -> None:
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            health = local_presentation.create_app(telegram_bot=None).test_client().get("/health").get_json()
+        self.assertFalse(health["telegramEnabled"])
+        self.assertFalse(health["telegramConfigured"])
+        self.assertFalse(health["telegramConnected"])
+        self.assertFalse(health["telegramVerified"])
+        self.assertIsNone(health["telegramConfigurationError"])
+        self.assertIsNone(health["telegramLastError"])
+        self.assertTrue(health["ready"])
+
+    def test_enabled_health_exposes_connection_observability(self) -> None:
+        bot = Mock(token="secret-token", bot_username="leda_bot", last_error="temporary")
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_ENABLED": "1", "LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "secret-token", "LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http):
+            health = local_presentation.create_app(telegram_bot=bot).test_client().get("/health").get_json()
+        self.assertTrue(health["telegramEnabled"])
+        self.assertTrue(health["telegramConfigured"])
+        self.assertTrue(health["telegramConnected"])
+        self.assertFalse(health["telegramVerified"])
+        self.assertIsNone(health["telegramConfigurationError"])
+        self.assertEqual(health["telegramLastError"], "temporary")
+        self.assertTrue(health["ready"])
+
+    def test_enabled_missing_token_health_stays_live_and_does_not_construct_bot_or_call_telegram(self) -> None:
+        fake_http = Mock()
+        fake_http.get.return_value.json.return_value = {"ok": True}
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_ENABLED": "1", "LEDA_RUNTIME_STATE_DIR": temporary}, clear=True), patch.object(local_presentation.requests, "Session", return_value=fake_http), patch.object(local_presentation, "TelegramLocalBot") as bot_type:
+            config = read_telegram_config()
+            bot = local_presentation.build_telegram_bot(Mock(), Mock(), Mock(), config=config)
+            health = local_presentation.create_app(telegram_bot=bot, telegram_configuration=config).test_client().get("/health").get_json()
+        self.assertIsNone(bot)
+        bot_type.assert_not_called()
+        self.assertTrue(health["ok"])
+        self.assertTrue(health["ready"])
+        self.assertTrue(health["telegramEnabled"])
+        self.assertFalse(health["telegramConfigured"])
+        self.assertFalse(health["telegramConnected"])
+        self.assertFalse(health["telegramVerified"])
+        self.assertEqual(health["telegramConfigurationError"], "LEDA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING")
+        self.assertNotIn("secret-token", str(health))
+
+
+class RuntimeOwnershipTests(unittest.TestCase):
+    def run_powershell(self, command: str) -> subprocess.CompletedProcess[str]:
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+
+    def test_listener_handoff_keeps_different_wrapper_alive_and_resolves_listener(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$global:stopped = @()
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) if ($Filter -match '200') {{ [pscustomobject]@{{ ProcessId = 200; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m leda_runtime.voice_service' }} }} elseif ($Filter -match '100') {{ [pscustomobject]@{{ ProcessId = 100; ExecutablePath = 'C:\\venv\\python.exe'; CommandLine = 'C:\\venv\\python.exe -m leda_runtime.voice_service' }} }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+$listener = Resolve-LedaVerifiedListener -Port 5056 -ExpectedModule 'leda_runtime.voice_service'
+Write-Output ('listener=' + $listener.pid + ';command=' + $listener.commandLine + ';stopped=' + ($global:stopped -join ','))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("listener=200", result.stdout)
+        self.assertIn("-m leda_runtime.voice_service", result.stdout)
+        self.assertIn("stopped=", result.stdout)
+
+    def test_startup_never_terminates_wrapper_after_listener_resolution(self) -> None:
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertNotIn("Stop-LedaWrapperIfSeparate", source)
+        startup = source.index("$startupComplete = $false")
+        startup_try = source[source.index("try {", startup):source.index("finally {")]
+        self.assertNotIn("Stop-LedaLaunchedProcess", startup_try)
+
+        ownership = (OPERATIONS_ROOT / "process-ownership.ps1").read_text(encoding="utf-8-sig")
+        self.assertNotIn("function Stop-LedaWrapperIfSeparate", ownership)
+        self.assertIn("Resolve-LedaVerifiedListener", source)
+        self.assertIn("New-ProcessRecord", source)
+
+    def test_wrong_module_is_not_admitted(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 200; ExecutablePath = 'C:\\Python\\python.exe'; CommandLine = 'C:\\Python\\python.exe -m other.service' }} }}
+Write-Output ([bool](Resolve-LedaVerifiedListener -Port 5056 -ExpectedModule 'leda_runtime.voice_service'))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("False", result.stdout)
+
+    def test_unknown_listener_executable_is_not_admitted_or_stopped(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$global:stopped = @()
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = 999 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 999; ExecutablePath = 'C:\\Other\\node.exe'; CommandLine = 'node.exe -m leda_runtime.voice_service' }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+$listener = Resolve-LedaVerifiedListener -Port 5056 -ExpectedModule 'leda_runtime.voice_service'
+Write-Output ('listener=' + [bool]$listener + ';stopped=' + ($global:stopped -join ','))
+"""
+        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("listener=False", result.stdout)
+        self.assertIn("stopped=", result.stdout)
+
+    def test_wrong_pid_and_command_line_do_not_stop_current_listener(self) -> None:
+        stop_script = OPERATIONS_ROOT / "stop-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            (state / "run" / "process-manifest.json").write_text(json.dumps({"schemaVersion": 1, "repositoryRoot": str(RUNTIME_ROOT), "processes": [{"service": "leda-voice", "port": 5056, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service --old",}]}), encoding="utf-8")
+            powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            command = f"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = 5056; OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 200; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m leda_runtime.voice_service' }} }}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+& '{stop_script}'
+Write-Output ('stopped=' + ($global:stopped -join ','))
+"""
+            result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=", result.stdout)
+        self.assertNotIn("stopped=200", result.stdout)
+
+    def test_owned_listener_can_be_stopped_when_manifest_matches_exactly(self) -> None:
+        stop_script = OPERATIONS_ROOT / "stop-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            (state / "run" / "process-manifest.json").write_text(json.dumps({"schemaVersion": 1, "repositoryRoot": str(RUNTIME_ROOT), "processes": [{"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service"}]}), encoding="utf-8")
+            powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            command = f"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ LocalPort = 5056; OwningProcess = 200 }} }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 200; ParentProcessId = 1; CreationDate = '2026-08-31T10:00:00Z'; ExecutablePath = 'C:\\Python.exe'; CommandLine = 'python.exe -m leda_runtime.voice_service' }} }}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+& '{stop_script}'
+Write-Output ('stopped=' + ($global:stopped -join ','))
+"""
+            result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=200", result.stdout)
+
+    def test_stale_manifest_is_pruned_without_stopping_unknown_processes(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "process-manifest.json"
+            manifest.write_text(json.dumps({"schemaVersion": 1, "repositoryRoot": str(RUNTIME_ROOT), "processes": [{"service": "leda-voice", "port": 5056, "pid": 111, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service"}]}), encoding="utf-8")
+            command = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @() }}
+Prune-LedaProcessManifest -ManifestPath '{manifest}' -RepositoryRoot '{RUNTIME_ROOT}'
+Write-Output ('exists=' + (Test-Path -LiteralPath '{manifest}'))
+"""
+            result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("exists=False", result.stdout)
+
+    def test_start_keeps_preflight_before_start_and_manifest_adds_creation_identity(self) -> None:
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertLess(source.index("Assert-LedaLocalPortsAvailable"), source.index("Start-Process"))
+        self.assertIn("pid = [int]$Listener.pid", source)
+        self.assertIn("module = [string]$Listener.module", source)
+        self.assertIn("commandLine = [string]$Listener.commandLine", source)
+        self.assertIn("creationTimeUtc", source)
+        self.assertNotIn("Stop-LedaWrapperIfSeparate", source)
+        ownership = (OPERATIONS_ROOT / "process-ownership.ps1").read_text(encoding="utf-8-sig")
+        self.assertNotIn("ParentProcessId", ownership)
+        self.assertIn("CreationDate", ownership)
+        self.assertNotIn("IndexOf($RepositoryRoot", ownership)
+
+    def test_failed_startup_removes_manifest_records_after_rollback(self) -> None:
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        cleanup = source.index("if (-not $startupComplete)")
+        startup = source.index("$startupComplete = $false")
+        try_body = source[source.index("try {", startup):cleanup]
+        cleanup_body = source[cleanup:]
+        self.assertNotIn("Stop-LedaLaunchedProcess -Process", try_body)
+        self.assertIn("Stop-LedaLaunchedProcess -Process $presentationProcess", cleanup_body)
+        self.assertIn("Stop-LedaLaunchedProcess -Process $voiceProcess", cleanup_body)
+        self.assertLess(cleanup_body.index("Stop-LedaLaunchedProcess"), cleanup_body.index("stop-local.ps1"))
+        self.assertIn("stop-local.ps1", source[cleanup:])
+        self.assertIn("Remove-Item -LiteralPath $manifestPath", source[cleanup:])
+        launcher_cleanup = source[source.index("function Stop-LedaLaunchedProcess"):source.index("$template = Get-LedaConfigurationTemplate")]
+        self.assertIn("Stop-Process -Id $Process.Id", launcher_cleanup)
+        self.assertIn("$Process.HasExited", launcher_cleanup)
+        self.assertIn("-ErrorAction SilentlyContinue", launcher_cleanup)
+        self.assertNotIn("Get-Process", launcher_cleanup)
+
+        stop_local = (OPERATIONS_ROOT / "stop-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("Stop-Process -Id $recordedPid", stop_local)
+
+    def test_manifest_lock_serializes_real_cross_process_writers(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / "manifest.lock"
+            marker = Path(temporary) / "marker.txt"
+            holder = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+Invoke-LedaManifestLock -LockPath '{lock_path}' -TimeoutMilliseconds 3000 -Action {{
+    Add-Content -LiteralPath '{marker}' -Value 'holder-enter'
+    Start-Sleep -Milliseconds 500
+    Add-Content -LiteralPath '{marker}' -Value 'holder-exit'
+}}
+"""
+            waiter = f"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+Invoke-LedaManifestLock -LockPath '{lock_path}' -TimeoutMilliseconds 3000 -Action {{
+    Add-Content -LiteralPath '{marker}' -Value 'waiter-enter'
+}}
+"""
+            powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            first = subprocess.Popen([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", holder], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for _ in range(100):
+                if lock_path.exists():
+                    break
+                time.sleep(0.01)
+            second = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", waiter], capture_output=True, text=True, check=False)
+            first_stdout, first_stderr = first.communicate(timeout=5)
+            self.assertEqual(first.returncode, 0, first_stderr or first_stdout)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(marker.read_text(encoding="utf-8").splitlines(), ["holder-enter", "holder-exit", "waiter-enter"])
+
+    def test_development_owner_transaction_shares_generation_and_releases_only_last_owner(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$manifest = [pscustomobject]@{{
+    schemaVersion = 2
+    repositoryRoot = 'C:\repo'
+    processes = @()
+    developmentOwnership = [pscustomobject]@{{ generation = 'generation'; owners = @('owner-a') }}
+}}
+Add-LedaDevelopmentOwner -Manifest $manifest -OwnerToken 'owner-b' -ExpectedGeneration 'generation'
+$first = Remove-LedaDevelopmentOwner -Manifest $manifest -OwnerToken 'owner-a' -ExpectedGeneration 'generation'
+$second = Remove-LedaDevelopmentOwner -Manifest $manifest -OwnerToken 'owner-b' -ExpectedGeneration 'generation'
+Write-Output "owners=$($manifest.developmentOwnership.owners -join ',');first=$first;second=$second"
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("owners=;first=False;second=True", result.stdout)
+
+    def test_actual_powershell_51_receipt_bytes_are_bomless_and_parse_in_actual_node(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+Save-LedaJsonFile -Path '{receipt}' -Value ([ordered]@{{ registered = $true; generation = 'generation' }}) -Depth 4
+"""
+            result = self.run_powershell(command)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = receipt.read_bytes()
+            self.assertNotEqual(data[:3], bytes((239, 187, 191)))
+            node = subprocess.run(
+                ["node", "-e", "const fs=require('node:fs'); JSON.parse(fs.readFileSync(process.argv[1], 'utf8'))", str(receipt)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(node.returncode, 0, node.stderr)
+
+    # T18 (2026-09-24): _assert_failed_receipt_handoff_rolls_back and its two callers
+    # (test_failed_sole_owner_receipt_handoff_rolls_back_exact_owned_processes,
+    # test_failed_shared_owner_receipt_handoff_removes_only_invocation_owner) were removed
+    # here. They exercised rolling back Add-LedaDevelopmentOwner registering a NEW owner
+    # onto an EXISTING, already-running, healthy dev-owned manifest after a receipt-save
+    # failure -- that registration only ever happened inside the warm-reuse branch T18
+    # deleted from start-local.ps1's Invoke-LedaStartTransaction (a healthy runtime is
+    # never reused and therefore never gains a second owner anymore). The rollback
+    # machinery itself (Invoke-LedaDevelopmentReleaseTransaction, sole-vs-shared-owner
+    # semantics) is unchanged and remains covered directly via release-dev-local.ps1 by
+    # test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity,
+    # test_release_reaps_provably_dead_peer_and_stops_runtime_for_last_live_owner and
+    # test_release_retains_legacy_peer_even_when_warnings_are_terminating below.
+    # Add-LedaDevelopmentOwner/Remove-LedaDevelopmentOwner themselves stay directly
+    # unit-tested by test_development_owner_transaction_shares_generation_and_releases_only_last_owner
+    # and test_generation_mismatch_and_repeated_release_cannot_claim_replacement.
+
+    def test_generation_mismatch_and_repeated_release_cannot_claim_replacement(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$manifest = [pscustomobject]@{{
+    schemaVersion = 2
+    repositoryRoot = 'C:\repo'
+    processes = @()
+    developmentOwnership = [pscustomobject]@{{ generation = 'replacement'; owners = @('owner') }}
+}}
+$mismatch = Remove-LedaDevelopmentOwner -Manifest $manifest -OwnerToken 'owner' -ExpectedGeneration 'old'
+$first = Remove-LedaDevelopmentOwner -Manifest $manifest -OwnerToken 'owner' -ExpectedGeneration 'replacement'
+$repeat = Remove-LedaDevelopmentOwner -Manifest $manifest -OwnerToken 'owner' -ExpectedGeneration 'replacement'
+Write-Output "mismatch=$mismatch;first=$first;repeat=$repeat"
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mismatch=False;first=True;repeat=False", result.stdout)
+
+    def test_new_identity_requires_creation_time_but_legacy_identity_remains_readable(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$listener = [pscustomobject]@{{ pid = 9; executable = 'C:\Python.exe'; module = 'leda_runtime.voice_service'; commandLine = 'python.exe -m leda_runtime.voice_service'; creationTimeUtc = '2026-09-17T10:00:00Z' }}
+$legacy = [pscustomobject]@{{ pid = 9; executable = 'C:\Python.exe'; module = 'leda_runtime.voice_service'; commandLine = 'python.exe -m leda_runtime.voice_service' }}
+$owned = [pscustomobject]@{{ pid = 9; executable = 'C:\Python.exe'; module = 'leda_runtime.voice_service'; commandLine = 'python.exe -m leda_runtime.voice_service'; creationTimeUtc = '2026-09-17T10:00:01Z' }}
+Write-Output "legacy=$(Test-LedaManifestIdentity -Listener $listener -Record $legacy);owned=$(Test-LedaManifestIdentity -Listener $listener -Record $owned -RequireCreationTime)"
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("legacy=True;owned=False", result.stdout)
+
+    def test_corrupt_or_foreign_manifest_is_not_canonical_reuse_proof(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "process-manifest.json"
+            manifest.write_text("{broken", encoding="utf-8")
+            corrupt = self.run_powershell(fr". '{helper}'; Write-Output ([bool](Get-LedaCanonicalManifest -ManifestPath '{manifest}' -RepositoryRoot 'C:\repo'))")
+            manifest.write_text(json.dumps({"schemaVersion": 1, "repositoryRoot": "C:\\other", "processes": []}), encoding="utf-8")
+            foreign = self.run_powershell(fr". '{helper}'; Write-Output ([bool](Get-LedaCanonicalManifest -ManifestPath '{manifest}' -RepositoryRoot 'C:\repo'))")
+        self.assertEqual(corrupt.returncode, 0, corrupt.stderr)
+        self.assertEqual(foreign.returncode, 0, foreign.stderr)
+        self.assertIn("False", corrupt.stdout)
+        self.assertIn("False", foreign.stdout)
+
+    # T18 (2026-09-24): test_manual_canonical_runtime_is_reused_without_start_or_stop_ownership
+    # was rewritten as test_start_local_always_stops_and_restarts_a_manually_started_runtime
+    # below (a manual runtime is now ALSO stopped and restarted, not reused).
+    #
+    # test_concurrent_acquisitions_join_one_owned_generation_without_manifest_corruption was
+    # removed: it proved two concurrent `npm run dev` launches could join the SAME
+    # developmentOwnership generation of an already-running, healthy manifest without
+    # corrupting it. That joining behavior no longer exists -- every start (concurrent or
+    # not) now always stops whatever verified runtime of this repository it finds and starts
+    # its own fresh, singly-owned one (Invoke-LedaManifestLock still serializes the two
+    # transactions, so the manifest itself is never corrupted; there is simply no longer a
+    # "join" outcome to assert).
+
+    def test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity(self) -> None:
+        release_script = OPERATIONS_ROOT / "release-dev-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest = {
+                "schemaVersion": 2,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                    {"service": "leda-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.local_presentation", "commandLine": "python.exe -m leda_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
+                ],
+                "developmentOwnership": {"generation": "generation", "owners": ["owner-a", "owner-b"]},
+            }
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m leda_runtime.voice_service' }} else {{ 'python.exe -m leda_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-replaced' }} else {{ 'presentation-created' }}) }}
+}}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id) $global:stopped += $Id }}
+& '{release_script}' -DevelopmentOwnerToken 'owner-a' -ExpectedGeneration 'generation'
+Write-Output "stopped=$($global:stopped -join ',')"
+"""
+            result = self.run_powershell(command)
+            final_manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=", result.stdout)
+        self.assertCountEqual(final_manifest["developmentOwnership"]["owners"], ["owner-a", "owner-b"])
+
+    def test_release_reaps_provably_dead_peer_and_stops_runtime_for_last_live_owner(self) -> None:
+        """PW-005: a peer owner whose process identity is provably dead (a
+        successful zero-result CIM lookup) must be reaped on the authorized
+        release of the last live owner, so the runtime is stopped and the
+        manifest is removed instead of being retained by an orphaned token."""
+        release_script = OPERATIONS_ROOT / "release-dev-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest = {
+                "schemaVersion": 2,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                    {"service": "leda-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.local_presentation", "commandLine": "python.exe -m leda_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
+                ],
+                "developmentOwnership": {
+                    "generation": "generation",
+                    "owners": ["owner-a", "dead-peer"],
+                    "ownerIdentities": {
+                        "owner-a": {"pid": 5000, "creationTimeUtc": "2026-09-17T10:00:00.0000000Z"},
+                        "dead-peer": {"pid": 5001, "creationTimeUtc": "2026-09-17T10:00:01.0000000Z"},
+                    },
+                },
+            }
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    if ($Filter -match '5001') {{ return @() }}
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m leda_runtime.voice_service' }} else {{ 'python.exe -m leda_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
+}}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id) $global:stopped += $Id }}
+& '{release_script}' -DevelopmentOwnerToken 'owner-a' -ExpectedGeneration 'generation'
+Write-Output "stopped=$($global:stopped -join ',')"
+"""
+            result = self.run_powershell(command)
+            final_manifest = manifest_path.read_text(encoding="utf-8-sig") if manifest_path.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=200,201", result.stdout)
+        self.assertIsNone(final_manifest)
+
+    # T18 (2026-09-24): test_warm_acquisition_reaps_provably_dead_owner_and_registers_new_owner_without_stopping
+    # was removed. It proved a NEW owner could join an existing manifest's generation (reaping
+    # a provably dead peer along the way) WITHOUT stopping or starting anything -- the exact
+    # warm-reuse branch (Get-LedaCanonicalManifest + Add-LedaDevelopmentOwner) T18 deleted
+    # from Invoke-LedaStartTransaction. Dead-peer reaping itself is untouched and stays
+    # covered by Invoke-LedaDevelopmentReleaseTransaction's own tests (see the note above
+    # test_release_keeps_nonfinal_generation_and_never_kills_replaced_identity); a dead peer
+    # recorded on an old manifest no longer matters to a start, since that manifest is now
+    # always discarded and its verified listeners stopped regardless
+    # (test_start_local_always_stops_and_restarts_a_healthy_dev_owned_runtime below covers the
+    # now-unconditional stop-and-restart path a dead-peer manifest would also hit).
+
+    def test_owner_liveness_lookup_distinguishes_dead_live_reused_and_unknown(self) -> None:
+        helper = OPERATIONS_ROOT / "process-ownership.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+function global:Get-CimInstance {{
+    [CmdletBinding()]
+    param([string]$ClassName, [string]$Filter)
+    if ($Filter -match '5001') {{ return @() }}
+    if ($Filter -match '5002') {{ return [pscustomobject]@{{ ProcessId = 5002; CreationDate = '2026-09-17T10:00:02.0000000Z' }} }}
+    if ($Filter -match '5003') {{ return [pscustomobject]@{{ ProcessId = 5003; CreationDate = '2026-09-17T10:00:33.0000000Z' }} }}
+    if ($Filter -match '5004') {{ Write-Error 'cim denied'; return @() }}
+    return @(
+        [pscustomobject]@{{ ProcessId = 5005; CreationDate = '2026-09-17T10:00:05.0000000Z' }},
+        [pscustomobject]@{{ ProcessId = 5005; CreationDate = '2026-09-17T10:00:05.0000000Z' }}
+    )
+}}
+$dead = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ pid = 5001; creationTimeUtc = '2026-09-17T10:00:01.0000000Z' }})
+$alive = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ pid = 5002; creationTimeUtc = '2026-09-17T10:00:02.0000000Z' }})
+$reused = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ pid = 5003; creationTimeUtc = '2026-09-17T10:00:03.0000000Z' }})
+$errorState = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ pid = 5004; creationTimeUtc = '2026-09-17T10:00:04.0000000Z' }})
+$duplicate = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ pid = 5005; creationTimeUtc = '2026-09-17T10:00:05.0000000Z' }})
+$malformed = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ pid = 5006; creationTimeUtc = 'not-a-date' }})
+$missing = Get-LedaDevelopmentOwnerState -OwnerIdentity ([pscustomobject]@{{ creationTimeUtc = '2026-09-17T10:00:06.0000000Z' }})
+$collisionMap = New-Object Collections.Specialized.OrderedDictionary ([StringComparer]::Ordinal)
+$collisionMap.Add('collision-peer', [pscustomobject]@{{ pid = 5001; creationTimeUtc = '2026-09-17T10:00:01.0000000Z' }})
+$collisionMap.Add('COLLISION-PEER', [pscustomobject]@{{ pid = 5002; creationTimeUtc = '2026-09-17T10:00:02.0000000Z' }})
+$collisionOwnership = [pscustomobject]@{{ owners = @('collision-peer'); ownerIdentities = $collisionMap }}
+$collision = $null -eq (Get-LedaDevelopmentOwnerIdentity -Ownership $collisionOwnership -OwnerToken 'collision-peer')
+Write-Output "dead=$dead;alive=$alive;reused=$reused;error=$errorState;duplicate=$duplicate;malformed=$malformed;missing=$missing;collision=$collision"
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("dead=dead;alive=alive;reused=dead;error=unknown;duplicate=unknown;malformed=unknown;missing=unknown;collision=True", result.stdout)
+
+    def test_release_retains_legacy_peer_even_when_warnings_are_terminating(self) -> None:
+        release_script = OPERATIONS_ROOT / "release-dev-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest = {
+                "schemaVersion": 2,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                    {"service": "leda-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.local_presentation", "commandLine": "python.exe -m leda_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
+                ],
+                "developmentOwnership": {"generation": "generation", "owners": ["owner-a", "legacy-peer"]},
+            }
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$WarningPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) [pscustomobject]@{{ OwningProcess = $(if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}) }} }}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m leda_runtime.voice_service' }} else {{ 'python.exe -m leda_runtime.local_presentation' }}); CreationDate = $(if ($voice) {{ 'voice-created' }} else {{ 'presentation-created' }}) }}
+}}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id) $global:stopped += $Id }}
+& '{release_script}' -DevelopmentOwnerToken 'OWNER-A' -ExpectedGeneration 'generation'
+Write-Output "stopped=$($global:stopped -join ',')"
+"""
+            result = self.run_powershell(command)
+            final_manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=", result.stdout)
+        self.assertEqual(final_manifest["developmentOwnership"]["owners"], ["legacy-peer"])
+
+    def test_development_acquisition_still_rejects_an_invalid_owner_process_id_before_any_manifest_mutation(self) -> None:
+        """Unrelated to T1b: a malformed -DevelopmentOwnerProcessId fails its own
+        identity-registration validation before any manifest or port logic runs,
+        and mutates nothing."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps({
+                "schemaVersion": 2,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                ],
+                "developmentOwnership": {"generation": "generation", "owners": ["owner-a"]},
+            }), encoding="utf-8")
+            original = manifest_path.read_bytes()
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) [pscustomobject]@{{ ProcessId = 5002; CreationDate = '2026-09-17T10:00:02.0000000Z' }} }}
+$global:started = 0
+$global:stopped = 0
+function global:Start-Process {{ $global:started++ }}
+function global:Stop-Process {{ $global:stopped++ }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-invalid' -DevelopmentOwnerProcessId 'invalid' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "invalid=True;started=$global:started;stopped=$global:stopped" }}
+"""
+            result = self.run_powershell(command)
+            final = manifest_path.read_bytes()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("invalid=True;started=0;stopped=0", result.stdout)
+        self.assertEqual(final, original)
+
+    def test_partial_owned_manifest_now_recovers_instead_of_refusing(self) -> None:
+        """T1b reverses the old refusal: a manifest that is owned but INCOMPLETE
+        (only one of the two expected process records, so
+        Get-LedaCanonicalManifest -RequireCompleteRuntime cannot treat it as
+        canonical) is discarded and a fresh start is attempted, exactly like any
+        other non-reusable manifest."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps({
+                "schemaVersion": 2,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                ],
+                "developmentOwnership": {"generation": "generation", "owners": ["owner-a"]},
+            }), encoding="utf-8")
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+$global:netTcpCalls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:netTcpCalls++
+    if ($global:netTcpCalls -le 2) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    if ($Filter -match '5002') {{ return [pscustomobject]@{{ ProcessId = 5002; CreationDate = '2026-09-17T10:00:02.0000000Z' }} }}
+    return @()
+}}
+$global:started = 0
+$global:stopped = 0
+function global:Start-Process {{ $global:started++ }}
+function global:Stop-Process {{ $global:stopped++ }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentOwnerProcessId '5002' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);started=$global:started;stopped=$global:stopped" }}
+"""
+            result = self.run_powershell(command)
+            manifest_exists = manifest_path.exists()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("partial or ambiguous manifest", result.stdout)
+        self.assertRegex(result.stdout, r"port 505[67] is occupied")
+        self.assertIn("Recovered Leda Local development state left by an abrupt shutdown.", result.stdout)
+        self.assertIn("started=0;stopped=0", result.stdout)
+        self.assertFalse(manifest_exists)
+
+    def test_launcher_presentation_ready_message_drops_the_internal_service_name(self) -> None:
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("Leda is ready at http://127.0.0.1:5057.", source)
+        self.assertNotIn("Leda Local presentation is ready", source)
+        self.assertIn("Leda voice is ready at http://127.0.0.1:5056.", source)
+
+    def test_start_local_always_recovers_a_dev_owned_manifest_regardless_of_owner_liveness(self) -> None:
+        """T1b (user decision, reverses T1/PW-006's fail-closed refusal): the
+        launcher must always start Leda, however the previous run ended.
+        Owner liveness (dead, unknown identity, or even still alive) is now
+        IRRELEVANT to recovery: whenever the canonical health/identity reuse
+        check above does not apply (here: the recorded processes are dead, so
+        Get-LedaCanonicalManifest -RequireCompleteRuntime already returns
+        null), the manifest is discarded and a fresh start is attempted. No
+        owner pid (9001) is ever a Stop-Process target on this path."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        for scenario, owner_identity in (
+            ("dead", {"pid": 9001, "creationTimeUtc": "2026-09-17T10:00:00.0000000Z"}),
+            ("alive", {"pid": 9001, "creationTimeUtc": "2026-09-17T10:00:00.0000000Z"}),
+            ("unknown", None),
+        ):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                state = Path(temporary)
+                (state / "run").mkdir()
+                manifest_path = state / "run" / "process-manifest.json"
+                ownership: dict[str, object] = {"generation": "generation", "owners": ["owner-a"]}
+                if owner_identity is not None:
+                    ownership["ownerIdentities"] = {"owner-a": owner_identity}
+                manifest_path.write_text(json.dumps({
+                    "schemaVersion": 2,
+                    "repositoryRoot": str(RUNTIME_ROOT),
+                    "processes": [
+                        {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                        {"service": "leda-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.local_presentation", "commandLine": "python.exe -m leda_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
+                    ],
+                    "developmentOwnership": ownership,
+                }), encoding="utf-8")
+                receipt = state / "receipt.json"
+                command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+$global:netTcpCalls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:netTcpCalls++
+    if ($global:netTcpCalls -le 3) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    if ($Filter -match '9001') {{ return $(if ('{scenario}' -eq 'alive') {{ [pscustomobject]@{{ ProcessId = 9001; CreationDate = '2026-09-17T10:00:00.0000000Z' }} }} else {{ @() }}) }}
+    return @()
+}}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+$global:started = 0
+function global:Start-Process {{ $global:started++ }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped -join ',');started=$global:started" }}
+"""
+                result = self.run_powershell(command)
+                manifest_exists = manifest_path.exists()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("partial or ambiguous manifest", result.stdout)
+            self.assertNotIn("no longer matches", result.stdout)
+            self.assertRegex(result.stdout, r"port 505[67] is occupied")
+            self.assertIn("Recovered Leda Local development state left by an abrupt shutdown.", result.stdout)
+            self.assertIn("stopped=;started=0", result.stdout)
+            self.assertFalse(manifest_exists)
+        source = start_script.read_text(encoding="utf-8-sig")
+        self.assertIn("Recovered Leda Local development state left by an abrupt shutdown.", source)
+
+    def test_start_local_stops_leftover_verified_listeners_with_no_manifest_and_recovers(self) -> None:
+        """T1b: a leftover verified Leda listener of THIS repository on
+        5056/5057 with NO manifest at all (e.g. the manifest file itself was
+        already deleted or never existed) must be stopped and the launcher
+        must still reach the normal fresh-start preflight."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+$global:netTcpCalls = 0
+$global:stopped = @()
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:netTcpCalls++
+    if ($global:netTcpCalls -gt 4) {{ return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }}) }}
+    $ownerPid = if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}
+    if ($global:stopped -contains $ownerPid) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = $ownerPid }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m leda_runtime.voice_service' }} else {{ 'python.exe -m leda_runtime.local_presentation' }}) }}
+}}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+$global:started = 0
+function global:Start-Process {{ $global:started++ }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped -join ',');started=$global:started" }}
+"""
+            result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"port 505[67] is occupied")
+        self.assertIn("Stopped previous Leda runtime (pid 200) to start clean.", result.stdout)
+        self.assertIn("Stopped previous Leda runtime (pid 201) to start clean.", result.stdout)
+        self.assertNotIn("Recovered Leda Local development state left by an abrupt shutdown.", result.stdout)
+        self.assertIn("stopped=200,201;started=0", result.stdout)
+
+    def test_start_local_always_stops_and_restarts_a_healthy_dev_owned_runtime(self) -> None:
+        """T18 (user decision, 2026-09-24, supersedes T1b/T1c's warm-reuse branch): a
+        complete, identity-verified, HEALTHY dev-owned development runtime is no longer
+        reused. It is stopped -- with a clear per-process terminal announcement, printed
+        BEFORE the fresh-start attempt -- and the launcher proceeds exactly like the
+        abrupt-shutdown recovery path always did for an unhealthy runtime. The health
+        endpoint is never even consulted anymore (Invoke-RestMethod throws if called),
+        since reuse itself no longer exists to need a health check."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest = {
+                "schemaVersion": 2,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service", "creationTimeUtc": "voice-created"},
+                    {"service": "leda-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.local_presentation", "commandLine": "python.exe -m leda_runtime.local_presentation", "creationTimeUtc": "presentation-created"},
+                ],
+                "developmentOwnership": {"generation": "generation", "owners": ["owner-a"]},
+            }
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+$global:netTcpCalls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:netTcpCalls++
+    if ($global:netTcpCalls -le 2) {{
+        $ownerPid = if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}
+        return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = $ownerPid }})
+    }}
+    if ($global:netTcpCalls -le 4) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m leda_runtime.voice_service' }} else {{ 'python.exe -m leda_runtime.local_presentation' }}) }}
+}}
+function global:Invoke-RestMethod {{ throw 'Invoke-RestMethod must not be called: reuse no longer health-checks anything.' }}
+$global:stoppedIds = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stoppedIds += $Id }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner-b' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stoppedIds -join ',')" }}
+"""
+            result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"port 505[67] is occupied")
+        self.assertIn("stopped=200,201", result.stdout)
+        self.assertIn("Stopped previous Leda runtime (pid 200) to start clean.", result.stdout)
+        self.assertIn("Stopped previous Leda runtime (pid 201) to start clean.", result.stdout)
+        self.assertNotIn("already running", result.stdout)
+
+    def test_start_local_always_stops_and_restarts_a_manually_started_runtime(self) -> None:
+        """T18 (user decision, 2026-09-24, supersedes T1b/T1c's manual-reuse branch): a
+        manually started runtime of THIS repository (start-local.cmd run by hand, no
+        developmentOwnership record at all) is verified the exact same way as a dev-owned
+        one -- via Resolve-LedaPortState, path + '-m <module>' command line, independent
+        of any manifest field -- and is therefore ALSO stopped and restarted by the dev
+        launcher. 'Always start clean' applies regardless of who started the prior runtime,
+        as long as it is verifiably this repository's own Leda."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            manifest = {
+                "schemaVersion": 1,
+                "repositoryRoot": str(RUNTIME_ROOT),
+                "processes": [
+                    {"service": "leda-voice", "port": 5056, "pid": 200, "executable": "C:\\Python.exe", "module": "leda_runtime.voice_service", "commandLine": "python.exe -m leda_runtime.voice_service"},
+                    {"service": "leda-local-presentation", "port": 5057, "pid": 201, "executable": "C:\\Python.exe", "module": "leda_runtime.local_presentation", "commandLine": "python.exe -m leda_runtime.local_presentation"},
+                ],
+            }
+            manifest_path = state / "run" / "process-manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+$global:netTcpCalls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:netTcpCalls++
+    if ($global:netTcpCalls -le 2) {{
+        $ownerPid = if ($LocalPort -eq 5056) {{ 200 }} else {{ 201 }}
+        return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = $ownerPid }})
+    }}
+    if ($global:netTcpCalls -le 4) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = $LocalPort; OwningProcess = 999 }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    $voice = $Filter -match '200'
+    [pscustomobject]@{{ ProcessId = $(if ($voice) {{ 200 }} else {{ 201 }}); ExecutablePath = 'C:\Python.exe'; CommandLine = $(if ($voice) {{ 'python.exe -m leda_runtime.voice_service' }} else {{ 'python.exe -m leda_runtime.local_presentation' }}) }}
+}}
+function global:Invoke-RestMethod {{ throw 'Invoke-RestMethod must not be called: reuse no longer health-checks anything.' }}
+$global:stoppedIds = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stoppedIds += $Id }}
+try {{ & '{start_script}' -DevelopmentOwnerToken 'owner' -DevelopmentReceiptPath '{receipt}'; exit 9 }}
+catch {{ Write-Output "message=$($_.Exception.Message);stopped=$($global:stoppedIds -join ',')" }}
+"""
+            result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"port 505[67] is occupied")
+        self.assertIn("stopped=200,201", result.stdout)
+        self.assertIn("Stopped previous Leda runtime (pid 200) to start clean.", result.stdout)
+        self.assertIn("Stopped previous Leda runtime (pid 201) to start clean.", result.stdout)
+        self.assertNotIn("already running", result.stdout)
+
+    def test_start_local_reports_and_never_stops_a_foreign_process_holding_a_port(self) -> None:
+        """T1b acceptance (d): a non-Leda process holding 5057 must never be
+        stopped. The terminal message names the port, the process name and
+        the PID, and the dev receipt carries a structured port_in_use
+        failure so dev.mjs (T4b) can read it even though this throws.
+
+        T4d: the terminal shows exactly this one clean line -- no PowerShell
+        uncaught-error record (message + "At line X char Y" + CategoryInfo +
+        FullyQualifiedErrorId) -- and the process exits non-zero directly, so
+        the invocation below is NOT wrapped in the caller's own try/catch
+        (start-local.ps1 now exits via its own top-level handler, which a
+        wrapping try/catch could never observe)."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            receipt = state / "receipt.json"
+            stopped_marker = state / "stopped.txt"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    if ($LocalPort -eq 5056) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = 5057; OwningProcess = 4321 }})
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    if ($Filter -match '4321') {{ return [pscustomobject]@{{ ProcessId = 4321; ExecutablePath = 'C:\Other\name.exe'; CommandLine = 'name.exe --serve' }} }}
+    return @()
+}}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) Add-Content -LiteralPath '{stopped_marker}' -Value $Id }}
+& '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+            stopped_content = stopped_marker.read_text(encoding="utf-8") if stopped_marker.exists() else ""
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('Leda could not start: port 5057 is in use by "name.exe" (PID 4321). Close it and run the launcher again.', result.stdout)
+        self.assertNotIn("FullyQualifiedErrorId", result.stderr)
+        self.assertNotIn("CategoryInfo", result.stderr)
+        self.assertEqual(stopped_content, "")
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value["registered"], False)
+        self.assertEqual(receipt_value["failure"], {"reason": "port_in_use", "port": 5057, "processName": "name.exe", "pid": 4321})
+
+    def test_start_local_reports_another_program_when_the_occupant_name_cannot_be_resolved(self) -> None:
+        """The same port_in_use failure, but the occupying process' identity
+        could not be resolved (e.g. a denied/failed CIM lookup): the terminal
+        message says "another program" instead of a name, and the receipt
+        carries a null processName rather than an empty or fabricated one."""
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            (state / "run").mkdir()
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    if ($LocalPort -eq 5056) {{ return @() }}
+    return @([pscustomobject]@{{ LocalPort = 5057; OwningProcess = 4321 }})
+}}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) return @() }}
+& '{start_script}' -DevelopmentOwnerToken 'owner-new' -DevelopmentReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('Leda could not start: port 5057 is in use by another program (PID 4321). Close it and run the launcher again.', result.stdout)
+        self.assertNotIn("FullyQualifiedErrorId", result.stderr)
+        self.assertNotIn("CategoryInfo", result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertIsNone(receipt_value["failure"]["processName"])
+        self.assertEqual(receipt_value["failure"]["port"], 5057)
+
+    def test_cancellation_during_voice_startup_rolls_back_only_the_launched_child(self) -> None:
+        start_script = OPERATIONS_ROOT / "start-local.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            cancellation = state / "cancel"
+            receipt = state / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$env:LEDA_RUNTIME_STATE_DIR = '{state}'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @() }}
+function global:Start-Process {{ [System.Diagnostics.Process]::GetCurrentProcess() }}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id) $global:stopped += $Id }}
+function global:Invoke-RestMethod {{ New-Item -ItemType File -Path '{cancellation}' -Force | Out-Null; throw 'not ready' }}
+try {{
+    & '{start_script}' -DevelopmentOwnerToken 'owner' -DevelopmentReceiptPath '{receipt}' -DevelopmentCancellationPath '{cancellation}'
+    exit 9
+}} catch {{
+    Write-Output "message=$($_.Exception.Message);stopped=$($global:stopped -join ',');receipt=$(Test-Path -LiteralPath '{receipt}')"
+    exit 0
+}}
+"""
+            result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cancelled", result.stdout.lower())
+        self.assertRegex(result.stdout, r"stopped=\d+")
+        self.assertIn("receipt=False", result.stdout)
+
+    def test_start_local_wires_the_progress_indicator_around_both_health_waits(self) -> None:
+        """T19 (user request): a progress indicator must cover the silent gap
+        while Leda starts. Structural check (the functional cases below
+        exercise the indicator's own behavior in isolation): both health-wait
+        loops start/tick/clear the indicator, and clearing happens in a
+        `finally` block so it runs whether the wait succeeds, times out, or
+        is cancelled.
+
+        User request (m1/K1): the indicator must tick every 100 ms rather than once per 1 s
+        health-check attempt, so the trailing caret blinks smoothly (0.6 s full cycle, see
+        console-progress.ps1) instead of jumping once per attempt. The overall 30-attempt
+        health-check budget (~30 s) is unchanged: each attempt now ticks the indicator 10 times at
+        100 ms apart instead of once, and `$tick` (not the outer per-second `$attempt`) drives the
+        caret phase so it keeps blinking independently of the health-check cadence."""
+        source = (OPERATIONS_ROOT / "start-local.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("console-progress.ps1", source)
+        for function_name, label in (("Wait-VoiceReady", "Starting Leda voice"), ("Wait-PresentationReady", "Starting Leda")):
+            start = source.index(f"function {function_name} {{")
+            end = source.index("\n}", start)
+            body = source[start:end]
+            self.assertIn(f"Start-LedaWaitIndicator -Label $label", body)
+            self.assertIn(f"'{label}'", body)
+            self.assertIn("Update-LedaWaitIndicator -Label $label -FrameIndex $tick", body)
+            self.assertIn("Start-Sleep -Milliseconds 100", body)
+            finally_index = body.index("finally {")
+            self.assertIn("Clear-LedaWaitIndicator", body[finally_index:])
+
+    def test_wait_indicator_prints_one_plain_line_when_output_is_not_a_tty(self) -> None:
+        """T19: a redirected/piped stdout (this test's own subprocess capture,
+        matching an unattended CI run) has no cursor to move, so the
+        indicator must print the label exactly once and never touch the
+        line again -- no carriage-return-driven overwrite, no duplicate
+        lines from repeated ticks."""
+        helper = OPERATIONS_ROOT / "console-progress.ps1"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+Start-LedaWaitIndicator -Label 'Starting Leda voice'
+Update-LedaWaitIndicator -Label 'Starting Leda voice' -FrameIndex 0
+Update-LedaWaitIndicator -Label 'Starting Leda voice' -FrameIndex 1
+Clear-LedaWaitIndicator
+Write-Output 'Leda voice is ready at http://127.0.0.1:5056.'
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(result.stdout.__contains__("\r"), result.stdout)
+        self.assertEqual(result.stdout.count("Starting Leda voice"), 1, result.stdout)
+        self.assertIn("Starting Leda voice...", result.stdout)
+        self.assertIn("Leda voice is ready at http://127.0.0.1:5056.", result.stdout)
+        # User request: no VT/ANSI escape garbage may leak into a non-TTY (redirected) stream --
+        # this must stay the plain, unanimated line it always was.
+        self.assertNotIn("\x1b", result.stdout)
+
+    def test_wait_indicator_blinks_a_trailing_caret_after_the_label_and_clears_it_when_the_console_is_interactive(self) -> None:
+        """K1 (user request, live test 2026-09-27): the orange `|/-\\` spinner glyph must become a
+        blinking underscore caret placed IMMEDIATELY after the label (no separating space, no
+        glyph before it), matching the HMI's own "Cargando_" caret rhythm
+        (`.widget-runtime-state-caret` in hmi-app/src/index.css): a 0.6 s cycle, 50% duty. At
+        start-local.ps1's existing 100 ms tick, 3 ticks make one 0.3 s phase, so FrameIndex 0-2 are
+        the visible phase, 3-5 are hidden, and 6 wraps back to visible. The hidden phase must
+        overwrite the caret with a space (never omit it), so the printed line length never changes
+        and no stray "_" is ever left behind. `$script:ledaConsoleIsInteractive` is forced true
+        here because a test runner's own captured stdout is never a real TTY."""
+        helper = OPERATIONS_ROOT / "console-progress.ps1"
+        label = "Starting Leda voice"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$script:ledaConsoleIsInteractive = $true
+Start-LedaWaitIndicator -Label '{label}'
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 0
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 1
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 2
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 3
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 4
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 5
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 6
+Clear-LedaWaitIndicator
+Write-Output '###END###'
+"""
+        # Raw bytes, not `self.run_powershell`'s text mode: Python's
+        # universal-newline translation silently turns every lone `\r` into
+        # `\n`, which would hide the exact overwrite behavior this test
+        # exists to prove.
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        raw = subprocess.run(
+            [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=False, check=False,
+        )
+        stdout = raw.stdout.decode("utf-8", errors="replace")
+        self.assertEqual(raw.returncode, 0, raw.stderr)
+        segments = stdout.split("\r")
+        # Interactive mode never prints the plain "once" line from
+        # Start-LedaWaitIndicator -- the string before the very first
+        # carriage return is empty, confirming Start-LedaWaitIndicator
+        # wrote nothing at all under an interactive console.
+        self.assertEqual(segments[0], "")
+        prefix_len = len(label) + 1
+        # FrameIndex 0-2 (ticks 0-2, phase 0): the caret is visible.
+        for index in (1, 2, 3):
+            self.assertEqual(segments[index][:prefix_len], f"{label}_", stdout)
+        # FrameIndex 3-5 (ticks 3-5, phase 1): the caret is hidden -- overwritten with a space,
+        # never simply omitted.
+        for index in (4, 5, 6):
+            self.assertEqual(segments[index][:prefix_len], f"{label} ", stdout)
+        # FrameIndex 6 (tick 6, phase 2) wraps back to visible, confirming the 0.6 s cycle repeats.
+        self.assertEqual(segments[7][:prefix_len], f"{label}_", stdout)
+        # The line length never changes between the visible and hidden phases.
+        self.assertEqual(len(segments[1]), len(segments[4]))
+        # The final overwrite (Clear-LedaWaitIndicator) leaves the line
+        # blank right before the real "###END###" output.
+        cleared_segment = segments[8]
+        self.assertNotIn(label, cleared_segment)
+        self.assertTrue(cleared_segment.split("\n")[0].strip() == "", stdout)
+        self.assertIn("###END###", stdout)
+        self.assertNotIn("\x1b", stdout)
+
+    def test_wait_indicator_never_applies_any_color_matching_the_npm_output_lines_above_it(self) -> None:
+        """K1 (user request, live test 2026-09-27): the label must print in the SAME color as the
+        npm lines above it (`> node ./scripts/dev.mjs ...`), i.e. the console's own default
+        foreground -- no orange, no `DarkYellow` fallback, no ANSI truecolor escape at all. Proven
+        two ways: structurally (the source no longer references any color mechanism) and
+        behaviorally (neither the non-TTY line nor an interactive tick emits `-ForegroundColor` or
+        an escape byte)."""
+        helper = OPERATIONS_ROOT / "console-progress.ps1"
+        source = helper.read_text(encoding="utf-8-sig")
+        self.assertNotIn("ForegroundColor", source)
+        self.assertNotIn("DarkYellow", source)
+        self.assertNotIn("38;2;255;140;0", source)
+        self.assertNotIn("ledaSpinnerFrames", source)
+        self.assertNotIn("Test-LedaVirtualTerminalSupport", source)
+        label = "Starting Leda voice"
+        command = fr"""
+$ErrorActionPreference = 'Stop'
+. '{helper}'
+$script:ledaConsoleIsInteractive = $true
+Update-LedaWaitIndicator -Label '{label}' -FrameIndex 0
+"""
+        result = self.run_powershell(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"{label}_", result.stdout)
+        self.assertNotIn("\x1b", result.stdout)
+
+
+class ViteDevPortGuardTests(unittest.TestCase):
+    """T18b: hmi-app/scripts/dev.mjs's leftover-Vite-listener guard invokes
+    resolve-vite-dev-port.ps1 before starting Vite. These tests exercise the real script
+    end to end (Resolve-LedaViteDevPortState + the stop/wait/receipt wiring around it),
+    faking only the OS-level cmdlets (Get-NetTCPConnection/Get-CimInstance/Stop-Process),
+    the same style already used above for Resolve-LedaVerifiedListener/stop-local.ps1."""
+
+    def run_powershell(self, command: str) -> subprocess.CompletedProcess[str]:
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, check=False)
+
+    def test_free_port_is_reported_free_and_nothing_is_stopped(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @() }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) throw 'must not be called' }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value, {"state": "free", "pid": 0, "processName": "", "stopped": False, "freed": True})
+
+    def test_verified_node_vite_listener_is_stopped_and_receipt_reports_freed(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+$global:calls = 0
+function global:Get-NetTCPConnection {{
+    param([int]$LocalPort, [string]$State)
+    $global:calls++
+    if ($global:calls -eq 1) {{ return @([pscustomobject]@{{ LocalPort = 5173; OwningProcess = 777 }}) }}
+    return @()
+}}
+function global:Get-CimInstance {{
+    param([string]$ClassName, [string]$Filter)
+    return [pscustomobject]@{{ ProcessId = 777; ExecutablePath = 'C:\node\node.exe'; CommandLine = 'node.exe "C:\repo\hmi-app\node_modules\vite\bin\vite.js" --host 127.0.0.1 --port 5173' }}
+}}
+$global:stopped = @()
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) $global:stopped += $Id }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+Write-Output ('stopped=' + ($global:stopped -join ','))
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stopped=777", result.stdout)
+        self.assertEqual(receipt_value, {"state": "ours", "pid": 777, "processName": "", "stopped": True, "freed": True})
+
+    def test_foreign_listener_is_never_stopped_and_is_reported_with_process_name(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @([pscustomobject]@{{ LocalPort = 5173; OwningProcess = 42 }}) }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) return [pscustomobject]@{{ ProcessId = 42; ExecutablePath = 'C:\Other\app.exe'; CommandLine = 'app.exe --serve' }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) throw 'must not be called' }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value, {"state": "foreign", "pid": 42, "processName": "app.exe", "stopped": False, "freed": True})
+
+    def test_stop_failure_is_reported_without_crashing_and_freed_is_false(self) -> None:
+        script = OPERATIONS_ROOT / "resolve-vite-dev-port.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            command = fr"""
+$ErrorActionPreference = 'Stop'
+function global:Get-NetTCPConnection {{ param([int]$LocalPort, [string]$State) return @([pscustomobject]@{{ LocalPort = 5173; OwningProcess = 777 }}) }}
+function global:Get-CimInstance {{ param([string]$ClassName, [string]$Filter) return [pscustomobject]@{{ ProcessId = 777; ExecutablePath = 'C:\node\node.exe'; CommandLine = 'node.exe "C:\repo\hmi-app\node_modules\vite\bin\vite.js" --port 5173' }} }}
+function global:Stop-Process {{ param([int]$Id, [switch]$Force) throw 'access denied' }}
+& '{script}' -Port 5173 -ViteCliPath 'C:\repo\hmi-app\node_modules\vite\bin\vite.js' -ReceiptPath '{receipt}'
+"""
+            result = self.run_powershell(command)
+            receipt_value = json.loads(receipt.read_text(encoding="utf-8-sig")) if receipt.exists() else None
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(receipt_value)
+        self.assertEqual(receipt_value, {"state": "ours", "pid": 777, "processName": "", "stopped": False, "freed": False})
+
+
+class ConcurrentFreshStateSeedingTests(unittest.TestCase):
+    """PW-002: seeding the effective configuration happens before the manifest
+    lock, so two concurrent launchers on a fresh state root can both observe a
+    missing file. The seeding must be atomic: exactly one launcher creates the
+    configuration, the loser survives without overwriting, and the published
+    file always equals the template byte for byte."""
+
+    TEMPLATE_SIZE_BYTES = 64 * 1024 * 1024
+    TEMPLATE_BLOCK = b"leda-seed-race-0123456789abcdef\n"  # exactly 32 bytes
+    ENVIRONMENT_LIBRARY = OPERATIONS_ROOT / "runtime-environment.ps1"
+
+    def _seeding_child_command(self, state: Path, template: Path, ready: Path, gate_name: str) -> str:
+        """Child body: signal readiness, wait on the shared named event (with the
+        child-side handle disposed after waiting), then run the real, unmodified
+        product function against the shared state root."""
+        return (
+            "$ErrorActionPreference = 'Stop'\n"
+            f". '{self.ENVIRONMENT_LIBRARY}'\n"
+            f"New-Item -ItemType File -Path '{ready}' -Force | Out-Null\n"
+            "$gate = [System.Threading.EventWaitHandle]::OpenExisting('" + gate_name + "')\n"
+            "try { $gate.WaitOne() | Out-Null } finally { $gate.Dispose() }\n"
+            f"$result = Initialize-LedaRuntimeState -StateRoot '{state}' -Template '{template}'\n"
+            "[Console]::Out.WriteLine(('seeded=' + $result.Seeded))\n"
+        )
+
+    def _start_powershell(self, command: str) -> subprocess.Popen[str]:
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.Popen(
+            [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def _seed(self, state: Path, template: Path) -> subprocess.CompletedProcess[str]:
+        """Run the real, unmodified product seeding function in a child
+        PowerShell against an isolated state root."""
+        command = (
+            "$ErrorActionPreference = 'Stop'\n"
+            f". '{self.ENVIRONMENT_LIBRARY}'\n"
+            f"$result = Initialize-LedaRuntimeState -StateRoot '{state}' -Template '{template}'\n"
+            "[Console]::Out.WriteLine(('seeded=' + $result.Seeded))\n"
+        )
+        powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        return subprocess.run(
+            [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _dead_owner_pid(self) -> int:
+        """Return the pid of a process that has already exited, so the sweep's
+        dead-owner rule has a definitively dead owner to work with."""
+        exited = subprocess.Popen([sys.executable, "-c", "pass"])
+        exited.wait()
+        return exited.pid
+
+    def test_directory_destination_raises_and_leaves_no_temporary(self) -> None:
+        """T1: a non-leaf destination must raise instead of being silently
+        treated as already seeded, and no temporary file may survive."""
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-dir-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        template = base / "leda_voice_config.example.json"
+        template.write_bytes(b"leda-seed-directory-destination\n")
+        state = base / "state"
+        state.mkdir()
+        destination = state / "leda_voice_config.json"
+        destination.mkdir()
+        result = self._seed(state, template)
+        self.assertNotEqual(result.returncode, 0, f"seeding must fail on a non-leaf destination: {result.stdout or result.stderr}")
+        # The localized .NET IOException text does not name the destination
+        # path, so the failure is tied to its actual cause by proving it
+        # originates at the rename step as an IOException: that is exactly the
+        # publish-onto-a-directory failure, not an unrelated harness problem.
+        self.assertIn(
+            "[IO.File]::Move($tempPath, $config)",
+            result.stderr + result.stdout,
+            "the failure must originate at the rename step",
+        )
+        self.assertIn(
+            "IOException",
+            result.stderr + result.stdout,
+            "the failure must be the publish-time IOException of renaming onto an existing directory",
+        )
+        self.assertTrue(destination.is_dir(), "the destination directory must not be replaced by a file")
+        self.assertEqual(list(state.glob("*.tmp")), [], "no temporary seeding file may remain behind")
+
+    def test_stale_temporary_is_swept_and_fresh_temporary_survives(self) -> None:
+        """T2: a successful seeding removes an orphaned temporary that is BOTH
+        older than the sweep threshold AND owned by a dead process, while an
+        aged temporary with a live owner (the dispose-to-rename suspension
+        counterexample), an aged temporary whose name does not parse, an aged
+        temporary whose owner id is out of range, a freshly created one, and a
+        fresh one with a dead owner (age-guard coverage) are all left
+        untouched."""
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-sweep-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        template = base / "leda_voice_config.example.json"
+        template.write_bytes(b"leda-seed-sweep-template\n")
+        state = base / "state"
+        state.mkdir()
+        dead_pid = self._dead_owner_pid()
+        live_pid = os.getpid()  # the test process is definitively alive
+        stale = state / f"leda_voice_config.json.{dead_pid}.0123456789abcdef0123456789abcdef.tmp"
+        stale.write_bytes(b"stale")
+        aged = time.time() - 7200  # two hours old: well past the one-hour threshold
+        os.utime(stale, (aged, aged))
+        stale_live_owner = state / f"leda_voice_config.json.{live_pid}.fedcba9876543210fedcba9876543210.tmp"
+        stale_live_owner.write_bytes(b"stale-live-owner")
+        os.utime(stale_live_owner, (aged, aged))
+        unparseable = state / "leda_voice_config.json.0123456789abcdef0123456789abcdef.tmp"
+        unparseable.write_bytes(b"unparseable")
+        os.utime(unparseable, (aged, aged))
+        fresh = state / f"leda_voice_config.json.{live_pid}.00112233445566778899aabbccddeeff.tmp"
+        fresh.write_bytes(b"fresh")
+        fresh_dead_owner = state / f"leda_voice_config.json.{dead_pid}.99887766554433221100ffeeddccbbaa.tmp"
+        fresh_dead_owner.write_bytes(b"fresh-dead-owner")
+        out_of_range = state / "leda_voice_config.json.2147483648.0123456789abcdef0123456789abcdef.tmp"
+        out_of_range.write_bytes(b"out-of-range")
+        os.utime(out_of_range, (aged, aged))
+        result = self._seed(state, template)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertIn("seeded=True", result.stdout)
+        self.assertTrue((state / "leda_voice_config.json").is_file())
+        self.assertFalse(stale.exists(), "the aged orphaned temporary with a dead owner must be swept")
+        self.assertTrue(stale_live_owner.exists(), "an aged temporary whose owner is still alive must survive the sweep")
+        self.assertTrue(unparseable.exists(), "a temporary whose name does not parse must never be deleted")
+        self.assertTrue(fresh.exists(), "a freshly created temporary must survive the sweep")
+        self.assertTrue(fresh_dead_owner.exists(), "a fresh temporary with a dead owner must survive because it is too young")
+        self.assertTrue(out_of_range.exists(), "a temporary whose owner id is out of range must be skipped without failing initialization")
+        self.assertTrue((state / "leda_voice_config.json").is_file())
+        self.assertFalse(stale.exists(), "the aged orphaned temporary must be swept")
+        self.assertTrue(fresh.exists(), "a freshly created temporary must survive the sweep")
+
+    def test_stale_temporary_is_swept_even_when_configuration_already_exists(self) -> None:
+        """The stale-temporary sweep must run before the already-configured
+        early return, so an orphan left by a hard kill cannot persist forever
+        on a state root whose effective configuration already exists."""
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-sweep-live-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        template = base / "leda_voice_config.example.json"
+        template.write_bytes(b"leda-seed-sweep-existing-template\n")
+        state = base / "state"
+        state.mkdir()
+        config = state / "leda_voice_config.json"
+        original = b"leda-seed-effective-configuration\n"
+        config.write_bytes(original)
+        stale = state / f"leda_voice_config.json.{self._dead_owner_pid()}.0123456789abcdef0123456789abcdef.tmp"
+        stale.write_bytes(b"stale")
+        aged = time.time() - 7200  # two hours old: well past the one-hour threshold
+        os.utime(stale, (aged, aged))
+        fresh = state / f"leda_voice_config.json.{os.getpid()}.fedcba9876543210fedcba9876543210.tmp"
+        fresh.write_bytes(b"fresh")
+        result = self._seed(state, template)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertIn("seeded=False", result.stdout)
+        self.assertFalse(stale.exists(), "the aged orphaned temporary must be swept even when the configuration already exists")
+        self.assertTrue(fresh.exists(), "a freshly created temporary must survive the sweep")
+        self.assertEqual(config.read_bytes(), original, "the effective configuration must keep its original bytes")
+
+    def test_concurrent_fresh_state_start_pairs_both_survive_seeding(self) -> None:
+        # Explicit mkdtemp with LIFO-ordered cleanup: the removal is registered
+        # FIRST, so it runs LAST, after both children have been terminated by
+        # their own cleanups. A Windows failure path must therefore never
+        # obscure the original failure message with a directory-deletion error
+        # from a still-live child.
+        base = Path(tempfile.mkdtemp(prefix="pw002-seed-race-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        # Resolve the long path: %TEMP% can carry an 8.3 short name, and
+        # .NET Framework short-name expansion under concurrent directory
+        # creation can otherwise hand the two children different state
+        # roots (the same gotcha ``canonical`` documents in
+        # test_python_environment.py).
+        block = self.TEMPLATE_BLOCK * (self.TEMPLATE_SIZE_BYTES // len(self.TEMPLATE_BLOCK))
+        template = base / "leda_voice_config.example.json"
+        template.write_bytes(block)
+        state = base / "state"
+        ready_a, ready_b = base / "ready-a", base / "ready-b"
+        gate_name = "pw002-seed-gate-" + os.urandom(6).hex()
+        # Explicit native signatures: the bare windll export table returns
+        # c_int for every call, which truncates HANDLE values and leaves
+        # CloseHandle/SetEvent results unchecked.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateEventW.argtypes = (ctypes.wintypes.LPVOID, ctypes.wintypes.BOOL, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR)
+        kernel32.CreateEventW.restype = ctypes.wintypes.HANDLE
+        kernel32.SetEvent.argtypes = (ctypes.wintypes.HANDLE,)
+        kernel32.SetEvent.restype = ctypes.wintypes.BOOL
+        kernel32.CloseHandle.argtypes = (ctypes.wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+        gate_handle = kernel32.CreateEventW(None, True, False, gate_name)
+        self.assertTrue(gate_handle, "the test barrier event must be creatable")
+
+        def _close_gate() -> None:
+            if not kernel32.CloseHandle(gate_handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        def _terminate_child(child: subprocess.Popen[str]) -> None:
+            # Individually protected: a failure while terminating one child
+            # must never prevent the other child's cleanup from running.
+            try:
+                if child.poll() is None:
+                    child.kill()
+                    child.communicate(timeout=10)
+            except Exception:
+                pass
+
+        self.addCleanup(_close_gate)
+        # Each started child is registered immediately after start, so the
+        # registered cleanups terminate every started child on every path,
+        # including a partially completed launch sequence and a test-body
+        # error before any try block is entered.
+        first = self._start_powershell(self._seeding_child_command(state, template, ready_a, gate_name))
+        self.addCleanup(_terminate_child, first)
+        second = self._start_powershell(self._seeding_child_command(state, template, ready_b, gate_name))
+        self.addCleanup(_terminate_child, second)
+
+        deadline = time.time() + 30
+        while not (ready_a.exists() and ready_b.exists()) and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(
+            ready_a.exists() and ready_b.exists(),
+            "both launchers must signal readiness before the barrier is released",
+        )
+        self.assertTrue(kernel32.SetEvent(gate_handle), "the barrier SetEvent call must succeed")
+        first_out, first_err = first.communicate(timeout=60)
+        second_out, second_err = second.communicate(timeout=60)
+
+        config = state / "leda_voice_config.json"
+        self.assertEqual(first.returncode, 0, f"first launcher failed: {first_err or first_out}")
+        self.assertEqual(second.returncode, 0, f"second launcher failed: {second_err or second_out}")
+        seeded_lines = sorted(line for line in (first_out + second_out).splitlines() if line.startswith("seeded="))
+        self.assertEqual(
+            seeded_lines,
+            ["seeded=False", "seeded=True"],
+            f"exactly one launcher must create the configuration; "
+            f"first(stderr)={first_err!r}; second(stderr)={second_err!r}",
+        )
+        self.assertTrue(config.is_file())
+        self.assertEqual(config.read_bytes(), block, "published configuration must equal the template byte for byte")
+        leftovers = sorted(str(path) for path in list(state.glob("*.tmp")) + list(base.glob("*.tmp")))
+        self.assertEqual(leftovers, [], "no temporary seeding file may remain in the state root or its parent")
+
+if __name__ == "__main__":
+    unittest.main()

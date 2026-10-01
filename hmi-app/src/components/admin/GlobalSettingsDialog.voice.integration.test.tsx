@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PRISMA_ORB_STORAGE_KEY, PRISMA_ORB_VISUAL_DEFAULTS } from '../../config/prismaOrb.config';
-import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
+import { LEDA_ORB_STORAGE_KEY, LEDA_ORB_VISUAL_DEFAULTS } from '../../config/ledaOrb.config';
+import { createDefaultLedaVoiceConfig } from '../../domain/ledaVoiceConfig';
 import { adminAuthClient, AdminAuthClient } from '../../services/adminAuth.service';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import GlobalSettingsDialog from './GlobalSettingsDialog';
@@ -97,7 +97,7 @@ class MockLedaOrb extends HTMLElement {
 }
 if (!customElements.get('leda-orb')) customElements.define('leda-orb', MockLedaOrb);
 
-function envelope(config = createDefaultPrismaVoiceConfig()): Response {
+function envelope(config = createDefaultLedaVoiceConfig()): Response {
     return { ok: true, status: 200, json: async () => ({ config, sync: { configured: false, verified: false } }) } as Response;
 }
 
@@ -105,8 +105,8 @@ function guardInjectedFetch() {
     const injected = fetch;
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (path, init) => {
         const route = `${init?.method ?? 'GET'} ${String(path)}`;
-        if (!['GET /api/prisma/voice-config', 'PUT /api/prisma/voice-config',
-            'GET /api/prisma/admin/credentials', 'GET /api/prisma/health'].includes(route)) {
+        if (!['GET /api/leda/voice-config', 'PUT /api/leda/voice-config',
+            'GET /api/leda/admin/credentials', 'GET /api/leda/health'].includes(route)) {
             nameBoundary.refused.push(route);
             throw new Error('TEST_NETWORK_REFUSED');
         }
@@ -147,7 +147,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             expect(nameBoundary.refused).toEqual([]);
             if (vi.isMockFunction(fetch)) {
                 expect(vi.mocked(fetch).mock.calls.filter(([path]) => ![
-                    '/api/prisma/voice-config', '/api/prisma/admin/credentials', '/api/prisma/health',
+                    '/api/leda/voice-config', '/api/leda/admin/credentials', '/api/leda/health',
                 ].includes(String(path)))).toEqual([]);
             }
             // External assertion: an unexpected singleton dispatch is a hard failure
@@ -163,7 +163,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         }
     });
 
-    it('saves the HMI name from Prisma independently of DSP, credentials and the footer', async () => {
+    it('saves the HMI name from Leda independently of DSP, credentials and the footer', async () => {
         useAuthStore.setState({
             isHydrated: true,
             session: { isAuthenticated: true, loginTimestamp: '2026-01-01T00:00:00Z',
@@ -186,7 +186,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         vi.stubGlobal('fetch', fetchMock);
         localStorage.setItem('hmi-global-settings-tab', 'connection');
         renderDialogHarness();
-        fireEvent.click(screen.getByRole('button', { name: 'Prisma' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Leda' }));
         const input = await screen.findByLabelText('Nombre de esta HMI');
         expect(input).toBeEnabled();
         fireEvent.change(input, { target: { value: 'Panel recepción' } });
@@ -200,10 +200,10 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         // the backend instead); name saving must not add one either.
         await waitFor(() => expect(screen.getByRole('group', { name: 'Canal A' })).toBeInTheDocument());
         expect(screen.queryByRole('button', { name: /^Aplicar/ })).not.toBeInTheDocument();
-        expect(localStorage.getItem('hmi:prisma-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
+        expect(localStorage.getItem('hmi:leda-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
         fireEvent.change(input, { target: { value: 'Discard on tab switch' } });
         fireEvent.click(screen.getByRole('button', { name: 'Conexion' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Prisma' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Leda' }));
         expect(screen.getByLabelText('Nombre de esta HMI')).toHaveValue('Panel recepción');
         fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
         fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
@@ -225,7 +225,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await waitFor(() => expect(screen.getByText('Guardado')).toBeInTheDocument());
         const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
         expect(puts).toHaveLength(1);
-        expect(puts[0]?.[0]).toBe('/api/prisma/voice-config');
+        expect(puts[0]?.[0]).toBe('/api/leda/voice-config');
     });
 
     it('saves the Manual playback buffer mode and seconds through the shared PUT', async () => {
@@ -265,7 +265,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(screen.getByText('Guardando...')).toBeInTheDocument();
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
 
-        const persisted = createDefaultPrismaVoiceConfig();
+        const persisted = createDefaultLedaVoiceConfig();
         persisted.effectIntensity = 81;
         await act(async () => resolvePut(envelope(persisted)));
         await waitFor(() => expect(screen.getByText('Guardado')).toBeInTheDocument());
@@ -274,16 +274,16 @@ describe('GlobalSettingsDialog unified voice integration', () => {
     it('does not render a replacement runtime or endpoint selector', async () => {
         vi.stubGlobal('fetch', vi.fn(async () => envelope()));
         renderDialog();
-        await waitFor(() => expect(screen.getByRole('heading', { name: 'Efectos de voz de Prisma' })).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole('heading', { name: 'Efectos de voz de Leda' })).toBeInTheDocument());
 
-        expect(screen.queryByRole('button', { name: 'Modo de ejecución de Prisma' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Modo de ejecución de Leda' })).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Endpoint Voz HMI')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('Endpoint Configuración Prisma')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('URL Servicio Voz Prisma')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Endpoint Configuración Leda')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('URL Servicio Voz Leda')).not.toBeInTheDocument();
     });
 
     it('discards unsaved effect, orb, and preview-only drafts when Close unmounts the tab', async () => {
-        const initial = createDefaultPrismaVoiceConfig();
+        const initial = createDefaultLedaVoiceConfig();
         initial.effectIntensity = 42;
         const fetchMock = vi.fn(async () => envelope(initial));
         vi.stubGlobal('fetch', fetchMock);
@@ -299,11 +299,11 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         await user.click(within(screen.getByRole('dialog', { name: '¿Descartar los cambios?' })).getByRole('button', { name: 'Descartar cambios' }));
 
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
-        expect(localStorage.getItem(PRISMA_ORB_STORAGE_KEY)).toBeNull();
+        expect(localStorage.getItem(LEDA_ORB_STORAGE_KEY)).toBeNull();
         await user.click(screen.getByRole('button', { name: 'Reopen' }));
 
         await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('42'));
-        expect(screen.getByRole('slider', { name: 'Velocidad' })).toHaveValue(String(PRISMA_ORB_VISUAL_DEFAULTS.speed));
+        expect(screen.getByRole('slider', { name: 'Velocidad' })).toHaveValue(String(LEDA_ORB_VISUAL_DEFAULTS.speed));
         expect(screen.getByRole('slider', { name: 'Penetración de haces' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled();
     });
@@ -342,10 +342,10 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         expect(adminAuthClient).toBeInstanceOf(AdminAuthClient);
 
         singletonNetwork.setHandler(async (path) => {
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/session') {
                 return json({ ok: true, administrator: { username: 'admin' }, csrfToken, absoluteExpiresAt: 2_000_000_000 }, 200);
             }
-            if (path === '/api/prisma/admin/credentials') {
+            if (path === '/api/leda/admin/credentials') {
                 return json({
                     ok: true,
                     providers: {
@@ -361,7 +361,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     },
                 }, 200);
             }
-            if (path === '/api/prisma/health') {
+            if (path === '/api/leda/health') {
                 // T10: save applies on the backend now, so a collision from an
                 // earlier save surfaces directly in health's lastError, with no
                 // "Aplicar cambio" button left to click in the UI.
@@ -379,7 +379,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     telegramBotUsername: null,
                 }, 200);
             }
-            if (path === '/api/prisma/admin/credentials/telegram_channel_a/status') {
+            if (path === '/api/leda/admin/credentials/telegram_channel_a/status') {
                 return json({
                     ok: true,
                     channelA: {
@@ -403,9 +403,9 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         )).toBeInTheDocument();
         // A collision is a plain failure, not a committed deletion awaiting a retry.
         expect(screen.queryByRole('button', { name: 'Reintentar detención' })).not.toBeInTheDocument();
-        expect(singletonNetwork.requests).toContain('GET /api/prisma/admin/auth/session');
-        expect(singletonNetwork.requests).toContain('GET /api/prisma/admin/credentials');
-        expect(singletonNetwork.requests).toContain('GET /api/prisma/health');
+        expect(singletonNetwork.requests).toContain('GET /api/leda/admin/auth/session');
+        expect(singletonNetwork.requests).toContain('GET /api/leda/admin/credentials');
+        expect(singletonNetwork.requests).toContain('GET /api/leda/health');
         expect(singletonNetwork.refusals).toEqual([]);
     });
 
@@ -441,7 +441,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
             activationEpoch: null, activation: null, lastError: null, botUsername: null, paired: false,
         });
         vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-            if (input === '/api/prisma/admin/credentials') {
+            if (input === '/api/leda/admin/credentials') {
                 return new Response(JSON.stringify({
                     ok: true,
                     providers: {
@@ -451,7 +451,7 @@ describe('GlobalSettingsDialog unified voice integration', () => {
                     },
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
             }
-            if (input === '/api/prisma/health') {
+            if (input === '/api/leda/health') {
                 return new Response(JSON.stringify({
                     ok: true,
                     telegramEnabled: true,
@@ -487,9 +487,9 @@ describe('GlobalSettingsDialog unified voice integration', () => {
     it('records every refused singleton dispatch exactly once, including a configured handler refusal', async () => {
         // No handler: the missing-handler branch refuses and records without ever
         // consulting the network.
-        await singletonNetwork.fetcher('/api/prisma/admin/unmapped').catch(() => undefined);
-        expect(singletonNetwork.requests).toEqual(['GET /api/prisma/admin/unmapped']);
-        expect(singletonNetwork.refusals).toEqual(['GET /api/prisma/admin/unmapped']);
+        await singletonNetwork.fetcher('/api/leda/admin/unmapped').catch(() => undefined);
+        expect(singletonNetwork.requests).toEqual(['GET /api/leda/admin/unmapped']);
+        expect(singletonNetwork.refusals).toEqual(['GET /api/leda/admin/unmapped']);
 
         // A configured handler that refuses an unexpected route must be recorded
         // too: production code swallows the rejection, so only the injected
@@ -498,15 +498,15 @@ describe('GlobalSettingsDialog unified voice integration', () => {
         singletonNetwork.setHandler(async () => {
             throw new Error('TEST_SINGLETON_FETCH_REFUSED');
         });
-        await singletonNetwork.fetcher('/api/prisma/admin/unmapped/configured', { method: 'POST' }).catch(() => undefined);
+        await singletonNetwork.fetcher('/api/leda/admin/unmapped/configured', { method: 'POST' }).catch(() => undefined);
 
         expect(singletonNetwork.requests).toEqual([
-            'GET /api/prisma/admin/unmapped',
-            'POST /api/prisma/admin/unmapped/configured',
+            'GET /api/leda/admin/unmapped',
+            'POST /api/leda/admin/unmapped/configured',
         ]);
         expect(singletonNetwork.refusals).toEqual([
-            'GET /api/prisma/admin/unmapped',
-            'POST /api/prisma/admin/unmapped/configured',
+            'GET /api/leda/admin/unmapped',
+            'POST /api/leda/admin/unmapped/configured',
         ]);
         // The deliberate refusals are consumed here; the shared afterEach keeps
         // guarding every other test with its empty expectation.

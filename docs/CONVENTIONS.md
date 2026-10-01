@@ -21,11 +21,11 @@
 
 ## Registro del texto visible al usuario (obligatorio)
 
-Todo texto en español visible para el usuario se escribe tratando de **usted**, nunca con voseo ni tuteo. Aplica a la HMI (etiquetas, mensajes, placeholders, tooltips, `aria-label`, errores), a los mensajes fijos de Prisma (bot de Telegram, respuestas predefinidas) y a las instrucciones de estilo que se entregan a modelos de lenguaje.
+Todo texto en español visible para el usuario se escribe tratando de **usted**, nunca con voseo ni tuteo. Aplica a la HMI (etiquetas, mensajes, placeholders, tooltips, `aria-label`, errores), a los mensajes fijos de Leda (bot de Telegram, respuestas predefinidas) y a las instrucciones de estilo que se entregan a modelos de lenguaje.
 
 - Correcto: «Ingrese su usuario», «Reinicie el lanzador», «Puede consultar…».
 - Incorrecto: «Ingresá tu usuario», «Reiniciá el lanzador», «Podés consultar…», «Ingresa tu usuario».
-- Preferir formas impersonales cuando alcanzan: «No se pudo iniciar Prisma».
+- Preferir formas impersonales cuando alcanzan: «No se pudo iniciar Leda».
 - Los tests que buscan por texto o nombre accesible usan el mismo registro.
 
 ## Política anti-parches (obligatoria)

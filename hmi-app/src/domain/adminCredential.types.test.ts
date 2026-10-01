@@ -91,7 +91,7 @@ describe('admin credential domain', () => {
         it('accepts every canonical verification state with a numeric-or-null timestamp and a nullable username', () => {
             for (const state of ['not_checked', 'verified', 'invalid_token', 'unreachable', 'not_configured'] as const) {
                 for (const checkedAt of [null, 0, 1_699_999_999.5]) {
-                    for (const username of [null, 'prisma_channel_a_bot']) {
+                    for (const username of [null, 'leda_channel_a_bot']) {
                         const providers = {
                             ...exactProviders,
                             telegram_channel_a: {
@@ -124,7 +124,7 @@ describe('admin credential domain', () => {
         it('parses the Telegram verify endpoint envelope with the username the check observed', () => {
             const telegram = {
                 configured: true, verified: true,
-                verification: { state: 'verified', checkedAt: 42, username: 'prisma_bot' },
+                verification: { state: 'verified', checkedAt: 42, username: 'leda_bot' },
             } as const;
             expect(parseTelegramVerificationResult({ ok: true, telegram })).toEqual(telegram);
             expect(() => parseTelegramVerificationResult({ ok: false, telegram })).toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
@@ -245,8 +245,8 @@ describe('admin credential domain', () => {
             telegramAppliedGeneration: 2,
             telegramRestartRequired: false,
         };
-        expect(parseTelegramPassiveHealth({ ...base, telegramBotUsername: 'prisma_channel_b_bot' }))
-            .toMatchObject({ botUsername: 'prisma_channel_b_bot' });
+        expect(parseTelegramPassiveHealth({ ...base, telegramBotUsername: 'leda_channel_b_bot' }))
+            .toMatchObject({ botUsername: 'leda_channel_b_bot' });
         for (const telegramBotUsername of [42, '', false]) {
             expect(() => parseTelegramPassiveHealth({ ...base, telegramBotUsername }))
                 .toThrow('ADMIN_CREDENTIAL_RESPONSE_INVALID');
@@ -319,12 +319,12 @@ describe('admin credential domain', () => {
                     activationEpoch: 7,
                     activation: runningActivation,
                     lastError: null,
-                    botUsername: 'prisma_channel_a_bot',
+                    botUsername: 'leda_channel_a_bot',
                     paired: true,
                 },
             });
             expect(running.activation).toEqual({ phase: 'running', reason: null, quiescent: false, restartRequired: false });
-            expect(running.botUsername).toBe('prisma_channel_a_bot');
+            expect(running.botUsername).toBe('leda_channel_a_bot');
             expect(running.paired).toBe(true);
 
             const restartRequired = parseChannelAAdministrationStatus({
@@ -336,17 +336,17 @@ describe('admin credential domain', () => {
                     activationEpoch: 2,
                     activation: {
                         phase: 'stopped',
-                        reason: 'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+                        reason: 'LEDA_CHANNEL_A_RESTART_REQUIRED',
                         quiescent: true,
                         restartRequired: true,
                     },
-                    lastError: 'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
+                    lastError: 'LEDA_CHANNEL_A_STOP_UNCONFIRMED',
                     botUsername: null,
                     paired: false,
                 },
             });
-            expect(restartRequired.activation?.reason).toBe('PRISMA_CHANNEL_A_RESTART_REQUIRED');
-            expect(restartRequired.lastError).toBe('PRISMA_CHANNEL_A_STOP_UNCONFIRMED');
+            expect(restartRequired.activation?.reason).toBe('LEDA_CHANNEL_A_RESTART_REQUIRED');
+            expect(restartRequired.lastError).toBe('LEDA_CHANNEL_A_STOP_UNCONFIRMED');
 
             const reserved = parseChannelAAdministrationStatus({
                 ok: true,
@@ -370,7 +370,7 @@ describe('admin credential domain', () => {
         });
 
         it('T16: accepts the two classified background-failure activation reasons', () => {
-            for (const reason of ['PRISMA_CHANNEL_A_POLL_FAILED', 'PRISMA_CHANNEL_A_UNAUTHORIZED'] as const) {
+            for (const reason of ['LEDA_CHANNEL_A_POLL_FAILED', 'LEDA_CHANNEL_A_UNAUTHORIZED'] as const) {
                 const parsed = parseChannelAAdministrationStatus({
                     ok: true,
                     channelA: {
@@ -408,18 +408,18 @@ describe('admin credential domain', () => {
 
         it('accepts all twelve canonical manager lastError codes in a valid status', () => {
             for (const lastError of [
-                'PRISMA_CHANNEL_A_CONFIGURATION_INVALID',
-                'PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
-                'PRISMA_CHANNEL_A_CREDENTIAL_MISSING',
-                'PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
-                'PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
-                'PRISMA_CHANNEL_A_RESTART_REQUIRED',
+                'LEDA_CHANNEL_A_CONFIGURATION_INVALID',
+                'LEDA_CHANNEL_A_CONFIGURATION_UNAVAILABLE',
+                'LEDA_CHANNEL_A_CREDENTIAL_MISSING',
+                'LEDA_CHANNEL_A_CREDENTIAL_UNAVAILABLE',
+                'LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE',
+                'LEDA_CHANNEL_A_RESTART_REQUIRED',
                 'TELEGRAM_BOT_IDENTITY_RESERVED',
                 'INVALID_CREDENTIAL_REQUEST',
-                'PRISMA_CHANNEL_A_MANAGER_BUSY',
-                'PRISMA_CHANNEL_A_STOP_UNCONFIRMED',
-                'PRISMA_CHANNEL_A_POLL_FAILED',
-                'PRISMA_CHANNEL_A_UNAUTHORIZED',
+                'LEDA_CHANNEL_A_MANAGER_BUSY',
+                'LEDA_CHANNEL_A_STOP_UNCONFIRMED',
+                'LEDA_CHANNEL_A_POLL_FAILED',
+                'LEDA_CHANNEL_A_UNAUTHORIZED',
             ] as const) {
                 const parsed = parseChannelAAdministrationStatus({
                     ok: true,
@@ -475,12 +475,12 @@ describe('admin credential domain', () => {
                     ok: true,
                     channelA: {
                         ...nullChannelA,
-                        activation: { ...runningActivation, reason: 'PRISMA_CHANNEL_A_FUTURE_UNKNOWN' },
+                        activation: { ...runningActivation, reason: 'LEDA_CHANNEL_A_FUTURE_UNKNOWN' },
                     },
                 },
                 { ok: true, channelA: { ...nullChannelA, activation: { ...runningActivation, quiescent: 'yes' } } },
                 { ok: true, channelA: { ...nullChannelA, lastError: 'internal diagnostic detail' } },
-                { ok: true, channelA: { ...nullChannelA, lastError: 'PRISMA_CHANNEL_A_FUTURE_UNKNOWN' } },
+                { ok: true, channelA: { ...nullChannelA, lastError: 'LEDA_CHANNEL_A_FUTURE_UNKNOWN' } },
                 { ok: true, channelA: { ...nullChannelA, paired: 'yes' } },
             ];
             for (const payload of malformed) {

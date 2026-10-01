@@ -17,7 +17,7 @@ const TABS = [
     { id: 'theme', label: 'Tema', icon: SwatchBook },
     { id: 'options', label: 'Opciones', icon: SlidersHorizontal },
     { id: 'temporal', label: 'Ajustes', icon: Clock3 },
-    { id: 'voice', label: 'Prisma', icon: Pyramid },
+    { id: 'voice', label: 'Leda', icon: Pyramid },
 ] as const;
 
 type GlobalSettingsDialogProps = {

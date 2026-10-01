@@ -3,13 +3,13 @@
 > ODD feature task (not SDD). Branch `fix/credential-rows` (worktree
 > `Interfaz-HMI-worktrees\credential-rows`, from main `d9455ed`). Regression of
 > the same class T15 already fixed for Verificar
-> (`odd/tasks/prisma-channel-a-corrections.md`), reported from the user's live
+> (`odd/tasks/leda-channel-a-corrections.md`), reported from the user's live
 > test on 2026-09-25.
 
 ## Objective
 
 Fix two regressions in `hmi-app/src/components/admin/VoiceCredentialSettings.tsx`
-(Configuración general -> Prisma credential rows: Proveedor de voz / Canal A /
+(Configuración general -> Leda credential rows: Proveedor de voz / Canal A /
 Canal B):
 
 - **F4**: clicking "Guardar" (or "Eliminar") in one row disables the OTHER
@@ -24,7 +24,7 @@ Canal B):
 
 ## Root cause (F4)
 
-`hmi-app/src/hooks/usePrismaCredentialAdministration.ts`'s `runOperation`
+`hmi-app/src/hooks/useLedaCredentialAdministration.ts`'s `runOperation`
 (used by `saveCredential`/`deleteCredential`/`applyTelegram`/`applyChannelA`)
 guards ALL THREE providers behind one single `operationRef`/`generationRef`/
 `pendingAction` (`useState<string | null>`), unlike `runVerify` (T15), which
@@ -82,7 +82,7 @@ Strict TDD: enabled (session config). Runner: `cd hmi-app && npx vitest run`
 
 ## Tasks
 
-- [x] **T1** Scope `usePrismaCredentialAdministration.ts`'s `runOperation` /
+- [x] **T1** Scope `useLedaCredentialAdministration.ts`'s `runOperation` /
   `pendingAction` per provider (`pendingActions: Record<CredentialProvider,
   string | null>`), mirroring T15's `runVerify` pattern exactly. Update
   `saveCredential`/`deleteCredential`/`applyTelegram`/`applyChannelA` and both
@@ -147,7 +147,7 @@ Final F5 strings (verbatim, before the blinking caret's trailing `_`):
 
 ## Progress
 
-- 2026-09-25: T1 done. `usePrismaCredentialAdministration.ts`'s `runOperation`
+- 2026-09-25: T1 done. `useLedaCredentialAdministration.ts`'s `runOperation`
   scoped from one global `operationRef`/`generationRef`/`pendingAction` to
   per-provider `operationRefs`/`generationRefs`/`pendingActions` (mirroring
   `runVerify`'s existing per-provider pattern exactly); `saveCredential`/
@@ -301,7 +301,7 @@ visible to the user.
   double-submit guard: the row's own Eliminar stays disabled while its
   delete is in flight (so the dialog cannot be reopened for that row), and
   the hook's own synchronous `operationRefs` lock
-  (`usePrismaCredentialAdministration.ts`'s `runOperation`) still rejects a
+  (`useLedaCredentialAdministration.ts`'s `runOperation`) still rejects a
   concurrent same-provider delete regardless. Other rows stay fully
   independent (unchanged, F4). Expected simplification: once the dialog
   closes synchronously at confirm-click time, the `finally`-block's

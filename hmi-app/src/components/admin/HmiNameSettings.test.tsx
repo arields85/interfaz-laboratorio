@@ -23,7 +23,7 @@ import HmiNameSettings from './HmiNameSettings';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 
 afterAll(() => vi.unstubAllGlobals());
-const KEY = 'hmi:prisma-hmi-name';
+const KEY = 'hmi:leda-hmi-name';
 function authenticate(access = true) {
     useAuthStore.setState({
         isHydrated: true,

@@ -4,8 +4,8 @@ import { StrictMode, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PRISMA_ORB_STORAGE_KEY, readPrismaOrbVisualConfig } from '../../config/prismaOrb.config';
-import { createDefaultPrismaVoiceConfig } from '../../domain/prismaVoiceConfig';
+import { LEDA_ORB_STORAGE_KEY, readLedaOrbVisualConfig } from '../../config/ledaOrb.config';
+import { createDefaultLedaVoiceConfig } from '../../domain/ledaVoiceConfig';
 import VoiceSettingsTab from './VoiceSettingsTab';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import { adminAuthClient } from '../../services/adminAuth.service';
@@ -50,7 +50,7 @@ if (!customElements.get('leda-orb')) customElements.define('leda-orb', MockLedaO
 function render(element: ReactElement, strictMode = false) {
     const injected = fetch;
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (path, init) => {
-        if (path !== '/api/prisma/voice-config' || !['GET', 'PUT'].includes(init?.method ?? 'GET')) {
+        if (path !== '/api/leda/voice-config' || !['GET', 'PUT'].includes(init?.method ?? 'GET')) {
             refused.push(`${init?.method ?? 'GET'} ${String(path)}`);
             throw new Error('TEST_NETWORK_REFUSED');
         }
@@ -61,7 +61,7 @@ function render(element: ReactElement, strictMode = false) {
     return renderTestingLibrary(strictMode ? <StrictMode>{view}</StrictMode> : view);
 }
 
-function configEnvelope(config = createDefaultPrismaVoiceConfig()): Response {
+function configEnvelope(config = createDefaultLedaVoiceConfig()): Response {
     return {
         ok: true,
         status: 200,
@@ -79,7 +79,7 @@ describe('VoiceSettingsTab', () => {
     afterEach(() => {
         cleanup();
         expect(refused).toEqual([]);
-        const unexpected = vi.mocked(fetch).mock.calls.filter(([path]) => path !== '/api/prisma/voice-config');
+        const unexpected = vi.mocked(fetch).mock.calls.filter(([path]) => path !== '/api/leda/voice-config');
         expect(unexpected).toEqual([]);
         localStorage.clear();
         vi.useRealTimers();
@@ -121,7 +121,7 @@ describe('VoiceSettingsTab', () => {
             fireEvent.change(screen.getByLabelText('Nombre de esta HMI'), { target: { value: 'Panel recepción' } });
             fireEvent.click(screen.getByRole('button', { name: 'Guardar nombre' }));
             expect(await screen.findByText('Nombre guardado en este navegador')).toBeInTheDocument();
-            expect(localStorage.getItem('hmi:prisma-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
+            expect(localStorage.getItem('hmi:leda-hmi-name')).toBe(JSON.stringify({ version: 1, name: 'Panel recepción' }));
             expect(onDirtyChange).not.toHaveBeenCalledWith(true);
             expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
         } finally {
@@ -134,23 +134,23 @@ describe('VoiceSettingsTab', () => {
     });
 
     it('ignores legacy routing preferences and renders only retained effect and orb settings', () => {
-        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
+        localStorage.setItem('hmi:leda-runtime-mode', 'local');
         localStorage.setItem('hmi:voice-endpoint', 'https://legacy.invalid/voice');
-        localStorage.setItem('hmi:prisma-config-endpoint', 'https://legacy.invalid/config');
-        localStorage.setItem('hmi:prisma-voice-tts-service-url', 'https://legacy.invalid/tts');
+        localStorage.setItem('hmi:leda-config-endpoint', 'https://legacy.invalid/config');
+        localStorage.setItem('hmi:leda-voice-tts-service-url', 'https://legacy.invalid/tts');
 
         render(<VoiceSettingsTab />);
 
-        expect(screen.queryByRole('button', { name: 'Modo de ejecución de Prisma' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Modo de ejecución de Leda' })).not.toBeInTheDocument();
         expect(screen.queryByLabelText('Endpoint Voz HMI')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('Endpoint Configuración Prisma')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('URL Servicio Voz Prisma')).not.toBeInTheDocument();
-        expect(screen.getByRole('heading', { name: 'Efectos de voz de Prisma' })).toBeInTheDocument();
-        expect(screen.getByTestId('prisma-orb-preview-stage')).toBeInTheDocument();
-        expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('local');
+        expect(screen.queryByLabelText('Endpoint Configuración Leda')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('URL Servicio Voz Leda')).not.toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Efectos de voz de Leda' })).toBeInTheDocument();
+        expect(screen.getByTestId('leda-orb-preview-stage')).toBeInTheDocument();
+        expect(localStorage.getItem('hmi:leda-runtime-mode')).toBe('local');
         expect(localStorage.getItem('hmi:voice-endpoint')).toBe('https://legacy.invalid/voice');
-        expect(localStorage.getItem('hmi:prisma-config-endpoint')).toBe('https://legacy.invalid/config');
-        expect(localStorage.getItem('hmi:prisma-voice-tts-service-url')).toBe('https://legacy.invalid/tts');
+        expect(localStorage.getItem('hmi:leda-config-endpoint')).toBe('https://legacy.invalid/config');
+        expect(localStorage.getItem('hmi:leda-voice-tts-service-url')).toBe('https://legacy.invalid/tts');
     });
 
     it('renders credential administration without joining the shared Voice save draft', async () => {
@@ -169,7 +169,7 @@ describe('VoiceSettingsTab', () => {
     });
 
     it('loads the runtime envelope into effect controls without dirtying the tab', async () => {
-        const config = createDefaultPrismaVoiceConfig();
+        const config = createDefaultLedaVoiceConfig();
         config.effectIntensity = 42;
         const fetchMock = vi.fn(async () => configEnvelope(config));
         vi.stubGlobal('fetch', fetchMock);
@@ -178,7 +178,7 @@ describe('VoiceSettingsTab', () => {
         render(<VoiceSettingsTab onDirtyChange={onDirtyChange} />);
 
         await waitFor(() => expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('42'));
-        expect(fetchMock).toHaveBeenCalledWith('/api/prisma/voice-config', expect.objectContaining({ method: 'GET' }));
+        expect(fetchMock).toHaveBeenCalledWith('/api/leda/voice-config', expect.objectContaining({ method: 'GET' }));
         expect(onDirtyChange).toHaveBeenLastCalledWith(false);
     });
 
@@ -187,7 +187,7 @@ describe('VoiceSettingsTab', () => {
 
         render(<VoiceSettingsTab />);
 
-        expect(await screen.findByText('No se pudo cargar la configuración de Prisma. Se mantienen los valores actuales.'))
+        expect(await screen.findByText('No se pudo cargar la configuración de Leda. Se mantienen los valores actuales.'))
             .toHaveAttribute('aria-live', 'polite');
         expect(screen.getByRole('checkbox', { name: 'Efecto robótico' })).toBeChecked();
     });
@@ -206,8 +206,8 @@ describe('VoiceSettingsTab', () => {
     });
 
     it('sends exactly one PUT per Save and commits the normalized response', async () => {
-        const initial = createDefaultPrismaVoiceConfig();
-        const normalized = createDefaultPrismaVoiceConfig();
+        const initial = createDefaultLedaVoiceConfig();
+        const normalized = createDefaultLedaVoiceConfig();
         normalized.effectIntensity = 64;
         const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => Promise.resolve(
             init?.method === 'PUT' ? configEnvelope(normalized) : configEnvelope(initial),
@@ -222,13 +222,13 @@ describe('VoiceSettingsTab', () => {
         await act(async () => saveRef.current?.());
 
         expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
-        expect(fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')?.[0]).toBe('/api/prisma/voice-config');
+        expect(fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')?.[0]).toBe('/api/leda/voice-config');
         expect(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' })).toHaveValue('64');
         expect(onSaveStatusChange).toHaveBeenLastCalledWith('saved');
     });
 
     it('uses read-after-write confirmation when the PUT response is lost', async () => {
-        let sent = createDefaultPrismaVoiceConfig();
+        let sent = createDefaultLedaVoiceConfig();
         const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
             if (init?.method === 'PUT') {
                 sent = JSON.parse(init.body as string) as typeof sent;
@@ -268,7 +268,7 @@ describe('VoiceSettingsTab', () => {
 
     it('blocks Save while an effect field is invalid', async () => {
         const user = userEvent.setup();
-        const initial = createDefaultPrismaVoiceConfig();
+        const initial = createDefaultLedaVoiceConfig();
         initial.effectIntensity = 42;
         const fetchMock = vi.fn(async () => configEnvelope(initial));
         vi.stubGlobal('fetch', fetchMock);
@@ -296,7 +296,7 @@ describe('VoiceSettingsTab', () => {
     it('preserves an invalid advanced edit made while a PUT is pending', async () => {
         const user = userEvent.setup();
         let resolvePut!: (response: Response) => void;
-        const initial = createDefaultPrismaVoiceConfig();
+        const initial = createDefaultLedaVoiceConfig();
         initial.effectIntensity = 42;
         const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => (
             init?.method === 'PUT'
@@ -319,7 +319,7 @@ describe('VoiceSettingsTab', () => {
         await user.type(modulationInput, '0');
         act(() => {
             fireEvent.blur(modulationInput);
-            const remote = createDefaultPrismaVoiceConfig();
+            const remote = createDefaultLedaVoiceConfig();
             remote.effectIntensity = 65;
             resolvePut(configEnvelope(remote));
         });
@@ -346,7 +346,7 @@ describe('VoiceSettingsTab', () => {
         act(() => { savePromise = saveRef.current?.(); });
         await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true));
         fireEvent.change(screen.getByRole('slider', { name: 'Intensidad del efecto robótico' }), { target: { value: '70' } });
-        const remote = createDefaultPrismaVoiceConfig();
+        const remote = createDefaultLedaVoiceConfig();
         remote.effectIntensity = 65;
 
         await act(async () => { resolvePut(configEnvelope(remote)); await savePromise; });
@@ -363,13 +363,13 @@ describe('VoiceSettingsTab', () => {
 
         await act(async () => saveRef.current?.());
 
-        expect(localStorage.getItem(PRISMA_ORB_STORAGE_KEY)).not.toBeNull();
-        expect(readPrismaOrbVisualConfig().core).toBe('#1240c8');
+        expect(localStorage.getItem(LEDA_ORB_STORAGE_KEY)).not.toBeNull();
+        expect(readLedaOrbVisualConfig().core).toBe('#1240c8');
     });
 
     it('keeps preview-only controls transient and clean', async () => {
         const user = userEvent.setup();
-        const initial = createDefaultPrismaVoiceConfig();
+        const initial = createDefaultLedaVoiceConfig();
         initial.effectIntensity = 42;
         vi.stubGlobal('fetch', vi.fn(async () => configEnvelope(initial)));
         const onDirtyChange = vi.fn();
@@ -385,9 +385,9 @@ describe('VoiceSettingsTab', () => {
 
         expect(screen.queryByRole('slider', { name: 'Penetración de haces' })).not.toBeInTheDocument();
         expect(setSpeakingMock).toHaveBeenLastCalledWith(true);
-        expect(screen.getByTestId('prisma-orb-preview-stage')).toHaveClass('bg-industrial-text/90');
+        expect(screen.getByTestId('leda-orb-preview-stage')).toHaveClass('bg-industrial-text/90');
         expect(onDirtyChange).not.toHaveBeenCalled();
-        expect(localStorage.getItem(PRISMA_ORB_STORAGE_KEY)).toBeNull();
+        expect(localStorage.getItem(LEDA_ORB_STORAGE_KEY)).toBeNull();
     });
 
     it('runs the preview demo cadence and clears its timer on unmount', () => {
@@ -467,7 +467,7 @@ describe('VoiceSettingsTab', () => {
         render(<VoiceSettingsTab />);
 
         const bufferHeading = await screen.findByRole('heading', { name: 'Buffer de audio' });
-        const effectsHeading = screen.getByRole('heading', { name: 'Efectos de voz de Prisma' });
+        const effectsHeading = screen.getByRole('heading', { name: 'Efectos de voz de Leda' });
         expect(bufferHeading.compareDocumentPosition(effectsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
@@ -482,7 +482,7 @@ describe('VoiceSettingsTab', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Modo del buffer de audio' }));
         fireEvent.click(screen.getByRole('button', { name: 'Manual' }));
 
-        expect(screen.getByText('Se usa siempre la espera fija que usted defina. Más espera reduce los cortes, pero Prisma empieza a hablar más tarde.')).toBeInTheDocument();
+        expect(screen.getByText('Se usa siempre la espera fija que usted defina. Más espera reduce los cortes, pero Leda empieza a hablar más tarde.')).toBeInTheDocument();
         const manualSlider = screen.getByRole('slider', { name: 'Espera manual en segundos' });
         expect(manualSlider).toHaveAttribute('min', '0.1');
         expect(manualSlider).toHaveAttribute('max', '3');

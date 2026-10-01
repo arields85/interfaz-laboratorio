@@ -14,8 +14,8 @@ typing indicator mirroring Channel A's PW-011 M5 behavior.
 ## TDD
 
 Strict TDD: enabled (source: session configuration "Strict TDD Mode: enabled").
-Runner: `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m
-unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\runtime-fixes\services\prisma-runtime -p "test_*.py"`.
+Runner: `D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\leda-runtime\.venv\Scripts\python.exe -m
+unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\runtime-fixes\services\leda-runtime -p "test_*.py"`.
 Baseline (worktree, before changes, 2026-09-25): **1730 tests, 2 pre-existing environmental
 failures, 2 skipped** — `test_real_missing_import_is_normalized_to_bootstrap_remedy_under_stop_preference`
 and `test_cancellation_during_voice_startup_rolls_back_only_the_launched_child`, both because this
@@ -26,7 +26,7 @@ not touched.
 ## Tasks
 
 - [x] **F1 — Channel B voice-note replies never arrive in protected credential mode.** Root cause:
-  `telegram_config.telegram_token()` always returns "" when `PRISMA_CREDENTIAL_MASTER_KEY_FILE` is
+  `telegram_config.telegram_token()` always returns "" when `LEDA_CREDENTIAL_MASTER_KEY_FILE` is
   set (protected mode), so `voice_service.py`'s `_telegram_token()` never resolves the Channel B bot
   token from the protected credential store, silently cancelling every Telegram voice job. Fix:
   resolve the "telegram" secret from the protected `CredentialService` in `voice_service.py`, mirroring
@@ -96,9 +96,9 @@ not touched.
 ### F1 — Channel B protected-mode Telegram token (`telegram_credentials.py`, `voice_service.py`)
 
 - Root cause confirmed by reading: `telegram_config.read_telegram_config()` forces `token=""`
-  whenever `PRISMA_CREDENTIAL_MASTER_KEY_FILE` is set (protected mode) — by design, so the legacy
+  whenever `LEDA_CREDENTIAL_MASTER_KEY_FILE` is set (protected mode) — by design, so the legacy
   env var can never leak in protected mode — but `voice_service.py`'s `_telegram_token()` called
-  only `telegram_token()`, so it always got "". `_send_same_prisma_audio_to_telegram`
+  only `telegram_token()`, so it always got "". `_send_same_leda_audio_to_telegram`
   (`if not token: _cancel_telegram_job(job); return`) and `_create_interactions_tts_job`'s encoder
   creation (`if valid_chat is not None and _telegram_token(): ...`) both silently no-opped.
 - Fix: `telegram_credentials.py`'s `TelegramCredentialResolver` gained an mtime-based cache
@@ -110,9 +110,9 @@ not touched.
   protected mode resolves via `telegram_credentials.resolve()` (same "telegram" secret the
   presentation process's own `TelegramCredentialResolver(os.environ, lambda: credentials)`
   already reads for Channel B's own bot construction), logging one WARNING (no secret) on
-  failure. Env mode behavior is unchanged (still reads `PRISMA_LOCAL_TELEGRAM_BOT_TOKEN` directly,
+  failure. Env mode behavior is unchanged (still reads `LEDA_LOCAL_TELEGRAM_BOT_TOKEN` directly,
   never calls the protected resolver).
-- Added WARNING logging in `_send_same_prisma_audio_to_telegram`: once when cancelled for a
+- Added WARNING logging in `_send_same_leda_audio_to_telegram`: once when cancelled for a
   missing token (event_id only, no secret), once when every sendVoice/sendDocument attempt is
   exhausted.
 - Channel A cross-check (task's own instruction): grepped and read `channel_a_credentials.py`,
@@ -123,7 +123,7 @@ not touched.
   never sets `telegramChatId` in production — that path is a vestige, not live for Channel A. No
   Channel A behavior change.
 - RED evidence: `TelegramCredentialResolver.__init__() got an unexpected keyword argument
-  'mtime_probe'` (3 new cache tests); `AttributeError: module 'prisma_runtime.voice_service' has
+  'mtime_probe'` (3 new cache tests); `AttributeError: module 'leda_runtime.voice_service' has
   no attribute 'telegram_credentials'` (new `_telegram_token()` tests) before implementation.
 - Checks: `tests.test_telegram_credentials` — 14 OK. `tests.test_voice_service` — 85 OK (targeted
   run). Full suite after F1+F2 — 1747 tests, same 2 pre-existing environmental failures.
@@ -257,8 +257,8 @@ not touched.
 
 ## Final verification (all fixes)
 
-`D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\prisma-runtime\.venv\Scripts\python.exe -m
-unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\runtime-fixes\services\prisma-runtime
+`D:\Proyectos\Interfaz-HMI\Interfaz-HMI\services\leda-runtime\.venv\Scripts\python.exe -m
+unittest discover -s D:\Proyectos\Interfaz-HMI\Interfaz-HMI-worktrees\runtime-fixes\services\leda-runtime
 -p "test_*.py"` → **1766 tests, 2 pre-existing environmental failures (same as baseline,
 worktree-local `.venv` missing), 2 skipped, no new failures.**
 
@@ -280,7 +280,7 @@ worktree-local `.venv` missing), 2 skipped, no new failures.**
 
 Closed; no pending work. Live retest by the user on 2026-09-25 passed: F3's inactivity
 warning/expiry copy showed the confirmed HMI label ("Notebook"), and F6's Channel B "typing…"
-indicator behaved as fixed (see `odd/tasks/pw-011-prisma-minor-followups.md`'s Live verification
+indicator behaved as fixed (see `odd/tasks/pw-011-leda-minor-followups.md`'s Live verification
 section). F1/F2/F7 were exercised as part of the same session's voice-note and Channel B retests
-(see `odd/tasks/prisma-channel-b-voice-replies.md` B3 and `odd/tasks/pw-013-voice-note-questions.md`
+(see `odd/tasks/leda-channel-b-voice-replies.md` B3 and `odd/tasks/pw-013-voice-note-questions.md`
 V7), with no errors observed in the runtime logs.

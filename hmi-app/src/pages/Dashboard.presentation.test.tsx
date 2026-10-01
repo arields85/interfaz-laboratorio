@@ -106,7 +106,7 @@ describe('Dashboard canonical presentation materialization', () => {
 
     it('feeds the real viewer and compact header into one frame-backed snapshot independent of DOM appearance', async () => {
         render(
-            <MemoryRouter initialEntries={['/?prismaMode=local']}>
+            <MemoryRouter initialEntries={['/?ledaMode=local']}>
                 <Routes><Route path="/" element={<Dashboard />} /></Routes>
             </MemoryRouter>,
         );

@@ -8,12 +8,12 @@ const { sessionClientMock } = vi.hoisted(() => ({
     },
 }));
 
-vi.mock('./prismaSessionClient', () => ({
-    prismaSessionClient: sessionClientMock,
+vi.mock('./ledaSessionClient', () => ({
+    ledaSessionClient: sessionClientMock,
 }));
 
 import { startVoiceEventListener } from './voiceEventListener.service';
-import { PRISMA_BROWSER_METRIC_EVENT } from './prismaVoiceMetrics';
+import { LEDA_BROWSER_METRIC_EVENT } from './ledaVoiceMetrics';
 
 async function collectVoiceEventReceivedSources(run: () => Promise<void>): Promise<string[]> {
     const sources: string[] = [];
@@ -23,11 +23,11 @@ async function collectVoiceEventReceivedSources(run: () => Promise<void>): Promi
             sources.push(detail.payload.source);
         }
     };
-    window.addEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+    window.addEventListener(LEDA_BROWSER_METRIC_EVENT, listener);
     try {
         await run();
     } finally {
-        window.removeEventListener(PRISMA_BROWSER_METRIC_EVENT, listener);
+        window.removeEventListener(LEDA_BROWSER_METRIC_EVENT, listener);
     }
     return sources;
 }
@@ -155,7 +155,7 @@ describe('startVoiceEventListener', () => {
         const onEvent = vi.fn();
 
         const stop = startVoiceEventListener({
-            url: '/api/prisma/events/latest',
+            url: '/api/leda/events/latest',
             onEvent,
             fetchImpl: fetchMock,
             intervalMs: 1_000,
@@ -183,7 +183,7 @@ describe('startVoiceEventListener', () => {
 
         const sources = await collectVoiceEventReceivedSources(async () => {
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
+                url: '/api/leda/events/latest',
                 onEvent,
                 fetchImpl: fetchMock,
                 intervalMs: 1_000,
@@ -246,7 +246,7 @@ describe('startVoiceEventListener', () => {
         const onEvent = vi.fn();
 
         const stop = startVoiceEventListener({
-            url: '/api/prisma/events/latest',
+            url: '/api/leda/events/latest',
             onEvent,
             fetchImpl: fetchMock,
             intervalMs: 1_000,
@@ -462,12 +462,12 @@ describe('startVoiceEventListener', () => {
         });
 
         const stopServer = startVoiceEventListener({
-            url: '/api/prisma/events/latest',
+            url: '/api/leda/events/latest',
             onEvent: vi.fn(),
             fetchImpl: fetchMock,
         });
         const stopLocal = startVoiceEventListener({
-            url: '/api/prisma/events/latest',
+            url: '/api/leda/events/latest',
             onEvent: vi.fn(),
             fetchImpl: fetchMock,
         });
@@ -578,21 +578,21 @@ describe('startVoiceEventListener', () => {
     });
 
     describe('T13b: push voice events over a header-based fetch SSE reader (capability never in the URL)', () => {
-        it('connects via prismaSessionClient.fetch with no query string, delivers an event, and never falls back to polling', async () => {
+        it('connects via ledaSessionClient.fetch with no query string, delivers an event, and never falls back to polling', async () => {
             const body = new FakeSseBody();
             sessionClientMock.fetch.mockResolvedValueOnce(sseResponse(body));
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
             });
             await vi.advanceTimersByTimeAsync(0);
 
             expect(sessionClientMock.fetch).toHaveBeenCalledOnce();
             const [calledUrl] = sessionClientMock.fetch.mock.calls[0]!;
-            expect(calledUrl).toBe('/api/prisma/events/stream');
+            expect(calledUrl).toBe('/api/leda/events/stream');
             expect(String(calledUrl)).not.toContain('capability=');
 
             body.push(`data: ${JSON.stringify(FIRST_EVENT)}\n\n`);
@@ -614,8 +614,8 @@ describe('startVoiceEventListener', () => {
 
             const sources = await collectVoiceEventReceivedSources(async () => {
                 const stop = startVoiceEventListener({
-                    url: '/api/prisma/events/latest',
-                    streamUrl: '/api/prisma/events/stream',
+                    url: '/api/leda/events/latest',
+                    streamUrl: '/api/leda/events/stream',
                     onEvent,
                 });
                 await vi.advanceTimersByTimeAsync(0);
@@ -633,8 +633,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
             });
             await vi.advanceTimersByTimeAsync(0);
@@ -658,8 +658,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
             });
             await vi.advanceTimersByTimeAsync(0);
@@ -684,8 +684,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
             });
             await vi.advanceTimersByTimeAsync(0);
@@ -709,8 +709,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
             });
             await vi.advanceTimersByTimeAsync(0);
@@ -729,8 +729,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
             });
             await vi.advanceTimersByTimeAsync(0);
@@ -751,8 +751,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 1_000,
             });
@@ -775,8 +775,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 1_000,
             });
@@ -798,8 +798,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 1_000,
             });
@@ -819,8 +819,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 1_000,
             });
@@ -839,8 +839,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 1_000,
             });
@@ -861,8 +861,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 1_000,
             });
@@ -884,8 +884,8 @@ describe('startVoiceEventListener', () => {
             const onEvent = vi.fn();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent,
                 intervalMs: 60_000,
             });
@@ -915,8 +915,8 @@ describe('startVoiceEventListener', () => {
             const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(FIRST_EVENT));
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent: vi.fn(),
                 fetchImpl: fetchMock,
             });
@@ -934,8 +934,8 @@ describe('startVoiceEventListener', () => {
             const body = new FakeSseBody();
 
             const stop = startVoiceEventListener({
-                url: '/api/prisma/events/latest',
-                streamUrl: '/api/prisma/events/stream',
+                url: '/api/leda/events/latest',
+                streamUrl: '/api/leda/events/stream',
                 onEvent: vi.fn(),
             });
 

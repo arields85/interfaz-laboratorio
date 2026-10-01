@@ -58,7 +58,7 @@ describe('AdminSessionLifecycle replaced session', () => {
         const user = userEvent.setup();
         let replaced = false;
         const fetcher = vi.fn<typeof fetch>((path) => {
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/session') {
                 return Promise.resolve(replaced
                     ? jsonResponse({ ok: false, error: 'ADMIN_SESSION_REPLACED' }, 401)
                     : jsonResponse({
@@ -87,7 +87,7 @@ describe('AdminSessionLifecycle replaced session', () => {
     it('keeps plain expiry silent: viewer, no replaced notice', async () => {
         let expired = false;
         const fetcher = vi.fn<typeof fetch>((path) => {
-            if (path === '/api/prisma/admin/auth/session') {
+            if (path === '/api/leda/admin/auth/session') {
                 return Promise.resolve(expired
                     ? jsonResponse({ ok: false, error: 'AUTHENTICATION_REQUIRED' }, 401)
                     : jsonResponse({

@@ -1,7 +1,7 @@
 import type {
     CredentialAdministrationClient,
     CredentialAdministrationController,
-} from '../../hooks/usePrismaCredentialAdministration';
+} from '../../hooks/useLedaCredentialAdministration';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
     Check,
@@ -21,7 +21,7 @@ import type {
     TelegramPassiveHealth,
     TelegramTokenVerification,
 } from '../../domain';
-import { usePrismaCredentialAdministration } from '../../hooks/usePrismaCredentialAdministration';
+import { useLedaCredentialAdministration } from '../../hooks/useLedaCredentialAdministration';
 import { AdminAuthError } from '../../services/adminAuth.service';
 import { useAuthStore } from '../../store/auth.store';
 import HmiButton from '../ui/HmiButton';
@@ -53,25 +53,25 @@ function errorText(error: unknown): string {
         TELEGRAM_STOP_TIMEOUT: 'No se pudo confirmar la detención de Telegram.',
         TELEGRAM_POLL_FAILED: 'Telegram informó una falla de conexión.',
         TELEGRAM_PREPARATION_FAILED: 'Telegram no pudo completar su preparación.',
-        PRISMA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING: 'Falta la credencial de Telegram en el entorno local.',
-        PRISMA_CHANNEL_A_CONFIGURATION_INVALID: 'La configuración local del Canal A es inválida.',
-        PRISMA_CHANNEL_A_CONFIGURATION_UNAVAILABLE: 'La configuración local del Canal A no está disponible.',
-        PRISMA_CHANNEL_A_CREDENTIAL_MISSING: 'El Canal A no tiene una credencial protegida.',
-        PRISMA_CHANNEL_A_CREDENTIAL_UNAVAILABLE: 'La credencial del Canal A no está disponible.',
-        PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE: 'El ciclo de vida del Canal A no está disponible.',
-        PRISMA_CHANNEL_A_MANAGER_BUSY: 'El administrador del Canal A está ocupado. Reintente la acción.',
-        PRISMA_CHANNEL_A_MANAGER_UNAVAILABLE: 'El estado del Canal A no está disponible.',
-        PRISMA_CHANNEL_A_RESTART_REQUIRED: 'El Canal A requiere un reinicio para aplicar el cambio.',
-        PRISMA_CHANNEL_A_STOP_UNCONFIRMED: 'No se pudo confirmar la detención del Canal A.',
-        PRISMA_CHANNEL_A_POLL_FAILED: 'El Canal A informó una falla de conexión.',
-        PRISMA_CHANNEL_A_UNAUTHORIZED: 'El token del Canal A fue rechazado por Telegram.',
+        LEDA_LOCAL_TELEGRAM_BOT_TOKEN_MISSING: 'Falta la credencial de Telegram en el entorno local.',
+        LEDA_CHANNEL_A_CONFIGURATION_INVALID: 'La configuración local del Canal A es inválida.',
+        LEDA_CHANNEL_A_CONFIGURATION_UNAVAILABLE: 'La configuración local del Canal A no está disponible.',
+        LEDA_CHANNEL_A_CREDENTIAL_MISSING: 'El Canal A no tiene una credencial protegida.',
+        LEDA_CHANNEL_A_CREDENTIAL_UNAVAILABLE: 'La credencial del Canal A no está disponible.',
+        LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE: 'El ciclo de vida del Canal A no está disponible.',
+        LEDA_CHANNEL_A_MANAGER_BUSY: 'El administrador del Canal A está ocupado. Reintente la acción.',
+        LEDA_CHANNEL_A_MANAGER_UNAVAILABLE: 'El estado del Canal A no está disponible.',
+        LEDA_CHANNEL_A_RESTART_REQUIRED: 'El Canal A requiere un reinicio para aplicar el cambio.',
+        LEDA_CHANNEL_A_STOP_UNCONFIRMED: 'No se pudo confirmar la detención del Canal A.',
+        LEDA_CHANNEL_A_POLL_FAILED: 'El Canal A informó una falla de conexión.',
+        LEDA_CHANNEL_A_UNAUTHORIZED: 'El token del Canal A fue rechazado por Telegram.',
         INVALID_CREDENTIAL_REQUEST: 'La solicitud de credencial es inválida.',
         GEMINI_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
         GEMINI_VERIFICATION_UNAVAILABLE: 'La verificación de Gemini no está disponible.',
         TELEGRAM_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
         TELEGRAM_VERIFICATION_UNAVAILABLE: 'La verificación del Canal B no está disponible.',
-        PRISMA_CHANNEL_A_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
-        PRISMA_CHANNEL_A_VERIFICATION_UNAVAILABLE: 'La verificación del Canal A no está disponible.',
+        LEDA_CHANNEL_A_VERIFICATION_IN_PROGRESS: 'Ya hay una verificación en curso. Espere a que finalice.',
+        LEDA_CHANNEL_A_VERIFICATION_UNAVAILABLE: 'La verificación del Canal A no está disponible.',
     }[code] ?? 'No se pudo completar la operación con el servicio local.';
 }
 
@@ -108,7 +108,7 @@ const DELETE_CONFIRMATION_TEXT: Record<CredentialProvider, string> = {
 // anti-hardcode dimensional policy), not a raw pixel measurement or a
 // content-dependent estimate; the container-width arithmetic behind this
 // specific step is recorded in the T14 tracker entry
-// (odd/tasks/prisma-channel-a-corrections.md), not duplicated here, so nothing
+// (odd/tasks/leda-channel-a-corrections.md), not duplicated here, so nothing
 // here can go stale if that reasoning is revisited independently of the token.
 const CREDENTIAL_INPUT_WIDTH_CLS = 'w-full md:w-44';
 
@@ -135,13 +135,13 @@ const RESULT_AREA_WIDTH_CLS = 'min-w-[33ch]';
 // automatically -- it stays until the next verify, a save, or a delete
 // (which already resets verification on the backend). No pre-existing
 // feedback/toast duration constant in the codebase is semantically
-// equivalent (PRISMA_ORB_FADE_DURATION_MS and the BOOT_SHIELD_*_MS family
+// equivalent (LEDA_ORB_FADE_DURATION_MS and the BOOT_SHIELD_*_MS family
 // are animation/boot timings, not a "leave a result on screen" duration), so
 // this is a new named constant per the anti-hardcode timing policy.
 const VERIFICATION_RESULT_DISPLAY_MS = 5000;
 
 // T11 (2026-09-23): Canal B (Telegram) row description, user-approved copy.
-const CHANNEL_B_DESCRIPTION = 'Consultas a distancia por Telegram: Prisma responde por mensaje, sin necesidad de mirar la interfaz.';
+const CHANNEL_B_DESCRIPTION = 'Consultas a distancia por Telegram: Leda responde por mensaje, sin necesidad de mirar la interfaz.';
 
 function emptySecretDrafts(): Record<CredentialProvider, string> {
     return { gemini: '', telegram: '', telegram_channel_a: '' };
@@ -348,7 +348,7 @@ function telegramConnectionResult(telegram: TelegramPassiveHealth | null): Resul
 function channelAConnectionResult(channelA: ChannelAAdministrationStatus | null): ResultGlyph | null {
     if (!channelA || !channelA.configured) return null;
     if (channelA.retrying) return { text: 'Reconectando…', tone: 'warning' };
-    if (channelA.lastError === 'PRISMA_CHANNEL_A_UNAUTHORIZED') return { text: 'Token inválido', tone: 'critical' };
+    if (channelA.lastError === 'LEDA_CHANNEL_A_UNAUTHORIZED') return { text: 'Token inválido', tone: 'critical' };
     if (channelA.lastError === 'TELEGRAM_BOT_IDENTITY_RESERVED') return { text: 'Bot en uso por el otro canal', tone: 'critical' };
     if (channelA.lastError) return { text: 'No se pudo conectar el bot', tone: 'critical' };
     const phase = channelA.activation?.phase ?? null;
@@ -524,7 +524,7 @@ function RuntimeErrorNotice({ code }: { code: string | null }) {
 
 export default function VoiceCredentialSettings({ active, client, controller }: VoiceCredentialSettingsProps) {
     const authenticated = useAuthStore((state) => state.session.isAuthenticated);
-    const administration = usePrismaCredentialAdministration({ client, controller, active });
+    const administration = useLedaCredentialAdministration({ client, controller, active });
     const [secretDrafts, setSecretDrafts] = useState<Record<CredentialProvider, string>>(emptySecretDrafts);
     const [deleteProvider, setDeleteProvider] = useState<CredentialProvider | null>(null);
     const [feedback, setFeedback] = useState<Feedback>(null);
@@ -895,7 +895,7 @@ export default function VoiceCredentialSettings({ active, client, controller }: 
             <CredentialFieldset
                 legend={isChannelA ? 'Canal A' : 'Canal B'}
                 description={isChannelA
-                    ? 'Canal privado de Telegram: se vincula con un QR y Prisma responde consultas sobre la interfaz.'
+                    ? 'Canal privado de Telegram: se vincula con un QR y Leda responde consultas sobre la interfaz.'
                     : CHANNEL_B_DESCRIPTION}
             >
                 <label htmlFor={inputId} className="text-industrial-muted">Telegram bot API Token</label>

@@ -40,12 +40,12 @@ describe('dataConnection.config industrial telemetry settings', () => {
         expect(getDataActivitySeriesUrl()).toBe('https://sample.example.invalid/api/hmi-data/activity-series');
     });
 
-    it('persists and clears industrial telemetry settings without touching legacy Prisma keys', () => {
-        localStorage.setItem('hmi:prisma-runtime-mode', 'local');
+    it('persists and clears industrial telemetry settings without touching legacy Leda keys', () => {
+        localStorage.setItem('hmi:leda-runtime-mode', 'local');
         localStorage.setItem('hmi:voice-endpoint', 'https://legacy.invalid/voice');
-        localStorage.setItem('hmi:prisma-config-endpoint', 'https://legacy.invalid/config');
+        localStorage.setItem('hmi:leda-config-endpoint', 'https://legacy.invalid/config');
         localStorage.setItem('hmi:snapshot-export-endpoint', '/legacy-snapshot');
-        localStorage.setItem('hmi:prisma-voice-tts-service-url', 'https://legacy.invalid/tts');
+        localStorage.setItem('hmi:leda-voice-tts-service-url', 'https://legacy.invalid/tts');
 
         saveDataBaseUrl(' https://sample.example.invalid/root/ ');
         saveDataEndpoint('/overview');
@@ -61,11 +61,11 @@ describe('dataConnection.config industrial telemetry settings', () => {
         clearDataHistoryEndpoint();
         clearDataActivitySeriesEndpoint();
 
-        expect(localStorage.getItem('hmi:prisma-runtime-mode')).toBe('local');
+        expect(localStorage.getItem('hmi:leda-runtime-mode')).toBe('local');
         expect(localStorage.getItem('hmi:voice-endpoint')).toBe('https://legacy.invalid/voice');
-        expect(localStorage.getItem('hmi:prisma-config-endpoint')).toBe('https://legacy.invalid/config');
+        expect(localStorage.getItem('hmi:leda-config-endpoint')).toBe('https://legacy.invalid/config');
         expect(localStorage.getItem('hmi:snapshot-export-endpoint')).toBe('/legacy-snapshot');
-        expect(localStorage.getItem('hmi:prisma-voice-tts-service-url')).toBe('https://legacy.invalid/tts');
+        expect(localStorage.getItem('hmi:leda-voice-tts-service-url')).toBe('https://legacy.invalid/tts');
     });
 
     it('keeps the connection change event for the telemetry base URL', () => {

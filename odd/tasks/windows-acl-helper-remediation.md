@@ -6,8 +6,8 @@ Direct non-SDD fix accepted; live auth-directory repair and independent read-onl
 verification passed. Backend status reports configured:true, and user confirmed native
 local Chrome login after the separate fetch-receiver correction. PAC-5 subsequently
 closed offline; the integrated closure record and its evidence live in
-[prisma-protected-credentials.md](prisma-protected-credentials.md). This correction was
-delivered as observed local commit `41dc286` on `feat/prisma-telegram-credentials` with
+[leda-protected-credentials.md](leda-protected-credentials.md). This correction was
+delivered as observed local commit `41dc286` on `feat/leda-telegram-credentials` with
 explicit user authorization; no push or PR was performed.
 
 ## Scope and boundaries
@@ -23,8 +23,8 @@ operations, service restarts or unrelated source changes. Preserve pre-existing 
 - Native RED required a protected incident descriptor; a fresh unprotected directory
   did not reproduce. The internal PowerShell mechanism is not independently established.
 - Mandatory project TDD; delegated direct writer and independent verification.
-- Source scope: services/prisma-runtime/operations/protect-auth-state.ps1 and
-  services/prisma-runtime/tests/test_storage_permissions.py only.
+- Source scope: services/leda-runtime/operations/protect-auth-state.ps1 and
+  services/leda-runtime/tests/test_storage_permissions.py only.
 - Delivery: ask-on-risk; local work-unit commit `41dc286` created with explicit user
   authorization; no push or PR performed.
 
@@ -61,7 +61,7 @@ operations, service restarts or unrelated source changes. Preserve pre-existing 
 Run from repository root (bash; no trailing dot):
 
 ```bash
-./services/prisma-runtime/.venv/Scripts/python.exe -B -m unittest discover -s services/prisma-runtime -p 'test_storage_permissions.py' -v
+./services/leda-runtime/.venv/Scripts/python.exe -B -m unittest discover -s services/leda-runtime -p 'test_storage_permissions.py' -v
 ```
 
 ## Remaining scratch artifact

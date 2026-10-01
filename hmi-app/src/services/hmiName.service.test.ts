@@ -22,7 +22,7 @@ const fixture = vi.hoisted(() => {
 
 import { readHmiName, saveHmiName } from './hmiName.service';
 
-const KEY = 'hmi:prisma-hmi-name';
+const KEY = 'hmi:leda-hmi-name';
 afterAll(() => vi.unstubAllGlobals());
 beforeEach(() => {
     fixture.bytes.clear();

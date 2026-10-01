@@ -1,8 +1,8 @@
 import type { VoiceEvent } from '../domain/voice.types';
 import { isVoiceEventKind, normalizeTelegramChatId } from '../domain/voice';
-import { PRISMA_EVENTS_URL } from '../config/prismaAssistant.config';
-import { prismaSessionClient } from './prismaSessionClient';
-import { recordVoiceEventReceived } from './prismaVoiceTimelineRecorder';
+import { LEDA_EVENTS_URL } from '../config/ledaAssistant.config';
+import { ledaSessionClient } from './ledaSessionClient';
+import { recordVoiceEventReceived } from './ledaVoiceTimelineRecorder';
 
 const DEFAULT_VOICE_POLL_INTERVAL_MS = 1_000;
 
@@ -23,7 +23,7 @@ interface VoiceEventListenerOptions {
      * instead of polling every intervalMs. Attempted only in real
      * production usage (fetchImpl === undefined, matching every existing
      * test/injected-transport seam in this module). Read with a
-     * fetch-based reader through prismaSessionClient.fetch -- the same
+     * fetch-based reader through ledaSessionClient.fetch -- the same
      * transport polling uses -- so the session capability travels in the
      * ordinary request header, never in the stream URL (T13b's blocking
      * finding: a native EventSource cannot set custom headers, so an
@@ -76,7 +76,7 @@ export function startVoiceEventListener({
         activeController = typeof AbortController === 'function' ? new AbortController() : null;
 
         try {
-            const response = await (fetchImpl ?? prismaSessionClient.fetch.bind(prismaSessionClient))(url, {
+            const response = await (fetchImpl ?? ledaSessionClient.fetch.bind(ledaSessionClient))(url, {
                 method: 'GET',
                 signal: activeController?.signal,
             });
@@ -86,7 +86,7 @@ export function startVoiceEventListener({
             }
 
             const payload: unknown = await response.json();
-            if (fetchImpl === undefined && !prismaSessionClient.isCurrentResponse(response)) {
+            if (fetchImpl === undefined && !ledaSessionClient.isCurrentResponse(response)) {
                 return;
             }
 
@@ -96,7 +96,7 @@ export function startVoiceEventListener({
             }
 
             const eventKey = getVoiceEventDedupeKey(event);
-            if (lastProcessedKey === null && (url !== PRISMA_EVENTS_URL || event.id === undefined)) {
+            if (lastProcessedKey === null && (url !== LEDA_EVENTS_URL || event.id === undefined)) {
                 lastProcessedKey = eventKey;
                 return;
             }
@@ -105,7 +105,7 @@ export function startVoiceEventListener({
             }
 
             lastProcessedKey = eventKey;
-            if (fetchImpl === undefined && !prismaSessionClient.acceptVoiceEvent(eventKey)) {
+            if (fetchImpl === undefined && !ledaSessionClient.acceptVoiceEvent(eventKey)) {
                 return;
             }
             recordVoiceEventReceived('poll');
@@ -163,7 +163,7 @@ export function startVoiceEventListener({
         }
 
         lastProcessedKey = eventKey;
-        if (!prismaSessionClient.acceptVoiceEvent(eventKey)) {
+        if (!ledaSessionClient.acceptVoiceEvent(eventKey)) {
             return;
         }
         recordVoiceEventReceived('sse');
@@ -177,7 +177,7 @@ export function startVoiceEventListener({
 
         let response: Response;
         try {
-            response = await prismaSessionClient.fetch(streamUrl, {
+            response = await ledaSessionClient.fetch(streamUrl, {
                 method: 'GET',
                 headers: { Accept: 'text/event-stream' },
             });
@@ -197,7 +197,7 @@ export function startVoiceEventListener({
             !response.ok
             || response.body === null
             || typeof response.body.getReader !== 'function'
-            || !prismaSessionClient.isCurrentResponse(response)
+            || !ledaSessionClient.isCurrentResponse(response)
         ) {
             void response.body?.cancel().catch(() => undefined);
             startPolling();

@@ -13,7 +13,7 @@ import {
 
 import { ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY, BASE_URL_STORAGE_KEY, ENDPOINT_STORAGE_KEY, HISTORY_ENDPOINT_STORAGE_KEY } from '../config/dataConnection.config';
 import { LOADER_OPTIONS_STORAGE_KEY } from '../config/loaderOptions.config';
-import { PRISMA_ORB_STORAGE_KEY } from '../config/prismaOrb.config';
+import { LEDA_ORB_STORAGE_KEY } from '../config/ledaOrb.config';
 import { TEMPORAL_SETTINGS_STORAGE_KEY } from '../config/temporalSettings.config';
 import { DESIGN_COLOR_STORAGE_KEY, DESIGN_FONT_STORAGE_KEY } from '../services/designSettingsStorage.service';
 import { FRAME_SHAPE_STORAGE_KEY } from '../services/frameShape.service';
@@ -42,7 +42,7 @@ import {
 
 describe('shared config domain', () => {
     it('accepts the existing localStorage key shapes and rejects unsafe keys', () => {
-        for (const key of ['hmi:prisma-hmi-name', 'hmi-theme-colors', 'a.b_c:1']) {
+        for (const key of ['hmi:leda-hmi-name', 'hmi-theme-colors', 'a.b_c:1']) {
             expect(isValidSharedConfigKey(key)).toBe(true);
         }
         for (const key of ['', 'with space', 'slash/key', 'é', 'k'.repeat(MAX_SHARED_CONFIG_KEY_LENGTH + 1)]) {
@@ -81,7 +81,7 @@ describe('shared config domain', () => {
 
     it('keeps its bounds identical to the runtime store and route', () => {
         const here = path.dirname(fileURLToPath(import.meta.url));
-        const runtime = path.resolve(here, '../../../services/prisma-runtime/src/prisma_runtime');
+        const runtime = path.resolve(here, '../../../services/leda-runtime/src/leda_runtime');
         const store = readFileSync(path.join(runtime, 'hmi_config_store.py'), 'utf-8');
         const route = readFileSync(path.join(runtime, 'admin_http.py'), 'utf-8');
         const mib = (source: string, name: string): number => {
@@ -119,7 +119,7 @@ describe('shared config domain', () => {
             HMI_NAME_STORAGE_KEY,
             LOADER_OPTIONS_STORAGE_KEY,
             TEMPORAL_SETTINGS_STORAGE_KEY,
-            PRISMA_ORB_STORAGE_KEY,
+            LEDA_ORB_STORAGE_KEY,
             // theme, design and background
             THEME_STYLE_STORAGE_KEY,
             FRAME_RADIUS_STORAGE_KEY,
@@ -136,7 +136,7 @@ describe('shared config domain', () => {
         for (const key of SHARED_CONFIG_KEYS) expect(isValidSharedConfigKey(key)).toBe(true);
         expect(new Set(SHARED_CONFIG_KEYS).size).toBe(SHARED_CONFIG_KEYS.length);
         // Device-level state stays in this browser: the exporter that publishes this screen to
-        // Prisma, the runtime mode and voice endpoints, the dialog tab, auth, history and caches.
+        // Leda, the runtime mode and voice endpoints, the dialog tab, auth, history and caches.
         for (const local of [
             'hmi:shared-config-cache',
             'laboratorio_hmi_hierarchy_expanded_v1',
@@ -144,12 +144,12 @@ describe('shared config domain', () => {
             'hmi-auth-session',
             'hmi-admin-exit-pending',
             'hmi-admin-revoked',
-            'hmi-prisma-voice-prebuffer-history',
+            'hmi-leda-voice-prebuffer-history',
             'hmi:snapshot-export-enabled',
             'hmi:snapshot-export-interval-ms',
             'hmi:snapshot-export-endpoint',
-            'hmi:prisma-runtime-mode',
-            'hmi:prisma-voice-tts-service-url',
+            'hmi:leda-runtime-mode',
+            'hmi:leda-voice-tts-service-url',
             'interfaz-laboratorio-ui',
             'hmi:hidden-access',
         ]) {

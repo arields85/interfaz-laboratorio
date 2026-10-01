@@ -1,0 +1,385 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The session client boundary is fully mocked: no real fetch, capability, or network here.
+const harness = vi.hoisted(() => {
+    class LedaStaleSessionResponse extends Error {}
+    return {
+        LedaStaleSessionResponse,
+        client: {
+            fetch: vi.fn<(path: string, init?: RequestInit) => Promise<Response>>(),
+            isCurrentResponse: vi.fn<(response: Response) => boolean>(),
+        },
+    };
+});
+vi.mock('./ledaSessionClient', () => ({
+    ledaSessionClient: harness.client,
+    LedaStaleSessionResponse: harness.LedaStaleSessionResponse,
+}));
+
+import { LEDA_CHANNEL_A_PAIRING_URL } from '../config/ledaAssistant.config';
+import { ledaChannelAPairing, LedaChannelAPairingError } from './ledaChannelAPairing.service';
+
+// Test-only opaque values shaped like the backend projection. Never a real credential.
+const FAKE_PAIRING_TOKEN = 'f4ke'.padEnd(43, 'x');
+const FAKE_DEEP_LINK = `https://t.me/hmi_lab_bot?start=${FAKE_PAIRING_TOKEN}`;
+const VALID_FAKE_STATUS = { ok: true, state: 'free' } as const;
+const VALID_FAKE_ISSUE = { ok: true, qr: { deepLink: FAKE_DEEP_LINK, expiresInSeconds: 42 } } as const;
+
+function knownResponse(status: number, payload: unknown): Response {
+    return new Response(JSON.stringify(payload), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+    });
+}
+
+// Fake body whose JSON resolution is deferred; bodyStarted resolves when json() is actually
+// called, so staleness can be injected deterministically after fetch without timers or loops.
+function deferredJsonResponse(status: number): {
+    response: Response;
+    body: { resolve: (value: unknown) => void };
+    bodyStarted: { promise: Promise<void> };
+} {
+    let resolve!: (value: unknown) => void;
+    const promise = new Promise<unknown>((resolvePromise) => { resolve = resolvePromise; });
+    let signalStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => { signalStarted = resolveStarted; });
+    return {
+        response: {
+            status,
+            ok: status >= 200 && status < 300,
+            json: () => {
+                signalStarted();
+                return promise;
+            },
+        } as unknown as Response,
+        body: { resolve },
+        bodyStarted: { promise: started },
+    };
+}
+
+async function caughtOf(pending: Promise<unknown>): Promise<unknown> {
+    return pending.catch((caught: unknown) => caught);
+}
+
+describe('ledaChannelAPairing.status', () => {
+    beforeEach(() => {
+        harness.client.fetch.mockReset();
+        harness.client.isCurrentResponse.mockReset();
+    });
+
+    it('issues the exact pairing GET through the session client without store, CSRF or capability duplication', async () => {
+        harness.client.fetch.mockResolvedValue(knownResponse(200, VALID_FAKE_STATUS));
+        harness.client.isCurrentResponse.mockReturnValue(true);
+
+        await expect(ledaChannelAPairing.status()).resolves.toEqual(VALID_FAKE_STATUS);
+
+        expect(harness.client.fetch).toHaveBeenCalledTimes(1);
+        expect(harness.client.fetch).toHaveBeenCalledWith(
+            LEDA_CHANNEL_A_PAIRING_URL,
+            expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+        );
+        const headers = new Headers(harness.client.fetch.mock.calls[0]?.[1]?.headers);
+        expect(headers.get('X-CSRF-Token')).toBeNull();
+        expect(headers.get('X-Leda-Session-Capability')).toBeNull();
+    });
+
+    it('forwards the caller abort signal to the session client', async () => {
+        harness.client.fetch.mockResolvedValue(knownResponse(200, VALID_FAKE_STATUS));
+        harness.client.isCurrentResponse.mockReturnValue(true);
+        const controller = new AbortController();
+
+        await ledaChannelAPairing.status(controller.signal);
+
+        expect(harness.client.fetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    });
+
+    it('keeps no cached QR or status state between calls', async () => {
+        // A fresh Response per call: a real Response body cannot be consumed twice.
+        harness.client.fetch.mockImplementation(() => Promise.resolve(knownResponse(200, VALID_FAKE_STATUS)));
+        harness.client.isCurrentResponse.mockReturnValue(true);
+
+        await ledaChannelAPairing.status();
+        await ledaChannelAPairing.status();
+
+        expect(harness.client.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('preserves a caller AbortError instead of mapping it to a pairing error', async () => {
+        harness.client.fetch.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(DOMException);
+        expect(caught).not.toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as DOMException).name).toBe('AbortError');
+    });
+
+    it('passes a session-client stale failure through untouched for the local lifecycle guard', async () => {
+        harness.client.fetch.mockRejectedValue(new harness.LedaStaleSessionResponse('stale epoch'));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(harness.LedaStaleSessionResponse);
+        expect(caught).not.toBeInstanceOf(LedaChannelAPairingError);
+    });
+
+    it('fails stale when the response epoch is no longer current before the body is consumed', async () => {
+        harness.client.fetch.mockResolvedValue(knownResponse(200, VALID_FAKE_STATUS));
+        harness.client.isCurrentResponse.mockReturnValue(false);
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(harness.LedaStaleSessionResponse);
+        expect(caught).not.toBeInstanceOf(LedaChannelAPairingError);
+    });
+});
+
+describe('ledaChannelAPairing.issue', () => {
+    beforeEach(() => {
+        harness.client.fetch.mockReset();
+        harness.client.isCurrentResponse.mockReset();
+    });
+
+    it('issues the exact pairing POST with an empty JSON object and no store', async () => {
+        harness.client.fetch.mockResolvedValue(knownResponse(200, VALID_FAKE_ISSUE));
+        harness.client.isCurrentResponse.mockReturnValue(true);
+
+        await expect(ledaChannelAPairing.issue()).resolves.toEqual(VALID_FAKE_ISSUE);
+
+        const init = harness.client.fetch.mock.calls[0]?.[1] ?? {};
+        expect(harness.client.fetch).toHaveBeenCalledTimes(1);
+        expect(harness.client.fetch).toHaveBeenCalledWith(
+            LEDA_CHANNEL_A_PAIRING_URL,
+            expect.objectContaining({ method: 'POST', cache: 'no-store', body: '{}' }),
+        );
+        expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
+    });
+
+    it('refuses a stale QR whose epoch changed while the deferred body was being resolved', async () => {
+        const { response, body, bodyStarted } = deferredJsonResponse(200);
+        harness.client.fetch.mockResolvedValue(response);
+        harness.client.isCurrentResponse.mockReturnValue(true);
+
+        const pending = ledaChannelAPairing.issue();
+        await bodyStarted.promise;
+        harness.client.isCurrentResponse.mockReturnValue(false);
+        body.resolve(VALID_FAKE_ISSUE);
+        const caught = await caughtOf(pending);
+
+        expect(caught).toBeInstanceOf(harness.LedaStaleSessionResponse);
+        expect(caught).not.toBeInstanceOf(LedaChannelAPairingError);
+    });
+});
+
+describe('ledaChannelAPairing error mapping', () => {
+    beforeEach(() => {
+        harness.client.fetch.mockReset();
+        harness.client.isCurrentResponse.mockReset();
+        harness.client.isCurrentResponse.mockReturnValue(true);
+    });
+
+    it('maps a 401 response to the session kind even though the real client already invalidated the epoch', async () => {
+        // Actual ledaSessionClient behavior: a 401 invalidates the capability BEFORE the
+        // response is returned, so isCurrentResponse is already false. The service must still
+        // surface the session kind, never a stale QR and never a stale failure for this case.
+        harness.client.isCurrentResponse.mockReturnValue(false);
+        harness.client.fetch.mockResolvedValue(knownResponse(401, { ok: false, error: 'LEDA_SESSION_REQUIRED' }));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('session');
+        expect(caught).not.toBeInstanceOf(harness.LedaStaleSessionResponse);
+    });
+
+    it('maps a 401 response to the session kind even without a readable payload', async () => {
+        harness.client.fetch.mockResolvedValue(new Response('{', { status: 401 }));
+
+        const caught = await caughtOf(ledaChannelAPairing.issue());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('session');
+    });
+
+    it('maps a 409 response carrying exactly the canonical conflict payload to the conflict kind', async () => {
+        harness.client.fetch.mockResolvedValue(
+            knownResponse(409, { ok: false, error: 'LEDA_CHANNEL_A_CONFLICT' }),
+        );
+
+        const caught = await caughtOf(ledaChannelAPairing.issue());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('conflict');
+    });
+
+    it.each([
+        ['the status endpoint', () => ledaChannelAPairing.status(), VALID_FAKE_STATUS],
+        ['the issue endpoint', () => ledaChannelAPairing.issue(), VALID_FAKE_ISSUE],
+    ])('never returns a structurally valid success payload from a 503 response on %s', async (_name, call, payload) => {
+        // HTTP failure semantics are frozen: a non-success status is unavailable BEFORE any
+        // body parsing, even when the body itself would parse as a valid status or QR.
+        harness.client.fetch.mockResolvedValue(knownResponse(503, payload));
+
+        const caught = await caughtOf(call());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+
+    it('rethrows an AbortError raised while reading the body instead of mapping it', async () => {
+        const abort = new DOMException('Aborted', 'AbortError');
+        harness.client.fetch.mockResolvedValue({
+            status: 200,
+            ok: true,
+            json: () => Promise.reject(abort),
+        } as unknown as Response);
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBe(abort);
+        expect(caught).not.toBeInstanceOf(LedaChannelAPairingError);
+    });
+
+    it.each([
+        ['a different error code', knownResponse(409, { ok: false, error: 'SOMETHING_ELSE' })],
+        ['a 409 without the error key', knownResponse(409, { ok: false })],
+        ['a 409 with the canonical code plus an extra key', knownResponse(409, { ok: false, error: 'LEDA_CHANNEL_A_CONFLICT', extra: 1 })],
+        ['a 409 with malformed JSON', new Response('{', { status: 409 })],
+    ])('maps %s to the safe unavailable kind instead of conflict', async (_name, response) => {
+        harness.client.fetch.mockResolvedValue(response);
+
+        const caught = await caughtOf(ledaChannelAPairing.issue());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+
+    it.each([
+        ['lifecycle unavailable with 502', 502, { ok: false, error: 'LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE' }],
+        ['manager unavailable with 503', 503, { ok: false, error: 'LEDA_CHANNEL_A_MANAGER_UNAVAILABLE' }],
+        ['a 200 body failing the domain parser', 200, { ok: true, state: 'frobnicate' }],
+        ['a 200 body with extra keys', 200, { ok: true, state: 'free', qr: VALID_FAKE_ISSUE.qr }],
+    ])('maps %s to the safe unavailable kind', async (_name, status, payload) => {
+        harness.client.fetch.mockResolvedValue(knownResponse(status, payload));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+
+    it('never propagates raw server failure text into the pairing error', async () => {
+        harness.client.fetch.mockResolvedValue(
+            knownResponse(500, { ok: false, error: 'SUPER_SECRET_INTERNAL_TRACE' }),
+        );
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+        expect((caught as LedaChannelAPairingError).message).not.toContain('SUPER_SECRET');
+    });
+
+    it('maps a malformed JSON success body to the safe unavailable kind', async () => {
+        harness.client.fetch.mockResolvedValue(new Response('{', { status: 200 }));
+
+        const caught = await caughtOf(ledaChannelAPairing.issue());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+
+    it('maps a rejected fetch (the runtime itself unreachable) to the runtime_unreachable kind', async () => {
+        harness.client.fetch.mockRejectedValue(new TypeError('NETWORK_DOWN'));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as LedaChannelAPairingError).message).not.toContain('NETWORK_DOWN');
+    });
+
+    it.each([
+        ['a 500 with an empty body (Vite dev proxy default error page on ECONNREFUSED)', new Response('', { status: 500 })],
+        ['a 502 with a plain-text body', new Response('Bad Gateway', { status: 502, headers: { 'Content-Type': 'text/plain' } })],
+    ])('maps %s to the runtime_unreachable kind instead of the runtime-reported unavailable kind', async (_name, response) => {
+        harness.client.fetch.mockResolvedValue(response);
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('runtime_unreachable');
+    });
+
+    it('still maps a non-2xx response carrying a valid (if unexpected) JSON body to the unavailable kind, never runtime_unreachable', async () => {
+        // A real runtime-produced JSON error body proves the runtime WAS reached; only a
+        // missing/invalid JSON body signals the dev proxy's own failure response.
+        harness.client.fetch.mockResolvedValue(knownResponse(503, { ok: false, error: 'LEDA_CHANNEL_A_LIFECYCLE_UNAVAILABLE' }));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+
+    it('maps the dev proxy runtime_unreachable JSON marker to runtime_unreachable with its port_in_use detail, even though the body is valid JSON', async () => {
+        // T4b: the proxy's own structured marker takes precedence over the generic "non-2xx
+        // with valid JSON = unavailable" rule above, because this body was never produced by
+        // the Leda runtime itself.
+        harness.client.fetch.mockResolvedValue(knownResponse(503, {
+            error: 'leda_runtime_unreachable',
+            reason: 'port_in_use',
+            port: 5057,
+        }));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as LedaChannelAPairingError).detail).toEqual({ reason: 'port_in_use', port: 5057 });
+    });
+
+    it('maps the bare runtime_unreachable JSON marker (no failure detail detected) with no detail', async () => {
+        harness.client.fetch.mockResolvedValue(knownResponse(503, { error: 'leda_runtime_unreachable' }));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as LedaChannelAPairingError).detail).toBeUndefined();
+    });
+
+    it.each([
+        ['an unknown reason', { error: 'leda_runtime_unreachable', reason: 'exploded', port: 5057 }],
+        ['a non-integer port', { error: 'leda_runtime_unreachable', reason: 'port_in_use', port: 70000 }],
+        ['a missing port', { error: 'leda_runtime_unreachable', reason: 'port_in_use' }],
+    ])('drops the detail (but keeps runtime_unreachable) when the marker has %s', async (_label, payload) => {
+        harness.client.fetch.mockResolvedValue(knownResponse(503, payload));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect((caught as LedaChannelAPairingError).kind).toBe('runtime_unreachable');
+        expect((caught as LedaChannelAPairingError).detail).toBeUndefined();
+    });
+
+    it('never treats a 2xx body carrying the runtime_unreachable marker shape as anything but a normal parse failure', async () => {
+        // The marker only ever applies to a non-2xx response (the proxy's own error page); a
+        // successful response is parsed by the normal success path regardless of its shape.
+        harness.client.fetch.mockResolvedValue(knownResponse(200, { error: 'leda_runtime_unreachable' }));
+
+        const caught = await caughtOf(ledaChannelAPairing.status());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+
+    it('keeps a 409 with malformed JSON mapped to the unavailable kind, never runtime_unreachable', async () => {
+        // The 409 conflict branch is classified independently of body-parse malformation.
+        harness.client.fetch.mockResolvedValue(new Response('{', { status: 409 }));
+
+        const caught = await caughtOf(ledaChannelAPairing.issue());
+
+        expect(caught).toBeInstanceOf(LedaChannelAPairingError);
+        expect((caught as LedaChannelAPairingError).kind).toBe('unavailable');
+    });
+});
