@@ -7,8 +7,8 @@ import { sharedConfigStorage } from '../services/sharedConfigStorage.service';
 // La HMI no sabe ni le importa si detrás hay Node-RED, RabbitMQ u otra cosa.
 // Solo conoce: baseUrl + endpoint → URL final.
 //
-// Las claves de localStorage se mantienen por compatibilidad con configs
-// guardadas existentes. Si se renombran, los usuarios pierden su config.
+// Persistido en la configuración compartida del servidor. Las claves se mantienen por
+// compatibilidad con configs guardadas existentes. Si se renombran, se pierde su config.
 //
 // Contrato oficial: docs/DATA_CONTRACT.md §4
 // =============================================================================
@@ -64,7 +64,7 @@ export function getDataBaseUrl(): string | null {
         const fromStorage = normalizeUrl(stored);
         if (fromStorage) return fromStorage;
     } catch {
-        // localStorage unavailable
+        // shared configuration unavailable
     }
 
     const fromEnv = import.meta.env.VITE_NODE_RED_BASE_URL as string | undefined;
@@ -105,7 +105,7 @@ export function getDataEndpoint(): string {
             return '/' + stripLeadingSlashes(stored.trim());
         }
     } catch {
-        // localStorage unavailable
+        // shared configuration unavailable
     }
     return DATA_DEFAULT_ENDPOINT;
 }
@@ -138,7 +138,7 @@ export function getDataHistoryEndpoint(): string | null {
             return '/' + stripLeadingSlashes(stored.trim());
         }
     } catch {
-        // localStorage unavailable
+        // shared configuration unavailable
     }
     return DATA_DEFAULT_HISTORY_ENDPOINT;
 }
@@ -175,7 +175,7 @@ export function getDataActivitySeriesEndpoint(): string | null {
             return trimmed === '' ? null : '/' + stripLeadingSlashes(trimmed);
         }
     } catch {
-        // localStorage unavailable
+        // shared configuration unavailable
     }
 
     return DATA_DEFAULT_ACTIVITY_SERIES_ENDPOINT;

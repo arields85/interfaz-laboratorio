@@ -8,6 +8,7 @@ import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 import TemporalSettingsTab from './TemporalSettingsTab';
 import ThemeSettingsTab from './ThemeSettingsTab';
 import VoiceSettingsTab from './VoiceSettingsTab';
+import { useHoldSharedConfigReapply } from '../../hooks/useHoldSharedConfigReapply';
 import { SAVE_STATUS_UI, type SaveStatus } from './saveStatus';
 
 const TABS = [
@@ -60,6 +61,9 @@ export default function GlobalSettingsDialog({ open, onClose }: GlobalSettingsDi
     };
     const activeTabDirty = dirtyByTab[activeTab];
     const anyTabDirty = Object.values(dirtyByTab).some(Boolean);
+    // Unsaved drafts (Diseño and Tema preview live on the document) must not be overwritten by a
+    // change another browser saved: it is applied once the drafts are saved or discarded.
+    useHoldSharedConfigReapply(anyTabDirty);
 
     const updateTabSaveStatus = useCallback((tabId: TabId, status: SaveStatus) => {
         setSaveStatusByTab((previous) => (

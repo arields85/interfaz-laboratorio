@@ -3,12 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
 import App from './App.tsx'
-import { applyThemeOverrides } from './components/admin/DesignSettingsTab'
-import { applyThemeStyleOverrides } from './services/themeStyle.service'
-import { applyViewerEntranceOverrides } from './services/viewerEntranceStyle.service'
-import { applyFrameShapeOverrides } from './services/frameShape.service'
-import { applyIconCutoutOverride } from './services/iconCutout.service'
-import { applyLinkAccentGeometryOverride, applyLinkAccentLengthsOverride, applyLinkCornerAccentsOverride } from './services/linkCornerAccents.service'
+import { applySharedConfigToDocument, startSharedConfigReapply } from './app/sharedConfigAppliers'
 import { cleanupLegacyStorage } from './utils/legacyStorageCleanup'
 import { prismaSessionClient } from './services/prismaSessionClient'
 import { sharedConfigStorage } from './services/sharedConfigStorage.service'
@@ -32,14 +27,9 @@ async function bootstrap(): Promise<void> {
   sharedConfigStorage.startPolling()
 
   cleanupLegacyStorage()
-  applyThemeOverrides()
-  applyThemeStyleOverrides()
-  applyViewerEntranceOverrides()
-  applyFrameShapeOverrides()
-  applyIconCutoutOverride()
-  applyLinkCornerAccentsOverride()
-  applyLinkAccentLengthsOverride()
-  applyLinkAccentGeometryOverride()
+  applySharedConfigToDocument()
+  // Another browser's saved change reaches this one within a poll interval and is applied live.
+  startSharedConfigReapply({ queryClient })
   void prismaSessionClient.bootstrap().catch(() => undefined)
   // T16: registered before the session-reset pagehide listener below, so its
   // own pagehide flush (browser voice timeline diagnostics) runs first --
