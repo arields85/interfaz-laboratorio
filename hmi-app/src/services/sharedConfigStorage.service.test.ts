@@ -180,6 +180,21 @@ describe('sharedConfigStorage', () => {
             await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
             expect(writeSharedConfig).not.toHaveBeenCalled();
         });
+
+        it('rejects a value whose escaped form would exceed the request bound, before queueing it', async () => {
+            const { storage, writeSharedConfig } = createHarness();
+            await storage.load();
+
+            // Under the raw value limit, but every control character escapes to six bytes.
+            const escapeHeavy = ''.repeat(MAX_SHARED_CONFIG_VALUE_BYTES);
+            storage.setItem('hmi:escaped', escapeHeavy);
+
+            expect(storage.getStatus().saveError).toMatchObject({ code: 'SHARED_CONFIG_VALUE_TOO_LARGE' });
+            expect(storage.getItem('hmi:escaped')).toBeNull();
+            expect(storage.getStatus().unsavedKeyCount).toBe(0);
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
+            expect(writeSharedConfig).not.toHaveBeenCalled();
+        });
     });
 
     describe('writes', () => {

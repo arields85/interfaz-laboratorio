@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConfigStoragePort } from '../domain/sharedConfig.types';
-import { makeDashboard, makeTemplate } from '../test/fixtures/dashboard.fixture';
+import { makeDashboard, makeTemplate, makeWidget } from '../test/fixtures/dashboard.fixture';
 import {
     DASHBOARDS_STORAGE_KEY,
     HIERARCHY_EXPANDED_STORAGE_KEY,
@@ -119,10 +119,17 @@ describe('content stores over the shared configuration port', () => {
         const created = service.create({ id: 'var-1', name: 'Temperatura', unit: '°C' } as never);
         await vi.advanceTimersByTimeAsync(0);
         await created;
-        data.set(DASHBOARDS_STORAGE_KEY, JSON.stringify([makeDashboard({ id: 'dashboard-uses-var', name: 'Usa variable' })]));
+        data.set(DASHBOARDS_STORAGE_KEY, JSON.stringify([
+            makeDashboard({
+                id: 'dashboard-uses-var',
+                name: 'Usa variable',
+                widgets: [makeWidget({ id: 'widget-uses-var', binding: { catalogVariableId: 'var-1' } as never })],
+            }),
+            makeDashboard({ id: 'dashboard-other', name: 'Sin variable' }),
+        ]));
 
         expect(JSON.parse(data.get(VARIABLE_CATALOG_STORAGE_KEY) ?? '[]')).toEqual([expect.objectContaining({ id: 'var-1' })]);
-        await expect(service.getAffectedDashboards('var-1')).resolves.toEqual([]);
+        await expect(service.getAffectedDashboards('var-1')).resolves.toEqual([{ id: 'dashboard-uses-var', name: 'Usa variable' }]);
         expect(localStorage.length).toBe(0);
     });
 });

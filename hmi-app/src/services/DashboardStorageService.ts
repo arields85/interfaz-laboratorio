@@ -13,6 +13,8 @@ import {
 
 const DEFAULT_DASHBOARD_ASPECT = '16:9' as const;
 const DEFAULT_DASHBOARD_ROWS = DEFAULT_ROWS;
+// Reads migrate in memory and must be repeatable: a dashboard with no timestamp gets the epoch, never the clock.
+const STABLE_MIGRATION_TIMESTAMP = new Date(0).toISOString();
 
 // =============================================================================
 // DashboardStorageService
@@ -83,7 +85,7 @@ export class DashboardStorageService {
                     headerConfig: dashboard.headerConfig
                         ? JSON.parse(JSON.stringify(dashboard.headerConfig))
                         : undefined,
-                    publishedAt: dashboard.lastUpdateAt ?? new Date().toISOString(),
+                    publishedAt: dashboard.lastUpdateAt ?? STABLE_MIGRATION_TIMESTAMP,
                 };
                 continue;
             }

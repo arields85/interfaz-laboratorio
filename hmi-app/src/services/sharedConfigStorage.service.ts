@@ -91,6 +91,12 @@ function toWire(chunk: ReadonlyMap<string, string | null>): SharedConfigBatch {
     return wire;
 }
 
+// A value under the raw limit can still escape past the request bound when sent alone: refuse it
+// before queueing, since the server would reject it for good.
+function fitsInOneRequest(key: string, value: string): boolean {
+    return EMPTY_WIRE_BYTES + jsonBytes(key) + 2 + jsonBytes(value) <= MAX_SHARED_CONFIG_REQUEST_BYTES;
+}
+
 /** Splits staged edits so every request respects the server's operation and size bounds. */
 function splitIntoChunks(batch: ReadonlyMap<string, string | null>): Array<Map<string, string | null>> {
     const chunks: Array<Map<string, string | null>> = [];
@@ -167,7 +173,7 @@ export class SharedConfigStorage {
             this.setSaveError({ code: 'SHARED_CONFIG_INVALID_KEY', status: null });
             return;
         }
-        if (!isSharedConfigValueWithinLimit(value)) {
+        if (!isSharedConfigValueWithinLimit(value) || !fitsInOneRequest(key, value)) {
             this.setSaveError({ code: 'SHARED_CONFIG_VALUE_TOO_LARGE', status: null });
             return;
         }

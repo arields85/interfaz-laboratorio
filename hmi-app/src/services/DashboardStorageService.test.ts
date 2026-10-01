@@ -272,6 +272,29 @@ describe('DashboardStorageService', () => {
         }));
     });
 
+    it('synthesizes the same published snapshot on every read when the dashboard has no timestamp', async () => {
+        localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify([
+            makeDashboard({
+                id: 'dashboard-no-timestamp',
+                status: 'published',
+                ownerNodeId: 'node-1',
+                publishedSnapshot: undefined,
+                lastUpdateAt: undefined,
+            }),
+        ]));
+
+        const first = dashboardStorage.getDashboard('dashboard-no-timestamp');
+        await vi.advanceTimersByTimeAsync(200);
+        const firstRead = await first;
+        vi.setSystemTime(new Date('2031-01-01T00:00:00.000Z'));
+        const second = dashboardStorage.getDashboard('dashboard-no-timestamp');
+        await vi.advanceTimersByTimeAsync(200);
+        const secondRead = await second;
+
+        expect(firstRead?.publishedSnapshot?.publishedAt).toBeTruthy();
+        expect(secondRead?.publishedSnapshot?.publishedAt).toBe(firstRead?.publishedSnapshot?.publishedAt);
+    });
+
     it('backfills missing published snapshot aspect, cols, and rows during migration', async () => {
         localStorage.setItem(DASHBOARDS_STORAGE_KEY, JSON.stringify([
             makeDashboard({
