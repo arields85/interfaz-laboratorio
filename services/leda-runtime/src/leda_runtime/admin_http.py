@@ -147,6 +147,9 @@ CHANNEL_A_MANAGER_ERROR_STATUS = {
     LEDA_CHANNEL_A_UNAUTHORIZED: 502,
 }
 
+# Longest textual IPv6 form (with an IPv4-mapped tail) is 45 characters.
+MAX_CLIENT_ADDRESS_CHARACTERS = 45
+
 
 @dataclass(frozen=True)
 class TransportPolicy:
@@ -340,6 +343,30 @@ class AdminHttpBoundary:
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    def _client_source(self) -> str:
+        """Client address used as the login/password-change rate-limit source.
+
+        Behind nginx every peer is loopback, so ``remote_addr`` alone would put all clients in one
+        budget. ``X-Real-IP`` (set, not appended, by nginx) is trusted only when the TCP peer is
+        loopback, a valid production origin is configured, and the value is exactly one IP address;
+        anything else falls back to the peer address (dev with Vite keeps working unchanged).
+        """
+        peer = request.remote_addr or ""
+        if not (self.transport.valid and self.transport.public_origin):
+            return peer
+        try:
+            if not ipaddress.ip_address(peer).is_loopback:
+                return peer
+        except ValueError:
+            return peer
+        header = request.headers.get("X-Real-IP", "")
+        if not header or len(header) > MAX_CLIENT_ADDRESS_CHARACTERS or header != header.strip():
+            return peer
+        try:
+            return str(ipaddress.ip_address(header))
+        except ValueError:
+            return peer
+
     def _allow(self, *, require_origin: bool):
         if not self.transport.valid:
             return self._error("AUTH_CONFIGURATION_INVALID", 503)
@@ -524,7 +551,7 @@ class AdminHttpBoundary:
             if not isinstance(username, str) or not isinstance(password, str) or not isinstance(takeover, bool):
                 return self._error("INVALID_LOGIN_REQUEST", 400)
             try:
-                session = self.auth_service.login(username, password, request.remote_addr or "", takeover=takeover)
+                session = self.auth_service.login(username, password, self._client_source(), takeover=takeover)
             except AuthNotConfigured:
                 return self._error("AUTH_NOT_CONFIGURED", 503)
             except LoginRateLimited:
@@ -605,7 +632,7 @@ class AdminHttpBoundary:
                 return self._error("INVALID_PASSWORD_CHANGE_REQUEST", 400)
             try:
                 outcome = self.auth_service.change_password(
-                    session.session_id, payload["currentPassword"], payload["newPassword"], request.remote_addr or ""
+                    session.session_id, payload["currentPassword"], payload["newPassword"], self._client_source()
                 )
             except PasswordPolicyError as error:
                 return self._error(str(error), 400)

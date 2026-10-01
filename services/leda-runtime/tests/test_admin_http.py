@@ -634,6 +634,135 @@ class AdminHttpTests(unittest.TestCase):
         self.assertEqual(client.get("/api/leda/admin/auth/session").status_code, 200)
         self.assertEqual(self.login_with(self.client(), takeover=True).status_code, 200)
 
+    PROXY_ORIGIN = "https://hmi.example.test"
+
+    def failed_login(self, client, *, real_ip=None, remote_addr="127.0.0.1", origin=None, host="127.0.0.1:5057"):
+        headers = {"Origin": origin or "http://127.0.0.1:5173"}
+        if real_ip is not None:
+            headers["X-Real-IP"] = real_ip
+        return client.post(
+            "/api/leda/admin/auth/login",
+            json={"username": "admin", "password": "wrong but sufficiently long password"},
+            headers=headers,
+            environ_overrides={"REMOTE_ADDR": remote_addr, "HTTP_HOST": host},
+        )
+
+    def exhaust_budget(self, client, **kwargs) -> None:
+        for _ in range(5):
+            self.assertEqual(self.failed_login(client, **kwargs).status_code, 401)
+        self.assertEqual(self.failed_login(client, **kwargs).status_code, 429)
+
+    def test_x_real_ip_is_the_rate_limit_source_behind_the_proxy(self) -> None:
+        client = self.client(public_origin=self.PROXY_ORIGIN)
+        proxied = {"origin": self.PROXY_ORIGIN, "host": "hmi.example.test"}
+
+        self.exhaust_budget(client, real_ip="198.51.100.7", **proxied)
+        other = self.failed_login(client, real_ip="198.51.100.8", **proxied)
+
+        self.assertEqual(other.status_code, 401)
+        with closing(sqlite3.connect(self.database)) as connection:
+            sources = {row[0] for row in connection.execute("SELECT source FROM login_failures")}
+        self.assertEqual(sources, {"198.51.100.7", "198.51.100.8"})
+
+    def test_an_exhausted_source_does_not_lock_out_the_administrator_from_another_source(self) -> None:
+        client = self.client(public_origin=self.PROXY_ORIGIN)
+        proxied = {"origin": self.PROXY_ORIGIN, "host": "hmi.example.test"}
+        self.exhaust_budget(client, real_ip="198.51.100.7", **proxied)
+
+        legitimate = client.post(
+            "/api/leda/admin/auth/login",
+            json={"username": "admin", "password": PASSWORD},
+            headers={"Origin": self.PROXY_ORIGIN, "X-Real-IP": "2001:db8::10"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "hmi.example.test"},
+        )
+
+        self.assertEqual(legitimate.status_code, 200)
+
+    def test_x_real_ip_is_ignored_without_a_production_origin(self) -> None:
+        client = self.client()
+
+        self.exhaust_budget(client, real_ip="198.51.100.7")
+
+        self.assertEqual(self.failed_login(client, real_ip="198.51.100.8").status_code, 429)
+
+    def test_x_real_ip_is_ignored_when_the_origin_configuration_is_invalid(self) -> None:
+        client = self.client(public_origin="http://hmi.example.test/path")
+
+        response = self.failed_login(client, real_ip="198.51.100.7")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.repository.count_failure_rows(), 0)
+
+    def test_x_real_ip_is_ignored_from_a_non_loopback_peer(self) -> None:
+        service = Mock()
+        service.login.side_effect = AuthNotConfigured("AUTH_NOT_CONFIGURED")
+        boundary = AdminHttpBoundary(service, public_origin=self.PROXY_ORIGIN)
+        # The transport policy rejects a non-loopback peer before the source is ever read, so the
+        # resolver is exercised directly with a forged header from a public address.
+        from flask import Flask
+
+        with Flask(__name__).test_request_context(
+            headers={"X-Real-IP": "198.51.100.7"}, environ_overrides={"REMOTE_ADDR": "203.0.113.8"}
+        ):
+            self.assertEqual(boundary._client_source(), "203.0.113.8")
+
+    def test_an_invalid_x_real_ip_falls_back_to_the_peer_address(self) -> None:
+        client = self.client(public_origin=self.PROXY_ORIGIN)
+        proxied = {"origin": self.PROXY_ORIGIN, "host": "hmi.example.test"}
+        invalid = [
+            "198.51.100.7, 198.51.100.8",
+            "198.51.100.7:443",
+            "not-an-address",
+            "",
+            " ",
+            "[2001:db8::1]",
+            "198.51.100.7 198.51.100.8",
+            "1" * 300,
+        ]
+        for value in invalid:
+            with self.subTest(value=value[:20]):
+                self.failed_login(client, real_ip=value, **proxied)
+        with closing(sqlite3.connect(self.database)) as connection:
+            sources = {row[0] for row in connection.execute("SELECT source FROM login_failures")}
+        self.assertLessEqual(sources, {"127.0.0.1"})
+
+    def test_x_real_ip_is_normalized_so_spelling_variants_share_one_budget(self) -> None:
+        client = self.client(public_origin=self.PROXY_ORIGIN)
+        proxied = {"origin": self.PROXY_ORIGIN, "host": "hmi.example.test"}
+        spellings = ["2001:db8::1", "2001:0db8:0:0:0:0:0:1", "2001:DB8::1", "2001:db8::1", "2001:db8:0::1"]
+        for value in spellings:
+            self.assertEqual(self.failed_login(client, real_ip=value, **proxied).status_code, 401)
+
+        self.assertEqual(self.failed_login(client, real_ip="2001:db8::1", **proxied).status_code, 429)
+
+    def test_password_change_uses_the_proxied_source_budget(self) -> None:
+        client = self.client(public_origin=self.PROXY_ORIGIN)
+        login = client.post(
+            "/api/leda/admin/auth/login",
+            json={"username": "admin", "password": PASSWORD},
+            headers={"Origin": self.PROXY_ORIGIN, "X-Real-IP": "198.51.100.9"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "hmi.example.test"},
+        )
+        token = login.get_json()["csrfToken"]
+        wrong = {"currentPassword": "wrong but sufficiently long password", "newPassword": self.NEW_PASSWORD}
+        kwargs = {"headers": {"Origin": self.PROXY_ORIGIN, "X-CSRF-Token": token}, "json": wrong}
+
+        def attempt(real_ip):
+            return client.post(
+                self.PASSWORD_ROUTE,
+                json=kwargs["json"],
+                headers={**kwargs["headers"], "X-Real-IP": real_ip},
+                environ_overrides={"REMOTE_ADDR": "127.0.0.1", "HTTP_HOST": "hmi.example.test"},
+            )
+
+        for _ in range(5):
+            self.assertEqual(attempt("198.51.100.9").status_code, 401)
+
+        self.assertEqual(attempt("198.51.100.9").status_code, 429)
+        with closing(sqlite3.connect(self.database)) as connection:
+            sources = {row[0] for row in connection.execute("SELECT source FROM login_failures")}
+        self.assertEqual(sources, {"198.51.100.9"})
+
 
 if __name__ == "__main__":
     unittest.main()
