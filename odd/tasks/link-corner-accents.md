@@ -73,6 +73,16 @@ registered accent custom properties.
   - Needs the browser: pixel check of the brackets 4 px outside the border (rounded corner clipping, both frame shapes, group container with link, inherited member link, reduced motion).
 - 2026-09-30 (review): native review of 6fb69eb..868fa89 (28 files / 1181 lines) APPROVED, lineage review-5133e19ceb066437; suggestions R3-link-accents-tab-shape-unproved and R3-cutout-glass-panel-guard-removed covered by 26ac07b (test-only characterization tests, no RED expected).
 
+- 2026-09-30 user live look: "en el widget grupo no funciona (o no se ve)". Diagnosed read-only in the control Chrome:
+  the layers existed (15) but a locked group is mostly covered by its member items (sibling grid items), so the group
+  item is rarely `:hover`; the viewer already marks it with `data-group-hover-target` (G5) while a member is hovered,
+  and the accents ignored it. Parent decision (stated to the user): the group's accents also light with the group hover
+  target, and a member that only INHERITS the locked group's target no longer gets its own accents (the clickable unit
+  is the group); a member with its own target keeps them. Fix (parent inline, TDD): RED 2 (viewer: inherited member
+  still had a layer; CSS: no group-hover-target rule) -> GREEN 21/21; `npx tsc -b`, `npm run lint` clean, `npm test`
+  269 files / 3572 passed, `npm run build` ok; served stylesheet checked after the single `index.css` write. Commit
+  `52fcd43`. Live pixel check of the hover still pending (the user is using the control Chrome).
+
 ## Next step
 
 Live check of the corner accents in the browser (parent), then close the feature.
