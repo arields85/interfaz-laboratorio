@@ -43,7 +43,8 @@ const ISSUE_TEXT: Record<AdminPasswordChangeIssue, string> = {
 
 const ERROR_TEXT: Record<string, string> = {
     INVALID_CURRENT_PASSWORD: 'La contraseña actual es incorrecta.',
-    PASSWORD_POLICY_REJECTED: NEW_TOO_SHORT_TEXT,
+    // The server uses one code for both bounds, so this message names both.
+    PASSWORD_POLICY_REJECTED: `La nueva contraseña debe tener al menos ${MIN_ADMIN_PASSWORD_CHARACTERS} caracteres y no superar ${MAX_ADMIN_PASSWORD_BYTES} bytes.`,
     PASSWORD_UNCHANGED: NEW_UNCHANGED_TEXT,
     LOGIN_RATE_LIMITED: 'Demasiados intentos. Intente nuevamente más tarde.',
     AUTH_STORAGE_UNAVAILABLE: 'El servicio de autenticación no está disponible.',
