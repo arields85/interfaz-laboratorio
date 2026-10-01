@@ -31,6 +31,11 @@ const TELEGRAM_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram/verify';
 const CHANNEL_A_VERIFY_ROUTE = '/api/prisma/admin/credentials/telegram_channel_a/verify';
 const SHARED_CONFIG_WRITE_ROUTE = '/api/prisma/admin/hmi-config';
 const CSRF_TOKEN_LENGTH = 43;
+export interface AdminLoginOptions {
+    signal?: AbortSignal;
+    takeover?: boolean;
+}
+
 export const SESSION_REPLACED_CODE = 'ADMIN_SESSION_REPLACED';
 export const SESSION_ACTIVE_ELSEWHERE_CODE = 'ADMIN_SESSION_ACTIVE_ELSEWHERE';
 const PUBLIC_ERROR_CODES = new Set([
@@ -198,7 +203,11 @@ export class AdminAuthClient {
     }
 
     // The runtime keeps one administrator session: `takeover` confirms closing the one open elsewhere.
-    async login(username: string, password: string, signal?: AbortSignal, takeover = false): Promise<AdministratorIdentity> {
+    async login(
+        username: string,
+        password: string,
+        { signal, takeover = false }: AdminLoginOptions = {},
+    ): Promise<AdministratorIdentity> {
         const generation = this.#generation;
         const response = await this.request(`${AUTH_ROOT}/login`, {
             method: 'POST',

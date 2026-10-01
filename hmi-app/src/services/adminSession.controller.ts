@@ -2,6 +2,7 @@ import type { AdministratorIdentity, AuthResult, AuthSession, Permission } from 
 import { UNAUTHENTICATED_SESSION, useAuthStore, type AuthStore } from '../store/auth.store';
 import {
     AdminAuthError,
+    type AdminLoginOptions,
     SESSION_ACTIVE_ELSEWHERE_CODE,
     SESSION_REPLACED_CODE,
     adminAuthClient,
@@ -20,7 +21,7 @@ const ACTIVE_ELSEWHERE_MESSAGE = 'Hay una sesión de administrador abierta en ot
 
 export interface AdminAuthGateway {
     clearPrivateSession(): void;
-    login(username: string, password: string, signal?: AbortSignal, takeover?: boolean): Promise<AdministratorIdentity>;
+    login(username: string, password: string, options?: AdminLoginOptions): Promise<AdministratorIdentity>;
     session(signal?: AbortSignal): Promise<AdministratorIdentity>;
     logout(signal?: AbortSignal): Promise<void>;
     // Fired when any request learns another login displaced this session (e.g. a shared-config write).
@@ -164,7 +165,7 @@ export class AdminSessionController {
         const { epoch, signal } = this.beginRequest();
         this.client.clearPrivateSession();
         this.state.set({ isAuthenticating: true, error: null });
-        const request = this.client.login(username, password, signal, options.takeover === true);
+        const request = this.client.login(username, password, { signal, takeover: options.takeover === true });
         const settlement = request.then(() => undefined, () => undefined);
         this.activeAuthentication = settlement;
         try {

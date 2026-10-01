@@ -35,7 +35,7 @@ describe('AdminAuthClient single administrator session', () => {
         const client = new AdminAuthClient(fetcher, () => 1_000);
 
         await client.login('admin', 'secret');
-        await client.login('admin', 'secret', undefined, true);
+        await client.login('admin', 'secret', { takeover: true });
 
         expect(bodyOf(fetcher.mock.calls[0])).toEqual({ username: 'admin', password: 'secret' });
         expect(bodyOf(fetcher.mock.calls[1])).toEqual({ username: 'admin', password: 'secret', takeover: true });
@@ -114,8 +114,8 @@ describe('AdminSessionController single administrator session', () => {
         await controller.login('admin', 'secret');
         await controller.login('admin', 'secret', { takeover: true });
 
-        expect(vi.mocked(client.login).mock.calls[0][3]).toBeFalsy();
-        expect(vi.mocked(client.login).mock.calls[1][3]).toBe(true);
+        expect(vi.mocked(client.login).mock.calls[0][2]).toMatchObject({ takeover: false });
+        expect(vi.mocked(client.login).mock.calls[1][2]).toMatchObject({ takeover: true });
         expect(state.get().session.isAuthenticated).toBe(true);
     });
 
@@ -180,5 +180,65 @@ describe('AdminSessionController single administrator session', () => {
 
         expect(state.get().sessionReplaced).toBe(false);
         expect(state.get().session.isAuthenticated).toBe(true);
+    });
+});
+
+describe('AdminSessionController replaced during bootstrap and focus validation', () => {
+    function realController(fetcher: typeof fetch) {
+        const state = createMemoryAuthStatePort();
+        const target = new EventTarget();
+        const controller = new AdminSessionController(
+            new AdminAuthClient(fetcher, () => 1_000),
+            null,
+            target as unknown as Pick<Window, 'addEventListener' | 'removeEventListener'>,
+            () => 1_000,
+            state,
+        );
+        return { controller, state, target };
+    }
+
+    it('settles hydrated, idle and flagged when the very first validation says the session was replaced', async () => {
+        const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({ ok: false, error: REPLACED }, 401)));
+        const { controller, state } = realController(fetcher);
+
+        controller.start();
+        await controller.bootstrap();
+
+        expect(state.get().isHydrated).toBe(true);
+        expect(state.get().isAuthenticating).toBe(false);
+        expect(state.get().session.isAuthenticated).toBe(false);
+        expect(state.get().sessionReplaced).toBe(true);
+        controller.stop();
+    });
+
+    it('settles the same way when the replaced answer arrives on a focus revalidation', async () => {
+        let replaced = false;
+        const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(
+            replaced ? jsonResponse({ ok: false, error: REPLACED }, 401) : jsonResponse(SESSION_BODY),
+        ));
+        const { controller, state, target } = realController(fetcher);
+        controller.start();
+        await controller.bootstrap();
+        expect(state.get().session.isAuthenticated).toBe(true);
+
+        replaced = true;
+        target.dispatchEvent(new Event('focus'));
+        await vi.waitFor(() => expect(state.get().sessionReplaced).toBe(true));
+
+        expect(state.get().isHydrated).toBe(true);
+        expect(state.get().isAuthenticating).toBe(false);
+        expect(state.get().session.isAuthenticated).toBe(false);
+        controller.stop();
+    });
+
+    it('settles when the replaced answer is handled without the client listener (controller not started)', async () => {
+        const fetcher = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse({ ok: false, error: REPLACED }, 401)));
+        const { controller, state } = realController(fetcher);
+
+        await controller.bootstrap();
+
+        expect(state.get().isHydrated).toBe(true);
+        expect(state.get().isAuthenticating).toBe(false);
+        expect(state.get().sessionReplaced).toBe(true);
     });
 });
