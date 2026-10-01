@@ -194,21 +194,20 @@ export class SharedConfigStorage {
         this.stage(key, null);
     }
 
-    getStatus(): SharedConfigStatus {
-        return this.status;
-    }
+    // Arrow properties: React's useSyncExternalStore receives these detached from the instance.
+    getStatus = (): SharedConfigStatus => this.status;
 
     /** Notified when another browser's change replaced part of the document. */
-    subscribe(listener: ChangeListener): () => void {
+    subscribe = (listener: ChangeListener): (() => void) => {
         this.changeListeners.add(listener);
         return () => { this.changeListeners.delete(listener); };
-    }
+    };
 
     /** Notified when loading, saving or the save-error state changes. */
-    subscribeStatus(listener: () => void): () => void {
+    subscribeStatus = (listener: () => void): (() => void) => {
         this.statusListeners.add(listener);
         return () => { this.statusListeners.delete(listener); };
-    }
+    };
 
     /** Resends every unsaved edit now; with nothing to resend it clears a stale error. */
     async retrySave(): Promise<void> {

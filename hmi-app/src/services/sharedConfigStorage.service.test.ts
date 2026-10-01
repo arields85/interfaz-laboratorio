@@ -90,6 +90,17 @@ describe('sharedConfigStorage', () => {
     beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.useRealTimers(); });
 
+    it('keeps its status and subscription methods usable when detached (useSyncExternalStore passes them unbound)', async () => {
+        const { storage } = createHarness({ items: {}, revision: 1 });
+        await storage.load();
+        const { getStatus, subscribeStatus, subscribe } = storage;
+
+        expect(getStatus()).toMatchObject({ loaded: true, revision: 1 });
+        const unsubscribeStatus = subscribeStatus(() => undefined);
+        const unsubscribe = subscribe(() => undefined);
+        expect(() => { unsubscribeStatus(); unsubscribe(); }).not.toThrow();
+    });
+
     describe('load', () => {
         it('reads the server document and records the source, revision and cache copy', async () => {
             const { storage, cache } = createHarness({ items: { 'hmi:a': '1' }, revision: 4 });
