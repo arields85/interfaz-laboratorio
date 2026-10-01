@@ -61,7 +61,7 @@ Implement it before the first server deployment.
 
 ## Decisions
 
-- **Policy.** One function, `password_bytes()` in `admin_auth.py`, now serves the hasher (CLI provision/reset) and the service. Bounds are the constants `MIN_PASSWORD_CHARACTERS = 15` and `MAX_PASSWORD_BYTES = 1024`. The client mirrors them in `domain/adminPasswordPolicy.types.ts`, and a test reads the Python constants to pin them.
+- **Policy.** One function, `password_bytes()` in `admin_auth.py`, now serves the hasher (CLI provision/reset) and the service. Bounds are the constants `MIN_PASSWORD_CHARACTERS = 10` and `MAX_PASSWORD_BYTES = 1024`. The client mirrors them in `domain/adminPasswordPolicy.types.ts`, and a test reads the Python constants to pin them.
 - **Order of checks.** Policy and "same as current" (`400 PASSWORD_POLICY_REJECTED` / `PASSWORD_UNCHANGED`) come first and spend no login attempt, so they say nothing about the current password. Then the login rate limit, then the current password (`401 INVALID_CURRENT_PASSWORD`, counted as a failure; a verified change clears the budget).
 - **Atomicity.** One `BEGIN IMMEDIATE` transaction checks the credential version and that the caller's session is still live, updates the hash and version, and deletes every other session. A concurrent reset or logout wins (`401 AUTHENTICATION_REQUIRED`); any storage failure rolls everything back (`503`).
 - **Revoked sessions get plain `AUTHENTICATION_REQUIRED`, not `ADMIN_SESSION_REPLACED`.** The replaced marker means "another login took your place" and the client says exactly that. A password change by the same administrator is not that, and it matches the CLI reset, which also leaves no marker. Side benefit: no write to `replaced_sessions`.
@@ -80,6 +80,7 @@ Implement it before the first server deployment.
     - The overhead comment cites a literal.
     - The backdrop-close assertion after settling is vacuous.
     - There is no exact-limit test for MAX_PASSWORD_CHANGE_REQUEST_BYTES.
+  - Decision 2026-10-01 (user): admin password minimum lowered from 15 to 10 characters (second factor is backlog PW-023); after a successful change the dialog's secondary button reads "Cerrar". Commit d1d1e4c. RED: 1 Python failure (15 != 10) and 6 vitest failures; GREEN: test_admin_auth 46 OK, 2 vitest files 31 passed, full hmi-app 3870 passed, offline backend gate 1900 OK. Existing passwords are unaffected: only provisioning/reset/change pass provisioning=True; login verification enforces the byte ceiling only.
 
 ## Status
 
