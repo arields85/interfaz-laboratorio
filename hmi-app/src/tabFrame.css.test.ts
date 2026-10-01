@@ -17,6 +17,17 @@ function ruleBody(selectorPattern: string): string {
     return rule?.[1] ?? '';
 }
 
+/**
+ * Hex colors left in a CSS block once comments are stripped. Only the white base of a `color-mix(in srgb, #fff ...)`
+ * tint is allowed: it is the one color the frame tokens are tinted from.
+ */
+function hardcodedHexColors(css: string): string[] {
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const withoutWhiteBase = withoutComments.replace(/color-mix\(in srgb, #fff\b/g, 'color-mix(in srgb,');
+
+    return withoutWhiteBase.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+}
+
 describe('index.css tab frame shape', () => {
     it('defines the geometry and color tokens with the measured defaults next to the frame tokens', () => {
         const root = indexCss.match(/:root\s*{([^}]*--tab-frame-height[^}]*)}/s)?.[1] ?? '';
@@ -224,11 +235,18 @@ describe('index.css tab frame shape', () => {
         expect(ruleBody('\\.hmi-tab-frame-header-clearance')).toContain('height: var(--tab-frame-header-clearance, 0px);');
     });
 
-    it('does not hardcode colors in the tab rules other than the fill token definition', () => {
+    it('does not hardcode colors in the tab rules other than the white base of its color-mix tints', () => {
         const block = indexCss.slice(indexCss.indexOf('Forma del marco: Pestaña (reglas)'));
 
         expect(block.length).toBeGreaterThan(0);
-        expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b(?!\s*var)/);
+        expect(hardcodedHexColors(block)).toEqual([]);
+    });
+
+    it('the hex guard flags a hex color even when a var() follows it, and ignores comments', () => {
+        expect(hardcodedHexColors('a { color: #ff0000 var(--x); }')).toEqual(['#ff0000']);
+        expect(hardcodedHexColors('a { border: 1px solid #abc; }')).toEqual(['#abc']);
+        expect(hardcodedHexColors('a { color: color-mix(in srgb, #fff var(--frame-border), transparent); }')).toEqual([]);
+        expect(hardcodedHexColors('/* #ff0000 */ a { color: var(--x); }')).toEqual([]);
     });
 
     it('leaves the viewer entrance flash clip to the inline path: no polygon rule for the tab flash remains', () => {
