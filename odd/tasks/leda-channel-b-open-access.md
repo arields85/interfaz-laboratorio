@@ -76,6 +76,12 @@ Strict mode ON (source: global user configuration). Runners:
   - Native review (slice `a15ac95..d362da4`, medium, `slice_budget_reached`): granted under standing consent, one reliability lens, **approved** and acknowledged (lineage `review-b6f8a7aa524fd8a4`, authority burned). The next reviewed boundary is `d362da4`.
   - Advisory findings, non-blocking, folded into B2: `R3-pair-timestamp-roundtrip` (`local_presentation.py:955-956`) and `R3-v2-migration-clock-unstable` (`telegram_lifecycle.py:108`, the v2 migration stamps a new time on every read until the first write).
 - 2026-10-01: B2 done in `3fd64e6` (delegated writer). RED: 15 of 32 tests in the new `ChannelBAdmissionTests` and the repository operations tests failed (no admission replies, no pending cap, no approval notice, the bot still wrote whole-state, v2 reads re-stamped times). GREEN: full runtime suite 1938 tests OK (clean env, temp `LEDA_RUNTIME_STATE_DIR`). The bot now reads admission fresh on every message, persists only through `add_pending`, `update` and `set_offset`, and exposes `send_approval_notice(chat_id) -> bool` for B4. The v2 migration is persisted on the first read (R3 findings folded in). Test doubles are now `TelegramStateRepository` subclasses over a dict.
+  - Parent spot check: `test_telegram_*.py` re-run, 191 OK.
+  - Native review (slice `d362da4..7ba6fbe`, medium, `slice_budget_reached`): granted under standing consent, one reliability lens, **approved** and acknowledged (lineage `review-db9ecb038d26aa8a`, authority burned). The next reviewed boundary is `7ba6fbe`.
+  - Advisory findings, non-blocking, folded into B3/B4:
+    - `R3-v2-read-now-writes` (`telegram_lifecycle.py:185-188`): `read()` writes the migrated file, so a read has a side effect. It must stay under the lock and be idempotent, and the admin list must cope with it.
+    - `R3-add-pending-result-ignored` (`local_presentation.py:974-975`): the pending-cap check and `add_pending` are two separate steps. Do them in one locked `update`.
+    - `R3-approval-notice-cross-thread` (`local_presentation.py:979-981`): `send_approval_notice` will be called from the admin HTTP thread. Make the send safe across threads.
 
 ## Acceptance criteria
 
