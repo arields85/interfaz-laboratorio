@@ -70,6 +70,21 @@ describe('AdminPasswordChangeDialog', () => {
         expect(client.changePassword).not.toHaveBeenCalled();
     });
 
+    it('refuses a new password over the byte ceiling with a plain message, without calling the server', async () => {
+        const { client, user } = setup();
+        const tooLong = 'x'.repeat(1025);
+        await user.type(currentField(), CURRENT);
+        await user.click(newField());
+        await user.paste(tooLong);
+        await user.click(confirmField());
+        await user.paste(tooLong);
+
+        await user.click(submit());
+
+        expect(screen.getByRole('alert')).toHaveTextContent(/^La nueva contraseña es demasiado larga\.$/);
+        expect(client.changePassword).not.toHaveBeenCalled();
+    });
+
     it('sends the passwords, clears every field and confirms on success', async () => {
         const { client, controller, user } = setup();
         client.changePassword.mockResolvedValue(undefined);
@@ -100,7 +115,7 @@ describe('AdminPasswordChangeDialog', () => {
     });
 
     it.each([
-        ['PASSWORD_POLICY_REJECTED', 400, /al menos 10 caracteres/],
+        ['PASSWORD_POLICY_REJECTED', 400, /^La nueva contraseña debe tener al menos 10 caracteres\.$/],
         ['PASSWORD_UNCHANGED', 400, /distinta de la actual/],
         ['LOGIN_RATE_LIMITED', 429, /Demasiados intentos/],
         ['AUTH_STORAGE_UNAVAILABLE', 503, /servicio de autenticación no está disponible/],

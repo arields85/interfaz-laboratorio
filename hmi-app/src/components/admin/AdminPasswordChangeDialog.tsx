@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
 
 import {
-    MAX_ADMIN_PASSWORD_BYTES,
     MIN_ADMIN_PASSWORD_CHARACTERS,
     validateAdminPasswordChange,
     type AdminPasswordChangeIssue,
@@ -36,15 +35,17 @@ const NEW_UNCHANGED_TEXT = 'La nueva contraseña debe ser distinta de la actual.
 const ISSUE_TEXT: Record<AdminPasswordChangeIssue, string> = {
     CURRENT_REQUIRED: 'Ingrese su contraseña actual.',
     NEW_TOO_SHORT: NEW_TOO_SHORT_TEXT,
-    NEW_TOO_LARGE: `La nueva contraseña no puede superar ${MAX_ADMIN_PASSWORD_BYTES} bytes.`,
+    // The ceiling is in bytes (MAX_ADMIN_PASSWORD_BYTES); a user-facing unit would only confuse.
+    NEW_TOO_LARGE: 'La nueva contraseña es demasiado larga.',
     NEW_UNCHANGED: NEW_UNCHANGED_TEXT,
     CONFIRMATION_MISMATCH: 'La confirmación no coincide con la nueva contraseña.',
 };
 
 const ERROR_TEXT: Record<string, string> = {
     INVALID_CURRENT_PASSWORD: 'La contraseña actual es incorrecta.',
-    // The server uses one code for both bounds, so this message names both.
-    PASSWORD_POLICY_REJECTED: `La nueva contraseña debe tener al menos ${MIN_ADMIN_PASSWORD_CHARACTERS} caracteres y no superar ${MAX_ADMIN_PASSWORD_BYTES} bytes.`,
+    // The dialog already refuses both bounds before sending, so the server only rejects the policy
+    // when the two disagree on the minimum (e.g. an older runtime): name the minimum only.
+    PASSWORD_POLICY_REJECTED: NEW_TOO_SHORT_TEXT,
     PASSWORD_UNCHANGED: NEW_UNCHANGED_TEXT,
     LOGIN_RATE_LIMITED: 'Demasiados intentos. Intente nuevamente más tarde.',
     AUTH_STORAGE_UNAVAILABLE: 'El servicio de autenticación no está disponible.',
