@@ -25,7 +25,7 @@ function browserStorage(): LegacyStoragePort | null {
 }
 
 /** Returns how many values were copied to a new key. Never throws: storage is best effort. */
-export function migrateLegacyLedaStorageKeys(storage: LegacyStoragePort | null = browserStorage()): number {
+export function migrateLegacyPrismaStorageKeys(storage: LegacyStoragePort | null = browserStorage()): number {
     if (storage === null) return 0;
     let copied = 0;
     for (const [oldKey, newKey] of LEGACY_PRISMA_STORAGE_KEY_RENAMES) {
