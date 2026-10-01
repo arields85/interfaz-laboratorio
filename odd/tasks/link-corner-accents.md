@@ -49,7 +49,7 @@ registered accent custom properties.
 - [x] **A2** — Viewer layer: accents outside the frame for widgets with an effective link, hover animation with the
   Contorno values, offset token, reduced motion; not in the builder.
 - [x] **A3** — Docs (`docs/DESIGN_SYSTEM.md`, done).
-- [ ] **A4** — Live check in the browser (control Chrome) — left for the parent.
+- [x] **A4** — Live check in the browser (control Chrome): done 2026-09-30 after the fixes below.
 
 ## Acceptance criteria
 
@@ -82,6 +82,21 @@ registered accent custom properties.
   still had a layer; CSS: no group-hover-target rule) -> GREEN 21/21; `npx tsc -b`, `npm run lint` clean, `npm test`
   269 files / 3572 passed, `npm run build` ok; served stylesheet checked after the single `index.css` write. Commit
   `52fcd43`. Live pixel check of the hover still pending (the user is using the control Chrome).
+
+- 2026-09-30 user: "sigue sin funcionar ... usá el Chrome control y miralo en vivo". Live diagnosis (control Chrome,
+  virtual pointer via `Input.dispatchMouseEvent`, forced frames): the group-hover state was right (group hover target
+  set, `--frame-accent-opacity` 40 %, length 8 px) but nothing painted, for two reasons:
+  1. The layer had `border-radius: frame radius + offset` (16 px with the user's 12 px radius): a background is clipped
+     to its own rounded border box, so the 8 px brackets sat inside the rounded-off corners and were never painted.
+     Fix: square layer (`border-radius: 0`), brackets frame the outer box like a viewfinder.
+  2. The grid fills the viewer root exactly and the root plus two page containers clip with `overflow: hidden`, so
+     brackets 4 px outside the outer widgets were cut. Fix: while the accents are on, the viewer root keeps a gutter
+     `padding: calc(var(--link-accent-offset) + var(--link-accent-thickness-hover))`; the grid fits the root content
+     box (ResizeObserver `contentRect`), so the dashboard shrinks by ~10 px only with the option on. (An
+     `overflow-clip-margin` attempt was dropped: the ancestors also clip.)
+  TDD: RED 1 (square corners) and RED 1 (gutter) -> GREEN; `npx tsc -b`, `npm run lint` clean, `npm test` 269 files /
+  3574 passed, `npm run build` ok. Commit `e101233`. Live after: all four brackets visible around the hovered group
+  (screenshot `group-hover-full.png` in the scratchpad).
 
 ## Next step
 
