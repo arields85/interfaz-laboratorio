@@ -1,5 +1,5 @@
 import { Bell } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChannelBAccessChat, ChannelBAccessDecision } from '../../domain';
 import {
@@ -8,6 +8,7 @@ import {
     type ChannelBAccessController,
 } from '../../hooks/useChannelBAccess';
 import {
+    CHANNEL_B_FEEDBACK_VISIBLE_MS,
     channelBAccessDecisionFeedback,
     channelBAccessErrorText,
     isChannelBAccessUnavailable,
@@ -42,16 +43,28 @@ export default function NotificationBell({ client, controller }: NotificationBel
     const pending: ChannelBAccessChat[] = (access.chats ?? []).filter((chat) => chat.status === 'pending');
     const count = pending.length;
 
+    // A decision message is transient: it fades after a while and never survives closing the panel.
+    useEffect(() => {
+        if (!feedback) return;
+        const timer = setTimeout(() => setFeedback(null), CHANNEL_B_FEEDBACK_VISIBLE_MS);
+        return () => clearTimeout(timer);
+    }, [feedback]);
+
+    const closePanel = useCallback(() => {
+        setOpen(false);
+        setFeedback(null);
+    }, []);
+
     useEffect(() => {
         if (!open) return;
         const handlePointerDown = (event: MouseEvent) => {
             const target = event.target as Node;
             if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
-            setOpen(false);
+            closePanel();
         };
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key !== 'Escape') return;
-            setOpen(false);
+            closePanel();
             buttonRef.current?.focus();
         };
         document.addEventListener('mousedown', handlePointerDown);
@@ -60,7 +73,7 @@ export default function NotificationBell({ client, controller }: NotificationBel
             document.removeEventListener('mousedown', handlePointerDown);
             window.removeEventListener('keydown', handleKeyDown);
         };
-    }, [open]);
+    }, [open, closePanel]);
 
     const handleDecision = async (chat: ChannelBAccessChat, decision: ChannelBAccessDecision) => {
         try {
@@ -84,7 +97,7 @@ export default function NotificationBell({ client, controller }: NotificationBel
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 className={`${TOPBAR_ICON_BUTTON_CLS} ${open ? TOPBAR_ICON_BUTTON_ACTIVE_CLS : ''}`}
-                onClick={() => setOpen((value) => !value)}
+                onClick={() => (open ? closePanel() : setOpen(true))}
             >
                 <Bell size={20} />
                 {count > 0 ? (
@@ -106,7 +119,7 @@ export default function NotificationBell({ client, controller }: NotificationBel
                         busy={access.pendingChatId !== null}
                         feedback={feedback}
                         onDecision={(chat, decision) => { void handleDecision(chat, decision); }}
-                        onClose={() => setOpen(false)}
+                        onClose={closePanel}
                     />
                 </div>
             ) : null}

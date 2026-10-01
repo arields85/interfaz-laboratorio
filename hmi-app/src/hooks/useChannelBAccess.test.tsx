@@ -137,7 +137,36 @@ describe('useChannelBAccess', () => {
 
         await act(async () => { release?.(); await first; });
         expect(decide).toHaveBeenCalledTimes(1);
-        expect(result.current.pendingChatId).toBeNull();
+        await waitFor(() => expect(result.current.pendingChatId).toBeNull());
+    });
+
+    it('shares the in-flight guard between two consumers of the same query client', async () => {
+        let release: (() => void) | undefined;
+        const decide = vi.fn(() => new Promise<ReturnType<typeof decidedResult>>((resolve) => {
+            release = () => resolve(decidedResult(PENDING_CHAT, 'approve'));
+        }));
+        const client: ChannelBAccessClient = { channelBAccessList: async () => [PENDING_CHAT], channelBAccessDecision: decide };
+        const controller = { handleProtectedRequestError: vi.fn(async () => undefined) };
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        );
+        // The topbar bell and the Leda tab are two mounted consumers of one cache.
+        const bell = renderHook(() => useChannelBAccess({ client, controller, polling: true }), { wrapper });
+        const tab = renderHook(() => useChannelBAccess({ client, controller }), { wrapper });
+        await waitFor(() => expect(tab.result.current.chats).not.toBeNull());
+
+        let first: Promise<unknown> = Promise.resolve();
+        act(() => { first = bell.result.current.decide(1001, 'approve'); });
+
+        await waitFor(() => expect(tab.result.current.pendingChatId).toBe(1001));
+        expect(bell.result.current.pendingChatId).toBe(1001);
+        await expect(tab.result.current.decide(1001, 'reject')).rejects.toThrow('CHANNEL_B_ACCESS_DECISION_PENDING');
+        expect(decide).toHaveBeenCalledTimes(1);
+
+        await act(async () => { release?.(); await first; });
+        await waitFor(() => expect(tab.result.current.pendingChatId).toBeNull());
+        expect(bell.result.current.pendingChatId).toBeNull();
     });
 
     it('invalidates and reports to the controller when a decision hits a 409', async () => {

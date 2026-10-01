@@ -15,6 +15,7 @@ import {
     PENDING_CHAT,
     PENDING_CHAT_NO_NAME,
 } from '../../test/fixtures/channelBAccess.fixture';
+import { CHANNEL_B_FEEDBACK_VISIBLE_MS } from '../admin/channelBAccess/channelBAccessCopy';
 import NotificationBell from './NotificationBell';
 
 function setAdminSession(isAuthenticated = true) {
@@ -230,6 +231,36 @@ describe('NotificationBell', () => {
         await user.click(bell);
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('clears the decision feedback after a short while', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        renderBell(makeChannelBClient([PENDING_CHAT]));
+        await user.click(await screen.findByRole('button', { name: 'Notificaciones: 1 pendiente' }));
+        await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Rechazar' }));
+        expect(await screen.findByText('Solicitud de Ana Pérez rechazada.')).toBeInTheDocument();
+
+        // Real time also elapses (shouldAdvanceTime), so probe at half the delay, not at the edge.
+        await act(async () => { await vi.advanceTimersByTimeAsync(CHANNEL_B_FEEDBACK_VISIBLE_MS / 2); });
+        expect(screen.getByText('Solicitud de Ana Pérez rechazada.')).toBeInTheDocument();
+        await act(async () => { await vi.advanceTimersByTimeAsync(CHANNEL_B_FEEDBACK_VISIBLE_MS / 2); });
+
+        expect(screen.queryByText('Solicitud de Ana Pérez rechazada.')).not.toBeInTheDocument();
+    });
+
+    it('does not show an old decision feedback when the panel is opened again', async () => {
+        const user = userEvent.setup();
+        renderBell(makeChannelBClient([PENDING_CHAT]));
+        const bell = await screen.findByRole('button', { name: 'Notificaciones: 1 pendiente' });
+        await user.click(bell);
+        await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Rechazar' }));
+        expect(await screen.findByText('Solicitud de Ana Pérez rechazada.')).toBeInTheDocument();
+
+        await user.click(bell);
+        await user.click(bell);
+
+        expect(screen.queryByText('Solicitud de Ana Pérez rechazada.')).not.toBeInTheDocument();
     });
 
     it('never fetches without an admin session', async () => {

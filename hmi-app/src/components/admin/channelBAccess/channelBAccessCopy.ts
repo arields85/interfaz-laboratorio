@@ -10,6 +10,9 @@ import { AdminAuthError } from '../../../services/adminAuth.service';
 
 export type ChannelBAccessFeedback = { kind: 'success' | 'warning' | 'error'; text: string };
 
+// How long a decision message stays visible: longer than a copy swap (1.5 s) because it is a sentence to read.
+export const CHANNEL_B_FEEDBACK_VISIBLE_MS = 5_000;
+
 export const CHANNEL_B_ACCESS_UNAVAILABLE_CODE = 'CHANNEL_B_ACCESS_UNAVAILABLE';
 
 export const DECISION_LABELS: Record<ChannelBAccessDecision, string> = {

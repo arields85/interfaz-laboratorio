@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMutation, useMutationState, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect } from 'react';
 
 import type {
     ChannelBAccessChat,
@@ -12,6 +12,9 @@ import { useAuthStore } from '../store/auth.store';
 
 // The list holds requester names, so it lives only while an admin session does.
 export const CHANNEL_B_ACCESS_QUERY_KEY = ['leda', 'admin', 'channel-b-access'] as const;
+// Decisions are mutations under one key, so every consumer of the cache (the topbar bell and the
+// Leda tab) sees the same in-flight decisions and none can submit the same chat twice.
+export const CHANNEL_B_ACCESS_DECISION_MUTATION_KEY = [...CHANNEL_B_ACCESS_QUERY_KEY, 'decision'] as const;
 export const CHANNEL_B_ACCESS_POLL_INTERVAL_MS = 30_000;
 
 export interface ChannelBAccessClient {
@@ -25,6 +28,11 @@ export interface ChannelBAccessClient {
 
 export interface ChannelBAccessController {
     handleProtectedRequestError(error: unknown): Promise<void>;
+}
+
+interface DecisionVariables {
+    chatId: number;
+    decision: ChannelBAccessDecision;
 }
 
 interface UseChannelBAccessOptions {
@@ -54,8 +62,6 @@ export function useChannelBAccess({
     const authenticated = useAuthStore((state) => state.session.isAuthenticated);
     const queryClient = useQueryClient();
     const active = enabled && authenticated;
-    const inFlightRef = useRef(false);
-    const [pendingChatId, setPendingChatId] = useState<number | null>(null);
 
     const query = useQuery({
         queryKey: CHANNEL_B_ACCESS_QUERY_KEY,
@@ -84,26 +90,39 @@ export function useChannelBAccess({
         await queryClient.invalidateQueries({ queryKey: CHANNEL_B_ACCESS_QUERY_KEY, exact: true });
     }, [queryClient]);
 
+    const decision = useMutation<ChannelBAccessDecisionResult, unknown, DecisionVariables>({
+        mutationKey: CHANNEL_B_ACCESS_DECISION_MUTATION_KEY,
+        mutationFn: async ({ chatId, decision: requested }) => {
+            try {
+                const result = await client.channelBAccessDecision(chatId, requested);
+                await refresh();
+                return result;
+            } catch (error) {
+                if (!isAbort(error)) await controller.handleProtectedRequestError(error);
+                if (leavesListStale(error)) await refresh();
+                throw error;
+            }
+        },
+    });
+    const { mutateAsync } = decision;
+
+    const [pendingChatId = null] = useMutationState({
+        filters: { mutationKey: CHANNEL_B_ACCESS_DECISION_MUTATION_KEY, status: 'pending' },
+        select: (mutation) => (mutation.state.variables as DecisionVariables).chatId,
+    });
+
     const decide = useCallback(async (
         chatId: number,
-        decision: ChannelBAccessDecision,
+        requested: ChannelBAccessDecision,
     ): Promise<ChannelBAccessDecisionResult> => {
-        if (inFlightRef.current) throw new Error('CHANNEL_B_ACCESS_DECISION_PENDING');
-        inFlightRef.current = true;
-        setPendingChatId(chatId);
-        try {
-            const result = await client.channelBAccessDecision(chatId, decision);
-            await refresh();
-            return result;
-        } catch (error) {
-            if (!isAbort(error)) await controller.handleProtectedRequestError(error);
-            if (leavesListStale(error)) await refresh();
-            throw error;
-        } finally {
-            inFlightRef.current = false;
-            setPendingChatId(null);
-        }
-    }, [client, controller, refresh]);
+        // Read synchronously from the shared cache: a second consumer cannot slip in before the first registers.
+        const inFlight = queryClient.getMutationCache().find({
+            mutationKey: CHANNEL_B_ACCESS_DECISION_MUTATION_KEY,
+            predicate: (mutation) => mutation.state.status === 'pending' && (mutation.state.variables as DecisionVariables | undefined)?.chatId === chatId,
+        });
+        if (inFlight) throw new Error('CHANNEL_B_ACCESS_DECISION_PENDING');
+        return mutateAsync({ chatId, decision: requested });
+    }, [mutateAsync, queryClient]);
 
     return {
         chats: query.data ?? null,
