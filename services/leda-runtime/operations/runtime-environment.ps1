@@ -457,6 +457,32 @@ function Get-LedaLegacyPrismaName {
     return $Name.Replace('PRISMA', 'LEDA').Replace('Prisma', 'Leda').Replace('prisma', 'leda')
 }
 
+function Copy-LedaAccessRules {
+    <#
+    .SYNOPSIS
+        Copies the DACL (including its protection against inheritance) from one path to another.
+
+    .DESCRIPTION
+        Goes through the SDDL form on purpose: on Windows PowerShell 5.1, SetAccessControl with a
+        security object that was only read (never modified) persists nothing and raises nothing, so
+        a protected credential directory would silently inherit its new parent's rules.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $sections = [Security.AccessControl.AccessControlSections]::Access
+    $isDirectory = [IO.Directory]::Exists($Source)
+    $sourceItem = if ($isDirectory) { New-Object IO.DirectoryInfo($Source) } else { New-Object IO.FileInfo($Source) }
+    $destinationItem = if ($isDirectory) { New-Object IO.DirectoryInfo($Destination) } else { New-Object IO.FileInfo($Destination) }
+    $sddl = $sourceItem.GetAccessControl($sections).GetSecurityDescriptorSddlForm($sections)
+    $acl = $destinationItem.GetAccessControl($sections)
+    $acl.SetSecurityDescriptorSddlForm($sddl, $sections)
+    $destinationItem.SetAccessControl($acl)
+}
+
 function Copy-LedaDirectoryTree {
     <#
     .SYNOPSIS
@@ -487,8 +513,7 @@ function Copy-LedaDirectoryTree {
             else {
                 [IO.File]::Copy($child, $target, $false)
                 try {
-                    $acl = (New-Object IO.FileInfo($child)).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
-                    (New-Object IO.FileInfo($target)).SetAccessControl($acl)
+                    Copy-LedaAccessRules -Source $child -Destination $target
                 }
                 catch {
                     Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $target, $_.Exception.Message)
@@ -499,8 +524,7 @@ function Copy-LedaDirectoryTree {
     # Directory rules last, so a protected (non-inheriting) directory never blocks the copy above.
     foreach ($pair in $directories) {
         try {
-            $acl = (New-Object IO.DirectoryInfo($pair.Source)).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
-            (New-Object IO.DirectoryInfo($pair.Destination)).SetAccessControl($acl)
+            Copy-LedaAccessRules -Source $pair.Source -Destination $pair.Destination
         }
         catch {
             Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $pair.Destination, $_.Exception.Message)
@@ -570,8 +594,9 @@ function Invoke-LedaLegacyCredentialKeyMigration {
     New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
     [IO.File]::Copy($legacyKey, $targetKey, $false)
     try {
-        $acl = (New-Object IO.FileInfo($legacyKey)).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
-        (New-Object IO.FileInfo($targetKey)).SetAccessControl($acl)
+        # The directory first: the key file inherits the protected rules from it.
+        Copy-LedaAccessRules -Source (Split-Path -Parent $legacyKey) -Destination $targetDirectory
+        Copy-LedaAccessRules -Source $legacyKey -Destination $targetKey
     }
     catch {
         Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $targetKey, $_.Exception.Message)

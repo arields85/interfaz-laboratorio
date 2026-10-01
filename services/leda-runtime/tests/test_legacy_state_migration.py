@@ -55,6 +55,29 @@ class LegacyMigrationTestCase(unittest.TestCase):
         path.write_bytes(content)
         return path
 
+    def protect(self, directory: Path) -> None:
+        """Gives the directory a protected (non-inheriting) DACL, like the real credential dirs."""
+        result = run_powershell(
+            f"$acl = Get-Acl -LiteralPath '{directory}'\n"
+            "$acl.SetAccessRuleProtection($true, $false)\n"
+            "$rule = New-Object Security.AccessControl.FileSystemAccessRule("
+            "[Security.Principal.WindowsIdentity]::GetCurrent().User, 'FullControl', "
+            "'ContainerInherit,ObjectInherit', 'None', 'Allow')\n"
+            "$acl.AddAccessRule($rule)\n"
+            f"Set-Acl -LiteralPath '{directory}' -AclObject $acl\n"
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def access_rules(self, path: Path) -> tuple[bool, list[str]]:
+        result = run_powershell(
+            f"$acl = Get-Acl -LiteralPath '{path}'\n"
+            "Write-Output $acl.AreAccessRulesProtected\n"
+            "$acl.Access | ForEach-Object { Write-Output $_.IdentityReference.Value }\n"
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return lines[0] == "True", sorted(lines[1:])
+
     def seed_legacy_state(self) -> None:
         self.write(self.legacy_state / "prisma_voice_config.json", b'{"effectEnabled": true}')
         self.write(self.legacy_state / "prisma_local_snapshot.json", b"snapshot")
@@ -147,6 +170,17 @@ class LegacyStateMigrationTests(LegacyMigrationTestCase):
 
         self.assertFalse(self.new_state.exists())
 
+    def test_keeps_the_protected_access_rules_of_the_credential_and_auth_dirs(self) -> None:
+        self.seed_legacy_state()
+        self.protect(self.legacy_state / "credentials")
+        self.protect(self.legacy_state / "auth")
+
+        self.migrate()
+
+        for name in ("credentials", "auth"):
+            self.assertEqual(self.access_rules(self.new_state / name), self.access_rules(self.legacy_state / name), name)
+            self.assertTrue(self.access_rules(self.new_state / name)[0], name)
+
     def test_still_copies_when_the_state_dir_variable_names_the_default_dir(self) -> None:
         # start-local.ps1 exports LEDA_RUNTIME_STATE_DIR (the default path) before it migrates.
         self.seed_legacy_state()
@@ -168,6 +202,16 @@ class LegacyCredentialKeyMigrationTests(LegacyMigrationTestCase):
         self.assertEqual((self.new_key_dir / "master.key").read_bytes(), self.KEY_BYTES)
         self.assertEqual((self.legacy_key_dir / "master.key").read_bytes(), self.KEY_BYTES)
         self.assertIn("Migrated the legacy credential master key", result.stdout)
+
+    def test_the_new_key_dir_keeps_the_protected_access_rules_of_the_old_one(self) -> None:
+        self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
+        self.protect(self.legacy_key_dir)
+
+        self.migrate()
+
+        self.assertEqual(self.access_rules(self.new_key_dir), self.access_rules(self.legacy_key_dir))
+        self.assertTrue(self.access_rules(self.new_key_dir)[0])
+        self.assertEqual(self.access_rules(self.new_key_dir / "master.key"), self.access_rules(self.legacy_key_dir / "master.key"))
 
     def test_never_overwrites_an_existing_new_master_key(self) -> None:
         self.write(self.legacy_key_dir / "master.key", self.KEY_BYTES)
