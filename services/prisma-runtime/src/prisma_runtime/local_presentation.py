@@ -38,6 +38,7 @@ from .channel_a_manager import ChannelAManager
 from .channel_a_pairing import OPAQUE_CHARS, PRISMA_CHANNEL_A_CONFLICT, ChannelAPairingConflict
 from .channel_a_transport import ChannelATransport
 from .credential_store import CredentialService
+from .hmi_config_store import HmiConfigStore
 from .gemini_credentials import GeminiCredentialResolver, GeminiVerificationService
 from .hmi_sessions import (
     CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge,
@@ -1529,6 +1530,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             gemini_verification_service=gemini_verification_service,
             telegram_verification_service=telegram_verification_service,
             channel_a_verification_service=channel_a_verification_service,
+            hmi_config_store=HmiConfigStore(paths.hmi_config_database),
         )
     app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry, channel_a_manager=channel_a_manager)
     admin_http.register(app)

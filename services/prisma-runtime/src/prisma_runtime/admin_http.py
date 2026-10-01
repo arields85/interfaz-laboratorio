@@ -16,6 +16,7 @@ from .channel_a_lifecycle import PRISMA_CHANNEL_A_LIFECYCLE_UNAVAILABLE, PRISMA_
 from .channel_a_manager import ChannelAManagerError
 from .credential_store import ALLOWED_PROVIDERS, MAX_SECRET_BYTES, CredentialUnavailable, InvalidCredential
 from .gemini_credentials import GEMINI_VERIFY_MODEL, GeminiVerificationInProgress
+from .hmi_config_store import HmiConfigInvalid, HmiConfigTooLarge, HmiConfigUnavailable
 from .telegram_lifecycle import TelegramLifecycleError
 from .telegram_verification import TelegramTokenVerificationInProgress
 
@@ -30,6 +31,13 @@ MAX_CREDENTIAL_REQUEST_BYTES = (
     MAX_SECRET_BYTES * MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE + MAX_CREDENTIAL_JSON_OVERHEAD_BYTES
 )
 MAX_TELEGRAM_APPLY_REQUEST_BYTES = 128
+# Shared HMI configuration. Public reads live outside the admin prefix because the
+# session cookie is scoped to COOKIE_PATH and must never reach them; the write is
+# mounted under the admin prefix so that cookie (and CSRF) authorize it.
+HMI_CONFIG_READ_ROUTE = "/api/prisma/hmi-config"
+HMI_CONFIG_REVISION_ROUTE = "/api/prisma/hmi-config/revision"
+HMI_CONFIG_WRITE_ROUTE = "/api/prisma/admin/hmi-config"
+MAX_HMI_CONFIG_REQUEST_BYTES = 16 * 1024 * 1024
 TELEGRAM_APPLY_ROUTE = "/api/prisma/admin/credentials/telegram/apply"
 GEMINI_VERIFY_ROUTE = "/api/prisma/admin/credentials/gemini/verify"
 TELEGRAM_VERIFY_ROUTE = "/api/prisma/admin/credentials/telegram/verify"
@@ -181,8 +189,10 @@ class AdminHttpBoundary:
         gemini_verification_service=None,
         telegram_verification_service=None,
         channel_a_verification_service=None,
+        hmi_config_store=None,
     ):
         self.auth_service = auth_service
+        self.hmi_config_store = hmi_config_store
         self.credential_service = credential_service
         self.telegram_manager = telegram_manager
         self.channel_a_manager = channel_a_manager
@@ -368,7 +378,75 @@ class AdminHttpBoundary:
             return None, self._error("INVALID_CREDENTIAL_REQUEST", 400)
         return secret, None
 
+    def _hmi_config_batch(self):
+        """Parse ``{"set": {key: str}, "delete": [key]}``; both members optional."""
+        if not request.is_json:
+            return None, self._error("JSON_REQUIRED", 415)
+        if request.content_length is None or request.content_length > MAX_HMI_CONFIG_REQUEST_BYTES:
+            return None, self._error("HMI_CONFIG_REQUEST_TOO_LARGE", 413)
+        try:
+            payload = json.loads(request.get_data(cache=False).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None, self._error("HMI_CONFIG_INVALID_REQUEST", 400)
+        if not isinstance(payload, dict) or not set(payload) <= {"set", "delete"}:
+            return None, self._error("HMI_CONFIG_INVALID_REQUEST", 400)
+        sets, deletes = payload.get("set", {}), payload.get("delete", [])
+        if not isinstance(sets, dict) or not isinstance(deletes, list):
+            return None, self._error("HMI_CONFIG_INVALID_REQUEST", 400)
+        return (sets, deletes), None
+
+    def _hmi_config_read(self, read):
+        """Public read of the shared document: transport checks only, no session."""
+        rejected = self._allow(require_origin=False)
+        if rejected:
+            return rejected
+        if self.hmi_config_store is None:
+            return self._error("HMI_CONFIG_UNAVAILABLE", 503)
+        try:
+            response = jsonify({"ok": True, **read(self.hmi_config_store)})
+        except HmiConfigUnavailable:
+            return self._error("HMI_CONFIG_UNAVAILABLE", 503)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     def register(self, app) -> None:
+        @app.get(HMI_CONFIG_READ_ROUTE)
+        def hmi_config_document():
+            def read(store):
+                revision, items = store.read_document()
+                return {"revision": revision, "items": items}
+
+            return self._hmi_config_read(read)
+
+        @app.get(HMI_CONFIG_REVISION_ROUTE)
+        def hmi_config_revision():
+            return self._hmi_config_read(lambda store: {"revision": store.read_revision()})
+
+        @app.put(HMI_CONFIG_WRITE_ROUTE)
+        def hmi_config_write():
+            rejected = self._allow(require_origin=True)
+            if rejected:
+                return rejected
+            _, rejected = self._authorized_session(require_csrf=True)
+            if rejected:
+                return rejected
+            if self.hmi_config_store is None:
+                return self._error("HMI_CONFIG_UNAVAILABLE", 503)
+            batch, rejected = self._hmi_config_batch()
+            if rejected:
+                return rejected
+            try:
+                revision = self.hmi_config_store.apply_batch(*batch)
+            except HmiConfigInvalid:
+                return self._error("HMI_CONFIG_INVALID_REQUEST", 400)
+            except HmiConfigTooLarge as error:
+                return self._error(error.args[0], 413)
+            except HmiConfigUnavailable:
+                return self._error("HMI_CONFIG_UNAVAILABLE", 503)
+            response = jsonify({"ok": True, "revision": revision})
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
         @app.after_request
         def credential_cache_policy(response):
             path = request.path
