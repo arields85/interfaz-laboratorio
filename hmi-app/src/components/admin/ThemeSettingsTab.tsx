@@ -32,10 +32,15 @@ import {
     writeStoredIconCutout,
 } from '../../services/iconCutout.service';
 import {
+    applyLinkAccentLengthsToDocument,
+    LINK_ACCENT_LENGTH_LIMITS,
     previewLinkCornerAccents,
+    readStoredLinkAccentLengths,
     readStoredLinkCornerAccents,
+    writeStoredLinkAccentLengths,
     writeStoredLinkCornerAccents,
 } from '../../services/linkCornerAccents.service';
+import type { LinkAccentLengths } from '../../domain/linkCornerAccents.types';
 import AdminActionButton from './AdminActionButton';
 import DockSliderField from './DockSliderField';
 import DockToggleField from './DockToggleField';
@@ -80,6 +85,11 @@ const ENTRANCE_CONTROLS: readonly EntranceControlCopy[] = [
     { key: 'outlineWidthPx', label: 'Grosor del contorno', numberInputAriaLabel: 'Valor de grosor del contorno', unit: 'px' },
     { key: 'outlineOpacityPercent', label: 'Opacidad del contorno', numberInputAriaLabel: 'Valor de opacidad del contorno', unit: '%' },
     { key: 'flashIntensityPercent', label: 'Intensidad del destello', numberInputAriaLabel: 'Valor de intensidad del destello', unit: '%' },
+];
+
+const ACCENT_LENGTH_CONTROLS: readonly { key: keyof LinkAccentLengths; label: string; numberInputAriaLabel: string }[] = [
+    { key: 'restPx', label: 'Largo en reposo', numberInputAriaLabel: 'Valor de largo en reposo' },
+    { key: 'hoverPx', label: 'Largo con el cursor', numberInputAriaLabel: 'Valor de largo con el cursor' },
 ];
 
 interface FrameShapeCopy {
@@ -140,6 +150,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const [cutout, setCutout] = useState(initialCutout);
     const initialLinkAccents = useMemo(() => readStoredLinkCornerAccents(), []);
     const [linkAccents, setLinkAccents] = useState(initialLinkAccents);
+    const initialAccentLengths = useMemo(() => readStoredLinkAccentLengths(), []);
+    const [accentLengths, setAccentLengths] = useState<LinkAccentLengths>(initialAccentLengths);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
     // The persisted id at mount / after the last save, so Descartar restores
     // exactly that instead of always falling back to Clasico.
@@ -149,6 +161,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
     const snapshotRadiiRef = useRef(initialRadii);
     const snapshotCutoutRef = useRef(initialCutout);
     const snapshotLinkAccentsRef = useRef(initialLinkAccents);
+    const snapshotAccentLengthsRef = useRef(initialAccentLengths);
     // Mirrors whether the current selection differs from `snapshotIdRef`,
     // updated synchronously alongside every state change below (select,
     // save, revert) so the unmount cleanup can read it without waiting for
@@ -194,12 +207,15 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         radii: FrameRadiusOverrides;
         cutout: boolean;
         linkAccents: boolean;
+        accentLengths: LinkAccentLengths;
     }) => next.id !== snapshotIdRef.current
         || !areEntranceSettingsEqual(next.entrance, snapshotEntranceRef.current)
         || next.shape !== snapshotShapeRef.current
         || !areRadiusOverridesEqual(next.radii, snapshotRadiiRef.current)
         || next.cutout !== snapshotCutoutRef.current
-        || next.linkAccents !== snapshotLinkAccentsRef.current;
+        || next.linkAccents !== snapshotLinkAccentsRef.current
+        || next.accentLengths.restPx !== snapshotAccentLengthsRef.current.restPx
+        || next.accentLengths.hoverPx !== snapshotAccentLengthsRef.current.hoverPx;
 
     const syncDirty = (isDirty: boolean) => {
         dirtyRef.current = isDirty;
@@ -215,7 +231,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         setSelectedId(id);
         previewThemeStyleOnDocument(id, document.documentElement, radii[getThemeStylePreset(id).id]);
 
-        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout, linkAccents }));
+        syncDirty(isDifferentFromSnapshot({ id, entrance, shape, radii, cutout, linkAccents, accentLengths }));
     };
 
     // The shape is previewed on the whole document like a theme card: every framed widget of the
@@ -227,7 +243,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setShape(next);
         previewFrameShape(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout, linkAccents }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape: next, radii, cutout, linkAccents, accentLengths }));
     };
 
     // Moving a slider previews the value on the whole document right away
@@ -240,7 +256,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setEntrance(next);
         applyViewerEntranceSettingsToDocument(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout, linkAccents }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance: next, shape, radii, cutout, linkAccents, accentLengths }));
     };
 
     // The icon cutout is previewed on the whole document like the shape: framed widgets read it
@@ -252,7 +268,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setCutout(next);
         previewIconCutout(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next, linkAccents }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout: next, linkAccents, accentLengths }));
     };
 
     // The link corner accents are previewed on the whole document like the cutout: the viewer reads
@@ -264,7 +280,20 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setLinkAccents(next);
         previewLinkCornerAccents(next);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents: next }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents: next, accentLengths }));
+    };
+
+    // The lengths are previewed live on the document root (`--link-accent-length-rest` / `-hover`),
+    // like the entrance sliders.
+    const handleAccentLengthChange = (key: keyof LinkAccentLengths, value: number) => {
+        const next = { ...accentLengths, [key]: value };
+        if (next[key] === accentLengths[key]) {
+            return;
+        }
+
+        setAccentLengths(next);
+        applyLinkAccentLengthsToDocument(next);
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii, cutout, linkAccents, accentLengths: next }));
     };
 
     // The link corner accents show with Clasico (any frame shape); the section says so while the
@@ -295,7 +324,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
         setRadii(nextRadii);
         previewThemeStyleOnDocument(selectedId, document.documentElement, nextRadii[selectedPreset.id]);
-        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout, linkAccents }));
+        syncDirty(isDifferentFromSnapshot({ id: selectedId, entrance, shape, radii: nextRadii, cutout, linkAccents, accentLengths }));
     };
 
     // If the tab unmounts (dialog closed/unmounted) while an unsaved
@@ -316,6 +345,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                 previewFrameShape(snapshotShapeRef.current);
                 previewIconCutout(snapshotCutoutRef.current);
                 previewLinkCornerAccents(snapshotLinkAccentsRef.current);
+                applyLinkAccentLengthsToDocument(snapshotAccentLengthsRef.current);
             }
         };
     }, []);
@@ -336,12 +366,15 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewIconCutout(cutout);
             writeStoredLinkCornerAccents(linkAccents);
             previewLinkCornerAccents(linkAccents);
+            writeStoredLinkAccentLengths(accentLengths);
+            applyLinkAccentLengthsToDocument(accentLengths);
             snapshotIdRef.current = selectedId;
             snapshotEntranceRef.current = entrance;
             snapshotShapeRef.current = shape;
             snapshotRadiiRef.current = radii;
             snapshotCutoutRef.current = cutout;
             snapshotLinkAccentsRef.current = linkAccents;
+            snapshotAccentLengthsRef.current = accentLengths;
             dirtyRef.current = false;
             setSaveStatus('saved');
             onDirtyChange?.(false);
@@ -350,7 +383,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
         return () => {
             saveRef.current = null;
         };
-    }, [cutout, entrance, linkAccents, onDirtyChange, radii, saveRef, selectedId, shape]);
+    }, [accentLengths, cutout, entrance, linkAccents, onDirtyChange, radii, saveRef, selectedId, shape]);
 
     useEffect(() => {
         if (!revertRef) {
@@ -374,6 +407,8 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
             previewIconCutout(snapshotCutoutRef.current);
             setLinkAccents(snapshotLinkAccentsRef.current);
             previewLinkCornerAccents(snapshotLinkAccentsRef.current);
+            setAccentLengths(snapshotAccentLengthsRef.current);
+            applyLinkAccentLengthsToDocument(snapshotAccentLengthsRef.current);
             dirtyRef.current = false;
             // The revert only restores state and document styles without
             // touching storage, so it reports no status: a persistence that
@@ -556,6 +591,26 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
                     checked={linkAccents}
                     onChange={handleLinkAccentsChange}
                 />
+
+                {/* Visible with the switch off but inactive, like a dependent control. */}
+                <p className={`mt-4 mb-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
+                    El largo es el tramo recto que continúa el arco de la esquina.
+                </p>
+                <div className="flex flex-col gap-4">
+                    {ACCENT_LENGTH_CONTROLS.map(({ key, label, numberInputAriaLabel }) => (
+                        <DockSliderField
+                            key={key}
+                            label={label}
+                            ariaLabel={label}
+                            numberInputAriaLabel={numberInputAriaLabel}
+                            unit="px"
+                            value={accentLengths[key]}
+                            disabled={!linkAccents}
+                            {...LINK_ACCENT_LENGTH_LIMITS}
+                            onChange={(value) => handleAccentLengthChange(key, value)}
+                        />
+                    ))}
+                </div>
 
                 {!linkAccentsApply && (
                     <p data-testid="theme-link-accents-note" className={`mt-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>

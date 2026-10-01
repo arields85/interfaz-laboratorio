@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeSettingsTab from './ThemeSettingsTab';
 import { resetThemeStyleOnDocument } from '../../services/themeStyle.service';
@@ -13,6 +14,9 @@ import {
     previewLinkCornerAccents,
     resetLinkCornerAccentsOnDocument,
     writeStoredLinkCornerAccents,
+    LINK_ACCENT_LENGTHS_STORAGE_KEY,
+    resetLinkAccentLengthsOnDocument,
+    writeStoredLinkAccentLengths,
 } from '../../services/linkCornerAccents.service';
 
 function createRef<T>(): { current: T | null } {
@@ -27,6 +31,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
         resetFrameShapeOnDocument(document.documentElement);
         resetIconCutoutOnDocument();
         resetLinkCornerAccentsOnDocument();
+        resetLinkAccentLengthsOnDocument();
     };
 
     beforeEach(reset);
@@ -165,5 +170,110 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
         await user.click(screen.getByRole('radio', { name: /Pestaña/ }));
 
         expect(accentsSection().textContent ?? '').not.toMatch(/ahora no se aplica/i);
+    });
+
+    describe('lengths', () => {
+        const restSlider = () => screen.getByRole('slider', { name: 'Largo en reposo' });
+        const hoverSlider = () => screen.getByRole('slider', { name: 'Largo con el cursor' });
+        const rootValue = (name: string) => document.documentElement.style.getPropertyValue(name);
+
+        it('renders both sliders inside the section with the default values and a usted-register hint', () => {
+            render(<ThemeSettingsTab />);
+
+            expect(accentsSection().contains(restSlider())).toBe(true);
+            expect(accentsSection().contains(hoverSlider())).toBe(true);
+            expect(restSlider()).toHaveValue('18');
+            expect(hoverSlider()).toHaveValue('8');
+            expect(accentsSection().textContent ?? '').toMatch(/tramo recto/i);
+            expect(accentsSection().textContent ?? '').not.toMatch(/tu|vos|tuyo/i);
+        });
+
+        it('starts from the persisted overrides', () => {
+            writeStoredLinkAccentLengths({ restPx: 30, hoverPx: 4 });
+
+            render(<ThemeSettingsTab />);
+
+            expect(restSlider()).toHaveValue('30');
+            expect(hoverSlider()).toHaveValue('4');
+        });
+
+        it('stays visible but disabled while the switch is off, and enabled once it is on', async () => {
+            const user = userEvent.setup();
+            render(<ThemeSettingsTab />);
+
+            expect(restSlider()).toBeDisabled();
+            expect(hoverSlider()).toBeDisabled();
+
+            await user.click(accentsSwitch());
+
+            expect(restSlider()).toBeEnabled();
+            expect(hoverSlider()).toBeEnabled();
+        });
+
+        it('previews live on the document root while dragging and marks the tab dirty, without persisting', () => {
+            writeStoredLinkCornerAccents(true);
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(restSlider(), { target: { value: '25' } });
+
+            expect(rootValue('--link-accent-length-rest')).toBe('25px');
+            expect(onDirtyChange).toHaveBeenCalledWith(true);
+            expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
+        });
+
+        it('persists only the overrides on save and clears dirty', () => {
+            writeStoredLinkCornerAccents(true);
+            const saveRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab saveRef={saveRef} onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(hoverSlider(), { target: { value: '12' } });
+            act(() => {
+                saveRef.current?.();
+            });
+
+            expect(JSON.parse(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY) ?? '')).toEqual({ hoverPx: 12 });
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('restores the saved lengths on revert without persisting', () => {
+            writeStoredLinkCornerAccents(true);
+            const revertRef = createRef<() => void>();
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab revertRef={revertRef} onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(restSlider(), { target: { value: '25' } });
+            act(() => {
+                revertRef.current?.();
+            });
+
+            expect(restSlider()).toHaveValue('18');
+            expect(rootValue('--link-accent-length-rest')).toBe('');
+            expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('clears dirty when a slider returns to the saved value', () => {
+            writeStoredLinkCornerAccents(true);
+            const onDirtyChange = vi.fn();
+            render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
+
+            fireEvent.change(restSlider(), { target: { value: '25' } });
+            fireEvent.change(restSlider(), { target: { value: '18' } });
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('restores the saved lengths on the document when the tab unmounts with an unsaved preview', () => {
+            writeStoredLinkCornerAccents(true);
+            const { unmount } = render(<ThemeSettingsTab />);
+
+            fireEvent.change(restSlider(), { target: { value: '25' } });
+            expect(rootValue('--link-accent-length-rest')).toBe('25px');
+            unmount();
+
+            expect(rootValue('--link-accent-length-rest')).toBe('');
+        });
     });
 });
