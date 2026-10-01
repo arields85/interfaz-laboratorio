@@ -587,14 +587,17 @@ function Invoke-LedaLegacyLocalMigration {
 
     .DESCRIPTION
         The state copy is skipped when LEDA_RUNTIME_STATE_DIR points the runtime elsewhere, because
-        the default directory is then not in use. The master key copy always applies: its default
-        location is independent of the state directory.
+        the default directory is then not in use. A variable that names the default directory itself
+        (start-local.ps1 exports it before migrating) still migrates. The master key copy always
+        applies: its default location is independent of the state directory.
     #>
     [CmdletBinding()]
     param([string]$LocalAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData))
 
+    $defaultState = Join-Path ([IO.Path]::GetFullPath($LocalAppData)) 'CoreAnalytics\Leda'
+    $configuredState = if ($env:LEDA_RUNTIME_STATE_DIR) { [IO.Path]::GetFullPath($env:LEDA_RUNTIME_STATE_DIR).TrimEnd('\') } else { $null }
     $state = $false
-    if (-not $env:LEDA_RUNTIME_STATE_DIR) {
+    if (-not $configuredState -or $configuredState -ieq $defaultState) {
         $state = Invoke-LedaLegacyStateMigration -LocalAppData $LocalAppData
     }
     $key = Invoke-LedaLegacyCredentialKeyMigration -LocalAppData $LocalAppData

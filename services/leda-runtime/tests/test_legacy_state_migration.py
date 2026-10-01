@@ -147,6 +147,15 @@ class LegacyStateMigrationTests(LegacyMigrationTestCase):
 
         self.assertFalse(self.new_state.exists())
 
+    def test_still_copies_when_the_state_dir_variable_names_the_default_dir(self) -> None:
+        # start-local.ps1 exports LEDA_RUNTIME_STATE_DIR (the default path) before it migrates.
+        self.seed_legacy_state()
+
+        self.migrate(env={"LEDA_RUNTIME_STATE_DIR": str(self.new_state)})
+
+        self.assertEqual((self.new_state / "auth" / "admin.sqlite3").read_bytes(), b"auth-db")
+        self.assertEqual((self.new_state / "credentials" / "provider-credentials.sqlite3").read_bytes(), b"cipher-text")
+
 
 class LegacyCredentialKeyMigrationTests(LegacyMigrationTestCase):
     KEY_BYTES = bytes(range(32))
