@@ -50,7 +50,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - [x] B3 — Runtime: per-chat message limit and the redacted admission audit log. Route: delegated.
 - [x] B4 — Runtime: admin HTTP routes to list, approve, reject and revoke chats. Route: delegated.
 - [ ] B4b — Runtime: review follow-ups. Guard every use of the shared Telegram session (not only `sendMessage`) against the HTTP-thread notice, test the `create_app` Channel B access wiring, and keep limiter counts on eviction where cheap. Route: delegated.
-- [ ] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
+- [x] B5 — HMI: service, hook and admin UI for the Channel B access list. Route: delegated (several non-trivial files).
 - [ ] B5b — HMI: enable the topbar bell (`Topbar.tsx:198-206`, today a disabled placeholder) as a notification panel that lists pending Channel B requests, with approve and reject actions and a pending-count badge. It is only active with an admin session (`shouldShowAdminActions`). Other viewers keep today's disabled bell, so requester names are never shown to them. It polls only while the admin session is active. Route: delegated.
 - [ ] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
 - [ ] B7 — Live check with the real bot (request, approve, use, revoke) and native review of the work-unit commits.
@@ -94,6 +94,10 @@ Strict mode ON (source: global user configuration). Runners:
     - `R3-limiter-lru-eviction-resets-count` (`channel_b_admission.py:75-76`): evicting a chat resets its window.
   - Open decision taken as default: with the bot stopped, the list and the decisions answer 503 `CHANNEL_B_ACCESS_UNAVAILABLE`. The UI shows "not available" instead of an empty list.
 - Route evidence: B4 delegated (writer for several non-trivial files).
+
+- 2026-10-01: B5 done in `636e7cd` (delegated writer). RED: `channelBAccess.types.test.ts` failed to import (module missing); 11 new `AdminAuthClient Channel B access` tests failed (`channelBAccessList`/`channelBAccessDecision` not functions); the settings and hook suites failed to resolve their modules; one extended `VoiceSettingsTab` test failed (section not mounted). GREEN: full HMI suite 296 files, 3932 tests OK; `npx tsc -b` clean; `npm run lint` clean. New domain types and strict parsers (`domain/channelBAccess.types.ts`), `AdminAuthClient.channelBAccessList/Decision` (same session, Origin and CSRF transport as the credential POSTs), shared hook `useChannelBAccess` (query key `['leda','admin','channel-b-access']`, optional 30 s polling and focus refetch for B5b, cache purged when the admin session ends), and `components/admin/channelBAccess/` (container `ChannelBAccessSettings`, presentational `ChannelBAccessList` and `ChannelBAccessIdentity`, usted copy in `channelBAccessCopy.ts`) mounted under the credentials in the Leda tab. Revoke uses `AdminDestructiveDialog`. The existing `GlobalSettingsDialog.voice.integration` and `VoiceSettingsTab` tests now stub the new list route.
+  - Route evidence: B5 delegated (writer for several non-trivial files).
+  - Pre-commit review (GGA) passed; notes only: the date uses the browser locale, and the shared parsers reuse the `ADMIN_CREDENTIAL_RESPONSE_INVALID` code.
 
 ## Acceptance criteria
 
