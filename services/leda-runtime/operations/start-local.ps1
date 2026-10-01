@@ -288,6 +288,8 @@ function Save-LedaDevelopmentReceipt {
 }
 
 $template = Get-LedaConfigurationTemplate -RuntimeRoot $runtimeRoot
+# One-time Prisma -> Leda copy of the old state and credential key, before any read of either.
+Invoke-LedaLegacyLocalMigration | Out-Null
 Initialize-LedaRuntimeState -StateRoot $stateRoot -Template $template | Out-Null
 . (Join-Path $PSScriptRoot 'startup-preflight.ps1')
 $script:developmentReceipt = $null

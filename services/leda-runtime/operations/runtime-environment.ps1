@@ -438,3 +438,165 @@ function Initialize-LedaRuntimeState {
         Seeded        = $seeded
     }
 }
+
+# --- Prisma -> Leda one-time local migration -------------------------------------------------
+# The assistant was renamed, and with it the default machine state directory and the credential
+# master key directory. The credential store is encrypted with that key, so the old key must
+# arrive intact. Both migrations COPY: the old directories are never moved, modified or deleted,
+# an existing new directory or key is never overwritten, and a repeated call is a no-op. This is
+# the only place that still names the old locations.
+
+function Get-LedaLegacyPrismaName {
+    <#
+    .SYNOPSIS
+        Maps a name containing the old assistant name to its Leda spelling, preserving case.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    return $Name.Replace('PRISMA', 'LEDA').Replace('Prisma', 'Leda').Replace('prisma', 'leda')
+}
+
+function Copy-LedaDirectoryTree {
+    <#
+    .SYNOPSIS
+        Recursively copies a directory, preserving each item's DACL, skipping top-level names.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [string[]]$ExcludeTopLevelName = @()
+    )
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $stack = New-Object System.Collections.Generic.Stack[object]
+    $stack.Push([pscustomobject]@{ Source = $Source; Destination = $Destination; Top = $true })
+    $directories = New-Object System.Collections.Generic.List[object]
+    while ($stack.Count -gt 0) {
+        $current = $stack.Pop()
+        $directories.Add($current)
+        foreach ($child in [IO.Directory]::GetFileSystemEntries($current.Source)) {
+            $name = [IO.Path]::GetFileName($child)
+            if ($current.Top -and ($ExcludeTopLevelName -contains $name)) { continue }
+            $target = Join-Path $current.Destination $name
+            if ([IO.Directory]::Exists($child)) {
+                New-Item -ItemType Directory -Path $target -Force | Out-Null
+                $stack.Push([pscustomobject]@{ Source = $child; Destination = $target; Top = $false })
+            }
+            else {
+                [IO.File]::Copy($child, $target, $false)
+                try {
+                    $acl = (New-Object IO.FileInfo($child)).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+                    (New-Object IO.FileInfo($target)).SetAccessControl($acl)
+                }
+                catch {
+                    Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $target, $_.Exception.Message)
+                }
+            }
+        }
+    }
+    # Directory rules last, so a protected (non-inheriting) directory never blocks the copy above.
+    foreach ($pair in $directories) {
+        try {
+            $acl = (New-Object IO.DirectoryInfo($pair.Source)).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+            (New-Object IO.DirectoryInfo($pair.Destination)).SetAccessControl($acl)
+        }
+        catch {
+            Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $pair.Destination, $_.Exception.Message)
+        }
+    }
+}
+
+function Invoke-LedaLegacyStateMigration {
+    <#
+    .SYNOPSIS
+        Copies %LOCALAPPDATA%\CoreAnalytics\Prisma to ...\Leda when only the old one exists.
+
+    .DESCRIPTION
+        The copy is staged in a sibling directory and renamed into place, so an interrupted run
+        never leaves a half-populated Leda directory. The ephemeral run directory (process
+        manifest and locks, which name the old modules) is not copied, and files whose names
+        contain the old assistant name are renamed inside the copy.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$LocalAppData)
+
+    $core = Join-Path ([IO.Path]::GetFullPath($LocalAppData)) 'CoreAnalytics'
+    $legacy = Join-Path $core 'Prisma'
+    $target = Join-Path $core 'Leda'
+    $staging = Join-Path $core 'Leda.migrating'
+    if ((Test-Path -LiteralPath $target) -or -not (Test-Path -LiteralPath $legacy -PathType Container)) {
+        return $false
+    }
+
+    if (Test-Path -LiteralPath $staging) {
+        Remove-Item -LiteralPath $staging -Recurse -Force
+    }
+    Copy-LedaDirectoryTree -Source $legacy -Destination $staging -ExcludeTopLevelName @('run')
+    $renamed = 0
+    foreach ($item in @(Get-ChildItem -LiteralPath $staging -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending)) {
+        $newName = Get-LedaLegacyPrismaName -Name $item.Name
+        if ($newName -ceq $item.Name) { continue }
+        if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $item.FullName) $newName)) { continue }
+        Rename-Item -LiteralPath $item.FullName -NewName $newName
+        $renamed++
+    }
+    [IO.Directory]::Move($staging, $target)
+    Write-Host "Migrated the legacy local state '$legacy' to '$target' ($renamed file name(s) renamed). The old directory was left untouched."
+    return $true
+}
+
+function Invoke-LedaLegacyCredentialKeyMigration {
+    <#
+    .SYNOPSIS
+        Copies the credential master key from ...\PrismaCredentialKey to ...\LedaCredentialKey.
+
+    .DESCRIPTION
+        Only when the new master key does not exist yet. The key is copied byte for byte with its
+        access rules; the old key is left in place.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$LocalAppData)
+
+    $core = Join-Path ([IO.Path]::GetFullPath($LocalAppData)) 'CoreAnalytics'
+    $legacyKey = Join-Path $core 'PrismaCredentialKey\master.key'
+    $targetDirectory = Join-Path $core 'LedaCredentialKey'
+    $targetKey = Join-Path $targetDirectory 'master.key'
+    if ((Test-Path -LiteralPath $targetKey) -or -not (Test-Path -LiteralPath $legacyKey -PathType Leaf)) {
+        return $false
+    }
+
+    New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
+    [IO.File]::Copy($legacyKey, $targetKey, $false)
+    try {
+        $acl = (New-Object IO.FileInfo($legacyKey)).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+        (New-Object IO.FileInfo($targetKey)).SetAccessControl($acl)
+    }
+    catch {
+        Write-Warning ("Could not preserve the access rules of '{0}': {1}" -f $targetKey, $_.Exception.Message)
+    }
+    Write-Host "Migrated the legacy credential master key to '$targetKey'. The old key was left untouched."
+    return $true
+}
+
+function Invoke-LedaLegacyLocalMigration {
+    <#
+    .SYNOPSIS
+        Runs the one-time local migrations; call it before any read of the state or the key.
+
+    .DESCRIPTION
+        The state copy is skipped when LEDA_RUNTIME_STATE_DIR points the runtime elsewhere, because
+        the default directory is then not in use. The master key copy always applies: its default
+        location is independent of the state directory.
+    #>
+    [CmdletBinding()]
+    param([string]$LocalAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData))
+
+    $state = $false
+    if (-not $env:LEDA_RUNTIME_STATE_DIR) {
+        $state = Invoke-LedaLegacyStateMigration -LocalAppData $LocalAppData
+    }
+    $key = Invoke-LedaLegacyCredentialKeyMigration -LocalAppData $LocalAppData
+    return [pscustomobject]@{ StateMigrated = $state; CredentialKeyMigrated = $key }
+}

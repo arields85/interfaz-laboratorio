@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import { applySharedConfigToDocument, startSharedConfigReapply } from './app/sharedConfigAppliers'
 import { cleanupLegacyStorage } from './utils/legacyStorageCleanup'
+import { migrateLegacyLedaStorageKeys } from './utils/legacyLedaStorageMigration'
 import { ledaSessionClient } from './services/ledaSessionClient'
 import { sharedConfigStorage } from './services/sharedConfigStorage.service'
 import { startLedaVoiceTimelineDiagnostics } from './services/ledaVoiceTimelineDiagnosticsSink'
@@ -23,6 +24,8 @@ const queryClient = new QueryClient({
 // loads, so no extra loading state is rendered: routes only mount once the document
 // (server, cache copy or empty) is in memory and the configuration appliers can read it.
 async function bootstrap(): Promise<void> {
+  // Before any read: the shared configuration's local fallback and the orb read the new keys.
+  migrateLegacyLedaStorageKeys()
   await sharedConfigStorage.load()
   sharedConfigStorage.startPolling()
 

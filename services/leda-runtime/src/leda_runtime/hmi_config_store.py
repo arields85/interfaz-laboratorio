@@ -20,6 +20,12 @@ MAX_BATCH_OPERATIONS = 200
 MAX_KEYS = 512
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9:._-]+$")
 BUSY_TIMEOUT_SECONDS = 5.0
+# Prisma -> Leda rename: shared keys that changed name. Migrated once when the store is
+# opened (see _migrate_legacy_keys); this is the only place that still names the old keys.
+LEGACY_PRISMA_KEY_RENAMES: tuple[tuple[str, str], ...] = (
+    ("hmi:prisma-hmi-name", "hmi:leda-hmi-name"),
+    ("hmi:prisma-orb-visual-config", "hmi:leda-orb-visual-config"),
+)
 
 
 class HmiConfigInvalid(ValueError):
@@ -80,8 +86,30 @@ class HmiConfigStore:
                             "CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL);"
                             "INSERT OR IGNORE INTO meta (id, revision) VALUES (1, 0);"
                         )
+                        self._migrate_legacy_keys(setup)
                     self._schema_ready = True
         return sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)
+
+    @staticmethod
+    def _migrate_legacy_keys(connection: sqlite3.Connection) -> None:
+        """Copy each legacy key to its new name when absent, drop the old key, bump the revision once."""
+        placeholders = ", ".join("?" for _ in LEGACY_PRISMA_KEY_RENAMES)
+        legacy_keys = [old for old, _ in LEGACY_PRISMA_KEY_RENAMES]
+        if connection.execute(f"SELECT 1 FROM config WHERE key IN ({placeholders}) LIMIT 1", legacy_keys).fetchone() is None:
+            return
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for old, new in LEGACY_PRISMA_KEY_RENAMES:
+                row = connection.execute("SELECT value FROM config WHERE key = ?", (old,)).fetchone()
+                if row is None:
+                    continue
+                connection.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", (new, row[0]))
+                connection.execute("DELETE FROM config WHERE key = ?", (old,))
+            connection.execute("UPDATE meta SET revision = revision + 1 WHERE id = 1")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
+        connection.execute("COMMIT")
 
     def read_revision(self) -> int:
         with self._connection() as connection:

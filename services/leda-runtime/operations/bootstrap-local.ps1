@@ -10,6 +10,8 @@ $runtimeRoot = Get-LedaRuntimeRoot
 $stateRoot = Get-LedaStateRoot
 $template = Get-LedaConfigurationTemplate -RuntimeRoot $runtimeRoot
 
+# One-time Prisma -> Leda copy of the old state and credential key, before the new state exists.
+Invoke-LedaLegacyLocalMigration | Out-Null
 $state = Initialize-LedaRuntimeState -StateRoot $stateRoot -Template $template
 Write-Host "Leda Local state is ready at $($state.StateRoot)." -ForegroundColor Green
 if (-not $state.Seeded) {
