@@ -541,9 +541,17 @@ The assistant was renamed from Prisma to Leda. `start-local.ps1` and
   directory is **copied** (never moved, modified or deleted) except its `run\` folder
   (stale process manifest and locks). Files whose names contain `prisma` are renamed inside
   the copy (for example `prisma_voice_config.json` becomes `leda_voice_config.json`).
-  It is skipped when `LEDA_RUNTIME_STATE_DIR` is set.
+  The copy is staged in `Leda.migrating` and renamed into place. It is skipped only when
+  `LEDA_RUNTIME_STATE_DIR` points somewhere other than that default directory (the launcher
+  exports the default path itself before migrating, which still migrates).
 - If `...\LedaCredentialKey\master.key` does not exist and `...\PrismaCredentialKey\master.key`
-  does, the key is copied byte for byte. The credential store is encrypted with it.
+  does, the key is staged in `LedaCredentialKey.migrating` (which first receives the protected
+  access rules of the old key directory), copied byte for byte, verified, and renamed into
+  place. The credential store is encrypted with it.
+- Both migrations fail closed: if the access rules of any copied file or directory cannot be
+  copied, the staging directory is removed and the launcher stops with an error naming the
+  path, instead of leaving credentials with inherited, more permissive rules. A leftover
+  staging directory from an interrupted run is replaced on the next run.
 - An existing new directory or key is never overwritten, a repeated run does nothing, and
   each migration prints what it did.
 - The shared HMI configuration keys `hmi:prisma-hmi-name` and `hmi:prisma-orb-visual-config`

@@ -71,15 +71,16 @@ Side effect handled by hand: the substitution renamed this very document, so it 
 ## Migration design (L2)
 
 - Local state and master key: `Invoke-LedaLegacyLocalMigration` in `services/leda-runtime/operations/runtime-environment.ps1`, called by `start-local.ps1` and `bootstrap-local.ps1` before `Initialize-LedaRuntimeState`. Both run before any read of the key or the state. It COPIES (never moves, never deletes, never overwrites):
-  - `%LOCALAPPDATA%\CoreAnalytics\Prisma` to `...\Leda` when the new one does not exist, staged in `Leda.migrating` and renamed into place; the `run\` folder is not copied; files whose names contain `prisma` are renamed inside the copy; DACLs are preserved. Skipped when `LEDA_RUNTIME_STATE_DIR` is set.
-  - `...\PrismaCredentialKey\master.key` to `...\LedaCredentialKey\master.key` when the new key is missing, byte for byte, with its DACL.
+  - `%LOCALAPPDATA%\CoreAnalytics\Prisma` to `...\Leda` when the new one does not exist, staged in `Leda.migrating` and renamed into place; the `run\` folder is not copied; files whose names contain `prisma` are renamed inside the copy; DACLs are preserved. Skipped only when `LEDA_RUNTIME_STATE_DIR` points somewhere other than the default dir (the launcher exports the default path itself before migrating, which still migrates).
+  - `...\PrismaCredentialKey\master.key` to `...\LedaCredentialKey\master.key` when the new key is missing: staged in `LedaCredentialKey.migrating`, which first receives the protected DACL of the old key directory, then the key byte for byte with its DACL (copy verified), then renamed into place.
+  - Both fail closed: if any access rule cannot be copied, the staging directory is removed and the launcher stops with an error naming the path, rather than leaving unprotected credentials. A stale staging directory is replaced on the next run.
   - It is idempotent and logs what it did. Python keeps resolving only the new default paths, so the two views agree.
-- Shared HMI configuration keys: `HmiConfigStore._migrate_legacy_keys` runs once when the store opens its database, copies the old value when the new key is absent, deletes the old key and bumps the revision once.
-- Browser keys: `hmi-app/src/utils/legacyLedaStorageMigration.ts`, called at the top of `bootstrap()` in `main.tsx`, before the shared configuration loads (its local fallback reads the new keys). It covers `hmi:prisma-hmi-name`, `hmi:prisma-orb-visual-config` and `hmi-prisma-voice-prebuffer-history`. The five content keys the bootstrap fallback reads never contained the old name, so they need no migration. The cached copy of the server document (`hmi:shared-config-cache`) is not rewritten; the next load replaces it.
+- Shared HMI configuration keys: `HmiConfigStore._migrate_legacy_keys` runs once when the store opens its database, copies the old value when the new key is absent, deletes the old key and bumps the revision once, and only when a legacy row actually moved (the check runs inside the immediate transaction, so a second opener that lost the race does not bump again).
+- Browser keys: `hmi-app/src/utils/legacyPrismaStorageMigration.ts`, called at the top of `bootstrap()` in `main.tsx`, before the shared configuration loads (its local fallback reads the new keys). It covers `hmi:prisma-hmi-name`, `hmi:prisma-orb-visual-config` and `hmi-prisma-voice-prebuffer-history`. The five content keys the bootstrap fallback reads never contained the old name, so they need no migration. The cached copy of the server document (`hmi:shared-config-cache`) is not rewritten; the next load replaces it.
 
 RED/GREEN evidence:
 
-- Browser: `npx vitest run src/utils/legacyLedaStorageMigration.test.ts` failed on the missing module (RED), then 6 passed (GREEN).
+- Browser: `npx vitest run src/utils/legacyPrismaStorageMigration.test.ts` failed on the missing module (RED), then 6 passed (GREEN).
 - Server keys: `unittest tests.test_hmi_config_legacy_keys` failed on the missing import `LEGACY_PRISMA_KEY_RENAMES` (RED), then passed together with `tests.test_hmi_config` (28 tests, GREEN).
 - Local state and key: `unittest tests.test_legacy_state_migration` failed 13 of 13 on the missing PowerShell functions and wiring (RED), then passed 13 of 13 (GREEN).
 
@@ -87,8 +88,9 @@ RED/GREEN evidence:
 
 - `services/leda-runtime/operations/runtime-environment.ps1`, `start-local.ps1`, `bootstrap-local.ps1`: the migration names the old directories and file names.
 - `services/leda-runtime/src/leda_runtime/hmi_config_store.py`: the old shared keys.
-- `hmi-app/src/utils/legacyLedaStorageMigration.ts`: the old browser keys.
-- `services/leda-runtime/tests/test_legacy_state_migration.py`, `test_hmi_config_legacy_keys.py`, `hmi-app/src/utils/legacyLedaStorageMigration.test.ts`: fixtures for those migrations.
+- `hmi-app/src/utils/legacyPrismaStorageMigration.ts`: the old browser keys.
+- `hmi-app/src/main.tsx`: imports and calls `migrateLegacyPrismaStorageKeys`.
+- `services/leda-runtime/tests/test_legacy_state_migration.py`, `test_hmi_config_legacy_keys.py`, `hmi-app/src/utils/legacyPrismaStorageMigration.test.ts`: fixtures for those migrations.
 - `services/leda-runtime/README.md` ("One-time migration" section) and `tools/dev-launcher/README.md` (key row): document the migration.
 - This feature document.
 - `.engram/chunks/*.jsonl.gz`: compressed Engram export, history, not rewritten.
@@ -125,4 +127,10 @@ RED/GREEN evidence:
       - the browser keys were migrated to `hmi:leda-*`;
       - the Leda panel generates the Channel A QR (Channel A credential readable).
     - Inert legacy browser keys `hmi:prisma-runtime-mode` and `hmi:prisma-voice-tts-service-url` remain. Nothing reads them; this is harmless.
-
+- 2026-10-01: native-review fixups M1-M7:
+  - M5 `bd7618d` (helper renamed to `ConvertTo-LedaName`) and M6 `13dd185` (module renamed to `legacyPrismaStorageMigration.ts`, `migrateLegacyPrismaStorageKeys`): refactors, tests stayed green (6 and 16 passed).
+  - M3 `f179eb4`: `test_legacy_state_migration` and the PowerShell classes of `test_python_environment` skip on non-Windows and no longer read `SystemRoot` at import. RED: with `SystemRoot` unset the import raised `KeyError: 'SystemRoot'`; GREEN: with `SystemRoot` unset and `sys.platform` patched to linux, 47 tests ran, 38 skipped, none errored. The other import-time `SystemRoot` reads in `test_operations.py` and `test_runtime_safety.py` sit inside test methods, not at import, so discovery does not error there; they were left alone.
+  - M1 and M2 `7756b52`: both migrations fail closed and the key is staged (`LedaCredentialKey.migrating`, directory DACL first, byte verification, rename). RED: 7 new tests failed; GREEN: 24 of 24.
+  - M7 `5c2febd`: the legacy-key check and the revision bump moved inside `BEGIN IMMEDIATE`, bumping only when a row moved. RED: the second-opener test saw revision 3 instead of 2; GREEN: 29 passed with `test_hmi_config`.
+  - M4: README and the Migration design above state the current override rule and the fail-closed behavior.
+  - Gates: `tsc -b` clean, lint clean, vitest 3779 passed, build ok, offline backend gate 1867 tests OK (PAC5 exit 0).
