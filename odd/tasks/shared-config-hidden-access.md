@@ -172,3 +172,13 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
     - The open viewer picked it up WITHOUT a reload by 10:55:50, about 7 s later, inside the 10 s poll. Because the server document now won entirely, it showed "Sin Vistas Publicadas", as designed.
     - The store was then restored to revision 0 with no items, after a backup copy, and after a reload the viewer showed the local dashboards again.
   - Not checked live: the admin write path, because the control Chrome admin session had expired and the parent holds no credentials. It is covered by the HTTP tests (401/403/413/503) and the adapter tests.
+- 2026-10-01 closing slice review:
+  - Native review of `d448341..5129ef9` (H1–H7, the T7 docs and the live check record): approved and acknowledged (lineage `review-d0aa99676cc458e9`). Reviewed boundary `5129ef9`. The whole feature is now reviewed.
+  - Advisories:
+    - `R3-seed-await-before-inflight`: false positive for a double flush. `flushNow` sets `flushPromise` before `performFlush` awaits `prepareSeed`, so a second debounced flush reuses the same promise. The only overlap is a poll that may run `refresh()` during the seed check, which is harmless.
+    - `R3-reset-color-keyset-unproved`: there is no test that `COLOR_TOKEN_KEYS` equals the keys walked through `COLOR_GROUPS`. Left as a small follow-up.
+
+## Status
+
+Complete. Every task is checked and every slice was reviewed and approved. Merging into main and pushing are the user's decisions. Next: the Prisma → Leda rename (a separate feature, branched from here).
+
