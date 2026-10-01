@@ -44,11 +44,12 @@ registered accent custom properties.
 
 ## Tasks
 
-- [ ] **A1** — Setting (service/store/persistence, default off) + Tema switch with the "applies with Clásico" note +
+- [x] **A1** — Setting (service/store/persistence, default off) + Tema switch with the "applies with Clásico" note +
   dirty/save/revert.
-- [ ] **A2** — Viewer layer: accents outside the frame for widgets with an effective link, hover animation with the
+- [x] **A2** — Viewer layer: accents outside the frame for widgets with an effective link, hover animation with the
   Contorno values, offset token, reduced motion; not in the builder.
-- [ ] **A3** — Docs + live check (control Chrome).
+- [x] **A3** — Docs (`docs/DESIGN_SYSTEM.md`, done).
+- [ ] **A4** — Live check in the browser (control Chrome) — left for the parent.
 
 ## Acceptance criteria
 
@@ -60,6 +61,17 @@ registered accent custom properties.
 
 - 2026-09-30: document created; route: delegated writer (writer trigger: 2+ non-trivial files).
 
+- 2026-09-30 (writer): A1-A3 done.
+  - `f781684` feat(theme): setting + Tema switch (441 +, 7 -). RED: service suite failed to load (module missing); Tema suite 10 failed / 16 passed (others green). GREEN: Tema tabs 80 passed.
+  - `a324e18` feat(theme): viewer layer + CSS (357 +, 1 -). RED: DashboardViewer.linkAccents 7 failed / 5 passed; CSS contract 6 failed. GREEN: 12 and 6 passed.
+  - `98273d2` docs(theme): DESIGN_SYSTEM section (18 +).
+  - Mechanism: `ViewerLinkCornerAccents` is a sibling layer in the item surface (aria-hidden, pointer-events none), `inset: calc(<surface inset> - var(--link-accent-offset))`; the viewer item gets `hmi-link-accents-host` and `.hmi-link-accents-host:hover .hmi-link-accents` switches the registered `--frame-accent-*` properties from the `--link-accent-*-rest` to the `-hover` tokens (same 0.2s ease transition and 8-gradient drawing as `.glass-panel::after`); radius = `--frame-radius-rest` + offset; reduced motion disables the transition.
+  - Tokens (`:root` in index.css): `--link-accent-offset` 4px, `-length-rest/-hover` 18px/8px, `-thickness-*` 1px, `-color-*` #ffffff, `-opacity-rest/-hover` 0%/40%.
+  - Setting: key `hmi-link-corner-accents`, store + service + `useLinkCornerAccentsActive` (setting + Clasico); Tema section after "Calado del ícono" with the "Ahora no se aplica: requiere el tema Clásico." note.
+  - Decisions: hover host is the whole viewer item, so the accents also react over the gutter between widgets (needed so they do not flicker when the pointer is on them); builder is untouched (the layer is only rendered by `DashboardViewer`); works with both frame shapes (outer box).
+  - Verification (hmi-app): `npx tsc -b`: clean; `npm run lint`: clean; `npm run build`: built; `npm test`: 3566 passed, 1 failed (known flaky Topbar "continues admin navigation immediately when runtime short is disabled", passes in isolation, 16/16).
+  - Needs the browser: pixel check of the brackets 4 px outside the border (rounded corner clipping, both frame shapes, group container with link, inherited member link, reduced motion).
+
 ## Next step
 
-A1–A3 (delegated writer), then live check.
+Live check of the corner accents in the browser (parent), then close the feature.
