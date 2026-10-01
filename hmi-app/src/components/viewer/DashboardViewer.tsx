@@ -15,6 +15,8 @@ import {
 import { extendViewerEntranceOrders, resolveViewerEntranceOrders } from '../../utils/viewerEntrance';
 import WidgetPresentationBoundary from './WidgetPresentationBoundary';
 import ViewerEntranceFrameOverlays from './ViewerEntranceFrameOverlays';
+import ViewerLinkCornerAccents from './ViewerLinkCornerAccents';
+import { useLinkCornerAccentsActive } from '../../hooks/useLinkCornerAccentsActive';
 import { ViewerEntranceContext } from '../../hooks/useViewerEntranceCountUp';
 import { GridFrameScope } from '../ui/GridFrameScope';
 import { useTabFrameWidths } from '../../hooks/useTabFrameWidths';
@@ -102,6 +104,10 @@ export default function DashboardViewer({
 
     const widgetMap = new Map(widgets.map(w => [w.id, w]));
 
+    // "Esquinas en widgets con enlace" (Tema tab): on with Clasico; each widget still needs an
+    // effective navigation target and a frame (see the item below).
+    const linkAccentsActive = useLinkCornerAccentsActive();
+
     // Tab frame shape: each widget reports the width of its tab so the entrance overlays follow the
     // tab + chamfered body silhouette (only widgets whose frame is the tab shape appear here).
     const { widths: tabWidths, heights: tabHeights, reporterFor } = useTabFrameWidths();
@@ -176,6 +182,12 @@ export default function DashboardViewer({
                             navigationTargetDashboardId: resolveEffectiveNavigationTarget(widget, widgets),
                         };
 
+                        // Only widgets that actually navigate on click (own or inherited target) and
+                        // draw a frame get the corner accents outside it.
+                        const showLinkAccents = linkAccentsActive
+                            && Boolean(effectiveWidget.navigationTargetDashboardId)
+                            && drawsGridFrame(widget);
+
                         // G5 group hover: which locked group (if any) hovering THIS item should
                         // mark as hovered — its own id for the container, or its owning group's
                         // id for a member.
@@ -190,7 +202,11 @@ export default function DashboardViewer({
                                 key={widget.id}
                                 data-testid={`dashboard-viewer-item-${widget.id}`}
                                 data-group-hover-target={hoveredGroup?.groupId === widget.id ? 'true' : undefined}
-                                className={entranceKey !== undefined ? 'h-full relative hmi-viewer-entrance-item' : 'h-full relative'}
+                                className={[
+                                    'h-full relative',
+                                    entranceKey !== undefined ? 'hmi-viewer-entrance-item' : '',
+                                    showLinkAccents ? 'hmi-link-accents-host' : '',
+                                ].filter(Boolean).join(' ')}
                                 style={{
                                     ...entranceStyle,
                                     gridColumnStart: item.x + 1,
@@ -237,6 +253,9 @@ export default function DashboardViewer({
                                             tabWidth={tabWidths[widget.id] ?? null}
                                             tabHeight={tabHeights[widget.id]}
                                         />
+                                    ) : null}
+                                    {showLinkAccents ? (
+                                        <ViewerLinkCornerAccents widgetId={widget.id} inset={resolveWidgetSurfaceInset(widget)} />
                                     ) : null}
                                 </div>
                             </div>

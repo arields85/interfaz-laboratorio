@@ -455,6 +455,29 @@ h1, h2, h3, h4, h5, h6 {
   --icon-cutout-ring-width: 1px;
 }
 
+/* ── Esquinas en widgets con enlace (tokens) ───────────────────────────────
+ * Configuración general -> Tema -> "Esquinas en widgets con enlace" (solo con el tema Clásico,
+ * solo en el visor; ver `ViewerLinkCornerAccents`). Dibuja las esquinas de acento del tema
+ * Contorno en una capa hermana, unos píxeles POR FUERA del marco (el marco recorta su desborde).
+ * Los valores de reposo y hover replican el acento de marco de Contorno.
+ *   --link-accent-offset            separación entre el borde del marco y las esquinas
+ *   --link-accent-length-rest/-hover        largo de cada brazo (reposo / hover)
+ *   --link-accent-thickness-rest/-hover     grosor de cada brazo
+ *   --link-accent-color-rest/-hover         color de las esquinas
+ *   --link-accent-opacity-rest/-hover       opacidad (0 % = ocultas en reposo)
+ * ────────────────────────────────────────────────────────────────────── */
+:root {
+  --link-accent-offset: 4px;
+  --link-accent-length-rest: 18px;
+  --link-accent-length-hover: 8px;
+  --link-accent-thickness-rest: 1px;
+  --link-accent-thickness-hover: 1px;
+  --link-accent-color-rest: #ffffff;
+  --link-accent-color-hover: #ffffff;
+  --link-accent-opacity-rest: 0%;
+  --link-accent-opacity-hover: 40%;
+}
+
 /* ── Forma del marco: Pestaña (tokens) ─────────────────────────────────────
  * Geometría y colores de la forma "Pestaña" (Configuración general -> Tema ->
  * "Forma del marco"); solo se usan bajo `.hmi-tab-frame` (ver `WidgetFrame`).
@@ -1068,6 +1091,7 @@ h1, h2, h3, h4, h5, h6 {
 
   .glass-panel,
   .glass-panel::after,
+  .hmi-link-accents,
   .widget-state-warning,
   .widget-state-critical,
   [data-icon-cutout]::before,
@@ -1563,6 +1587,49 @@ h1, h2, h3, h4, h5, h6 {
       var(--frame-accent-thickness) var(--frame-accent-length);
     transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
       --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
+  }
+
+  /* Esquinas en widgets con enlace: capa hermana del widget en la superficie del ítem del visor
+   * (fuera del marco, que recorta su desborde). Mismas propiedades registradas, mismo dibujo y
+   * misma transición que el acento de `.glass-panel::after`; el hover es el del ítem del visor. */
+  .hmi-link-accents {
+    position: absolute;
+    border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));
+    pointer-events: none;
+    --frame-accent-length: var(--link-accent-length-rest);
+    --frame-accent-thickness: var(--link-accent-thickness-rest);
+    --frame-accent-color: var(--link-accent-color-rest);
+    --frame-accent-opacity: var(--link-accent-opacity-rest);
+    --frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);
+    background-repeat: no-repeat;
+    background-image:
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint));
+    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+    background-size:
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length),
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length),
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length),
+      var(--frame-accent-length) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--frame-accent-length);
+    transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
+      --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
+  }
+
+  .hmi-link-accents-host:hover .hmi-link-accents {
+    --frame-accent-length: var(--link-accent-length-hover);
+    --frame-accent-thickness: var(--link-accent-thickness-hover);
+    --frame-accent-color: var(--link-accent-color-hover);
+    --frame-accent-opacity: var(--link-accent-opacity-hover);
   }
 
   .glass-panel-danger {
