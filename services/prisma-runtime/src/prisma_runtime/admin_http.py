@@ -343,12 +343,18 @@ class AdminHttpBoundary:
         A session that was displaced by another login (takeover) answers with its own code so the
         client can say so; every other cause (no cookie, expiry, logout, reset) stays generic.
         """
-        cookie = request.cookies.get(COOKIE_NAME, "")
         try:
-            replaced = self.auth_service.was_session_replaced(cookie) is True if cookie else False
+            replaced = self.auth_service.was_session_replaced(request.cookies.get(COOKIE_NAME, ""))
         except AuthUnavailable:
-            return self._error("AUTH_STORAGE_UNAVAILABLE", 503)
-        return self._error("ADMIN_SESSION_REPLACED" if replaced else "AUTHENTICATION_REQUIRED", 401)
+            replaced = False  # the lookup is best-effort: an unauthenticated 401 never becomes a 503
+        if not replaced:
+            return self._error("AUTHENTICATION_REQUIRED", 401)
+        response = self._error("ADMIN_SESSION_REPLACED", 401)
+        self._expire_session_cookie(response)  # the displaced browser is told once, not on every request
+        return response
+
+    def _expire_session_cookie(self, response) -> None:
+        response.delete_cookie(COOKIE_NAME, path=COOKIE_PATH, secure=self.transport.secure_cookie, httponly=True, samesite="Strict")
 
     def _authorized_session(self, *, require_csrf: bool):
         try:
@@ -557,7 +563,7 @@ class AdminHttpBoundary:
             if not revoked:
                 return self._error("CSRF_VALIDATION_FAILED", 403)
             response = Response(status=204)
-            response.delete_cookie(COOKIE_NAME, path=COOKIE_PATH, secure=self.transport.secure_cookie, httponly=True, samesite="Strict")
+            self._expire_session_cookie(response)
             response.headers["Cache-Control"] = "no-store"
             return response
 

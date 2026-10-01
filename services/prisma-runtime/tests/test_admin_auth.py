@@ -468,6 +468,53 @@ class AdminSingleSessionTests(unittest.TestCase):
         self.assertTrue(self.service.was_session_replaced(first.session_id))
 
 
+    def test_the_replaced_lookup_is_a_pure_read_that_needs_no_write_lock(self) -> None:
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+        locker = sqlite3.connect(self.database, timeout=0.1)
+        self.addCleanup(locker.close)
+        locker.execute("BEGIN IMMEDIATE")
+
+        started = time.perf_counter()
+        self.assertTrue(self.service.was_session_replaced(first.session_id))
+        self.assertFalse(self.service.was_session_replaced("a forged cookie value"))
+
+        self.assertLess(time.perf_counter() - started, 1.0)
+
+    def test_the_replaced_lookup_neither_creates_the_table_nor_purges_markers(self) -> None:
+        first = self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.service.login("admin", VALID_PASSWORD, "127.0.0.1", takeover=True)
+        self.clock[0] = 1010.0 + 1000 + 1
+
+        self.assertFalse(self.service.was_session_replaced(first.session_id))
+
+        with closing(sqlite3.connect(self.database)) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM replaced_sessions").fetchone()[0], 1)
+            connection.execute("DROP TABLE replaced_sessions")
+            connection.commit()
+        self.assertFalse(self.service.was_session_replaced(first.session_id))
+        with closing(sqlite3.connect(self.database)) as connection:
+            tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'replaced_sessions'").fetchall()
+        self.assertEqual(tables, [])
+
+    def test_schema_init_adds_the_marker_table_to_a_database_that_lacks_it(self) -> None:
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.execute("DROP TABLE replaced_sessions")
+            connection.commit()
+
+        self.repository.initialize_for_provisioning()
+
+        with closing(sqlite3.connect(self.database)) as connection:
+            self.assertIsNotNone(
+                connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'replaced_sessions'").fetchone()
+            )
+
+    def test_an_idle_expired_session_does_not_trigger_the_active_elsewhere_refusal(self) -> None:
+        self.service.login("admin", VALID_PASSWORD, "127.0.0.1")
+        self.clock[0] = 1010.0 + 100
+
+        self.assertIsNotNone(self.service.login("admin", VALID_PASSWORD, "192.0.2.9"))
+
 class AdminCliTests(unittest.TestCase):
     def test_provision_and_reset_use_non_echoing_reader_and_revoke_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -268,6 +268,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
     def test_a_status_get_requires_authentication_and_is_observational(self) -> None:
         unauthenticated = Mock()
         unauthenticated.read_session.return_value = None
+        unauthenticated.was_session_replaced.return_value = False
         denied_client = self.build_client(
             channel_a=self.channel_a, telegram=self.telegram_manager, auth_service=unauthenticated
         )
@@ -326,6 +327,7 @@ class ChannelAAdminHttpTests(unittest.TestCase):
     def test_a_apply_requires_authentication_origin_and_csrf_before_the_manager(self) -> None:
         unauthenticated = Mock()
         unauthenticated.read_session.return_value = None
+        unauthenticated.was_session_replaced.return_value = False
         unauth_client = self.build_client(channel_a=self.channel_a, auth_service=unauthenticated)
 
         denied = unauth_client.post(

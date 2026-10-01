@@ -128,6 +128,7 @@ class HmiConfigHttpTests(unittest.TestCase):
 
     def test_empty_document_is_public_and_not_cacheable(self) -> None:
         self.auth.read_session.return_value = None
+        self.auth.was_session_replaced.return_value = False
         response = self.read()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"ok": True, "revision": 0, "items": {}})
@@ -142,6 +143,7 @@ class HmiConfigHttpTests(unittest.TestCase):
 
     def test_write_requires_a_session(self) -> None:
         self.auth.read_session.return_value = None
+        self.auth.was_session_replaced.return_value = False
         response = self.write({"set": {"hmi:a": "1"}})
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")

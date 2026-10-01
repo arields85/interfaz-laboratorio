@@ -54,6 +54,7 @@ class CredentialHttpTests(unittest.TestCase):
 
     def test_absent_expired_or_revoked_session_denies_before_provider_or_storage(self) -> None:
         self.auth.read_session.return_value = None
+        self.auth.was_session_replaced.return_value = False
         response = self.client.put(
             "/api/prisma/admin/credentials/unsupported",
             json={"secret": "synthetic"},
@@ -373,6 +374,7 @@ class GeminiVerifyHttpTests(unittest.TestCase):
 
     def test_requires_authenticated_session_before_verifying(self) -> None:
         self.auth.read_session.return_value = None
+        self.auth.was_session_replaced.return_value = False
         response = self._verify()
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
@@ -495,6 +497,7 @@ class TelegramFamilyVerifyHttpTests(unittest.TestCase):
         for provider in ("telegram", "telegram_channel_a"):
             with self.subTest(provider=provider):
                 self.auth.read_session.return_value = None
+                self.auth.was_session_replaced.return_value = False
                 response = self._verify(provider)
                 self.assertEqual(response.status_code, 401)
                 self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")

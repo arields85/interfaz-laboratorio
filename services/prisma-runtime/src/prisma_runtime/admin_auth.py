@@ -24,7 +24,22 @@ SOURCE_FAILURE_LIMIT = 20
 MAX_FAILURE_ROWS = 100
 # Markers left for displaced sessions (see replaced_sessions); bounded so the table cannot grow.
 MAX_REPLACED_ROWS = 64
+# Single definition of the marker table: schema init creates it, and the takeover write path
+# re-asserts it (IF NOT EXISTS) so databases provisioned before the single-session rule keep
+# working without a schema version bump.
+REPLACED_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS replaced_sessions (
+    session_id_hash TEXT PRIMARY KEY,
+    replaced_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+)
+"""
 _HASH_SLOT = threading.BoundedSemaphore(1)
+
+
+def _is_live_session(row, now: float, idle_seconds: int) -> bool:
+    """Single liveness rule: within the absolute lifetime and not idle for too long."""
+    return now < row["absolute_expires_at"] and now - row["last_seen_at"] < idle_seconds
 
 
 class AuthUnavailable(RuntimeError):
@@ -175,7 +190,7 @@ class AdminAuthRepository:
                 if version not in (0, SCHEMA_VERSION) or (version == 0 and tables):
                     raise AuthUnavailable("AUTH_STORAGE_UNAVAILABLE")
                 connection.executescript(
-                    """
+                    f"""
                     CREATE TABLE IF NOT EXISTS administrator (
                         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                         username TEXT NOT NULL,
@@ -191,11 +206,7 @@ class AdminAuthRepository:
                         last_seen_at REAL NOT NULL,
                         absolute_expires_at REAL NOT NULL
                     );
-                    CREATE TABLE IF NOT EXISTS replaced_sessions (
-                        session_id_hash TEXT PRIMARY KEY,
-                        replaced_at REAL NOT NULL,
-                        expires_at REAL NOT NULL
-                    );
+                    {REPLACED_SESSIONS_DDL};
                     CREATE TABLE IF NOT EXISTS login_failures (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         account_key TEXT NOT NULL,
@@ -286,15 +297,6 @@ class AdminAuthRepository:
 
         return self._translate_database_error(query)
 
-    @staticmethod
-    def _ensure_replaced_table(connection: sqlite3.Connection) -> None:
-        # Databases provisioned before the single-session rule have no marker table and keep
-        # schema version 1; the table is created on first use instead of bumping the version.
-        connection.execute(
-            "CREATE TABLE IF NOT EXISTS replaced_sessions ("
-            "session_id_hash TEXT PRIMARY KEY, replaced_at REAL NOT NULL, expires_at REAL NOT NULL)"
-        )
-
     def create_session_if_version(
         self,
         credential_version: int,
@@ -302,7 +304,7 @@ class AdminAuthRepository:
         source: str,
         *,
         takeover: bool = False,
-        idle_seconds: int | None = None,
+        idle_seconds: int,
     ) -> SessionCreation:
         def write() -> SessionCreation:
             with self._connection() as connection:
@@ -318,13 +320,12 @@ class AdminAuthRepository:
                 live = [
                     (other["session_id_hash"], other["absolute_expires_at"])
                     for other in connection.execute("SELECT * FROM admin_sessions").fetchall()
-                    if now < other["absolute_expires_at"]
-                    and (idle_seconds is None or now - other["last_seen_at"] < idle_seconds)
+                    if _is_live_session(other, now, idle_seconds)
                 ]
                 if live and not takeover:
                     return SessionCreation.ACTIVE_ELSEWHERE
                 if live:
-                    self._ensure_replaced_table(connection)
+                    connection.execute(REPLACED_SESSIONS_DDL)
                     connection.execute("DELETE FROM replaced_sessions WHERE expires_at <= ?", (now,))
                     connection.executemany(
                         "INSERT OR REPLACE INTO replaced_sessions VALUES (?, ?, ?)",
@@ -352,17 +353,20 @@ class AdminAuthRepository:
         return self._translate_database_error(write)
 
     def was_session_replaced(self, session_id: str, *, now: float) -> bool:
+        """Pure read: no write lock, no DDL, no purge (the takeover write path purges expired markers)."""
+
         def read() -> bool:
             with self._connection() as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                self._ensure_replaced_table(connection)
-                connection.execute("DELETE FROM replaced_sessions WHERE expires_at <= ?", (now,))
-                return (
-                    connection.execute(
-                        "SELECT 1 FROM replaced_sessions WHERE session_id_hash = ?", (digest_token(session_id),)
+                try:
+                    row = connection.execute(
+                        "SELECT 1 FROM replaced_sessions WHERE session_id_hash = ? AND expires_at > ?",
+                        (digest_token(session_id), now),
                     ).fetchone()
-                    is not None
-                )
+                except sqlite3.OperationalError as error:
+                    if "no such table" in str(error):
+                        return False  # provisioned before the single-session rule: nothing was replaced
+                    raise
+                return row is not None
 
         return self._translate_database_error(read)
 
@@ -374,7 +378,7 @@ class AdminAuthRepository:
                 row = connection.execute("SELECT * FROM admin_sessions WHERE session_id_hash = ?", (token_hash,)).fetchone()
                 if row is None:
                     return None
-                if now >= row["absolute_expires_at"] or now - row["last_seen_at"] >= idle_seconds:
+                if not _is_live_session(row, now, idle_seconds):
                     connection.execute("DELETE FROM admin_sessions WHERE session_id_hash = ?", (token_hash,))
                     return None
                 connection.execute("UPDATE admin_sessions SET last_seen_at = ? WHERE session_id_hash = ?", (now, token_hash))

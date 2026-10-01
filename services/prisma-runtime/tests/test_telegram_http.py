@@ -74,6 +74,7 @@ class TelegramHttpTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             auth = Mock()
             auth.read_session.return_value = None
+            auth.was_session_replaced.return_value = False
             boundary = AdminHttpBoundary(auth, credential_service=Mock())
             client = create_app(
                 JsonFileStore(Path(temporary) / "snapshot.json"),

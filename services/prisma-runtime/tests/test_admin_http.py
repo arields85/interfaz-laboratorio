@@ -3,13 +3,14 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
-from prisma_runtime.admin_auth import AdminAuthRepository, AdminAuthService
+from prisma_runtime.admin_auth import AdminAuthRepository, AdminAuthService, AuthUnavailable
 from prisma_runtime.admin_http import AdminHttpBoundary
 from prisma_runtime.local_presentation import JsonFileStore, VoiceEventStore, create_app
 
@@ -337,13 +338,20 @@ class AdminHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(second.get("/api/prisma/admin/auth/session").status_code, 200)
-        displaced = first.get("/api/prisma/admin/auth/session")
+        stale_cookie = first.get_cookie("prisma_admin_session", path="/api/prisma/admin").value
+
+        def displaced_browser():
+            browser = self.client()
+            browser.set_cookie("prisma_admin_session", stale_cookie)
+            return browser
+
+        displaced = displaced_browser().get("/api/prisma/admin/auth/session")
         self.assertEqual(displaced.status_code, 401)
         self.assertEqual(displaced.get_json(), {"ok": False, "error": "ADMIN_SESSION_REPLACED"})
-        protected = first.get("/api/prisma/admin/credentials")
+        protected = displaced_browser().get("/api/prisma/admin/credentials")
         self.assertEqual(protected.status_code, 401)
         self.assertEqual(protected.get_json()["error"], "ADMIN_SESSION_REPLACED")
-        write = first.put(
+        write = displaced_browser().put(
             "/api/prisma/admin/hmi-config",
             json={"set": {}, "delete": []},
             headers={"Origin": "http://127.0.0.1:5173", "X-CSRF-Token": old_token},
@@ -351,6 +359,46 @@ class AdminHttpTests(unittest.TestCase):
         )
         self.assertEqual(write.status_code, 401)
         self.assertEqual(write.get_json()["error"], "ADMIN_SESSION_REPLACED")
+
+    def test_the_replaced_response_expires_the_session_cookie_so_it_is_reported_once(self) -> None:
+        first = self.client()
+        self.login(first)
+        self.login_with(self.client(), takeover=True)
+
+        displaced = first.get("/api/prisma/admin/auth/session")
+
+        self.assertEqual(displaced.get_json()["error"], "ADMIN_SESSION_REPLACED")
+        cookie = displaced.headers["Set-Cookie"]
+        self.assertIn("prisma_admin_session=;", cookie)
+        self.assertIn("Expires=Thu, 01 Jan 1970", cookie)
+        self.assertIn("Path=/api/prisma/admin", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        self.assertEqual(first.get("/api/prisma/admin/auth/session").get_json()["error"], "AUTHENTICATION_REQUIRED")
+
+    def test_a_forged_cookie_gets_the_generic_401_without_any_replaced_marker_write(self) -> None:
+        client = self.client()
+        client.set_cookie("prisma_admin_session", "forged")
+
+        response = client.get("/api/prisma/admin/auth/session")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
+        self.assertNotIn("Set-Cookie", response.headers)
+        with closing(sqlite3.connect(self.database)) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM replaced_sessions").fetchone()[0], 0)
+
+    def test_a_failing_replaced_lookup_falls_back_to_the_generic_401_never_503(self) -> None:
+        service = Mock()
+        service.read_session.return_value = None
+        service.was_session_replaced.side_effect = AuthUnavailable("AUTH_STORAGE_UNAVAILABLE")
+        client = self.client_for_service(service)
+        client.set_cookie("prisma_admin_session", "stale")
+
+        response = client.get("/api/prisma/admin/auth/session")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "AUTHENTICATION_REQUIRED")
 
     def test_plain_expiry_and_anonymous_requests_keep_the_generic_401(self) -> None:
         self.assertEqual(self.client().get("/api/prisma/admin/auth/session").get_json()["error"], "AUTHENTICATION_REQUIRED")
