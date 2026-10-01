@@ -104,6 +104,17 @@ registered accent custom properties.
 
 - 2026-09-30 SPEC CHANGE (parent/user): the user rejected the curved-border drawing (e874cdf, "quedó feo"): in the lab it worked with rounded corners; the accents should live on an invisible, slightly larger outer frame. Writer: `.hmi-link-accents` reverted to the lab technique: the 8 straight `linear-gradient`s as BACKGROUND on a layer rounded `frame radius + offset` (the rounding clips the gradient ends at the corners); no border, no mask. The length is the VISIBLE straight part: gradient size along the edge = `--link-accent-reach` = radius + offset + `--frame-accent-length`, so the same value looks the same with any radius; registered `--frame-accent-*` transition kept. Defaults (lab-equivalent): length 12 px rest / 6 px hover, opacity 0 % / 60 %, thickness 1 px, white. Sliders use the same semantics and defaults (hint says visible straight length, measured from where the curve ends). RED: CSS contract 3 failed / 5 passed (tokens, background technique, reach) -> GREEN 8/8; service + Tema defaults RED 8 failed -> GREEN (104 passed in the service + Tema suites). Single `index.css` write; served stylesheet checked (`--link-accent-reach` present, no `--link-accent-corner` left). Live pixel check pending (parent).
 
+- 2026-09-30 parent: live check of the CURRENT drawing (lab technique, `beb88b2`): forced hover over a member of the
+  linked group in the control Chrome -> `--frame-accent-opacity` 60 %, length 6 px, the four straight brackets visible
+  around the group, clipped by the invisible outer frame's rounding (screenshots `gz-tl3.png`, `group-hover-full.png`).
+  Review `868fa89..766522c` (13 files / 598 lines, medium, standing consent): APPROVED and acknowledged
+  (`review-07aab1d1b11146fe`). Suggestions: R3-inherited-member-accents-doc-stale — the DESIGN_SYSTEM "Cuándo aplica"
+  paragraph fixed in this commit (own target; group lit via group hover; inherited members plain; viewer gutter);
+  R3-a4-marked-done-while-pending — resolved by this live check. Recorded, not fixed: R3-viewer-gutter-fit-unproved
+  (no test proves the grid fits the padded content box; verified live: brackets not clipped), R3-cutout-guard-comma-split
+  (the cutout guard splits selector lists on raw commas inside `:is()`), and the edge case of a locked group WITHOUT a
+  frame whose inherited members then get no accents at all.
+
 ## Next step
 
 Live check of the corner accents in the browser (parent), then close the feature.
