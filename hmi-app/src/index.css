@@ -459,23 +459,24 @@ h1, h2, h3, h4, h5, h6 {
  * Configuración general -> Tema -> "Esquinas en widgets con enlace" (solo con el tema Clásico,
  * solo en el visor; ver `ViewerLinkCornerAccents`). Dibuja las esquinas de acento del tema
  * Contorno en una capa hermana, unos píxeles POR FUERA del marco (el marco recorta su desborde).
- * Los valores de reposo y hover replican el acento de marco de Contorno.
+ * Valores del laboratorio de estilo. El largo es el tramo recto VISIBLE, medido desde donde termina la
+ * curva de la esquina (no depende del radio del marco).
  *   --link-accent-offset            separación entre el borde del marco y las esquinas
- *   --link-accent-length-rest/-hover        largo de cada brazo (reposo / hover)
+ *   --link-accent-length-rest/-hover        largo visible del tramo recto (reposo / hover)
  *   --link-accent-thickness-rest/-hover     grosor de cada brazo
  *   --link-accent-color-rest/-hover         color de las esquinas
  *   --link-accent-opacity-rest/-hover       opacidad (0 % = ocultas en reposo)
  * ────────────────────────────────────────────────────────────────────── */
 :root {
   --link-accent-offset: 4px;
-  --link-accent-length-rest: 18px;
-  --link-accent-length-hover: 8px;
+  --link-accent-length-rest: 12px;
+  --link-accent-length-hover: 6px;
   --link-accent-thickness-rest: 1px;
   --link-accent-thickness-hover: 1px;
   --link-accent-color-rest: #ffffff;
   --link-accent-color-hover: #ffffff;
   --link-accent-opacity-rest: 0%;
-  --link-accent-opacity-hover: 40%;
+  --link-accent-opacity-hover: 60%;
 }
 
 /* ── Forma del marco: Pestaña (tokens) ─────────────────────────────────────
@@ -1592,10 +1593,12 @@ h1, h2, h3, h4, h5, h6 {
   /* Esquinas en widgets con enlace: capa hermana del widget en la superficie del ítem del visor
    * (fuera del marco, que recorta su desborde). Mismas propiedades registradas, mismo dibujo y
    * misma transición que el acento de `.glass-panel::after`; el hover es el del ítem del visor. */
-  /* Curved corner brackets: a rounded BORDER (a background would be clipped inside the rounded corners) with the
-   * widget's own radius plus the offset, masked to the four corner squares of side radius + offset + length, so
-   * each bracket is the corner arc plus a straight tail of the accent length. Length, thickness, color and opacity
-   * are the registered accent properties, so the hover animation is the frame accent's. */
+  /* Lab technique (like `.glass-panel::after`): the 8 straight gradients are the BACKGROUND of a layer that is
+   * rounded like an invisible outer frame (frame radius + offset); the rounding clips the gradient ends at the
+   * corners. The length is the VISIBLE straight part, measured where the corner curve ends, so the gradient runs
+   * radius + offset + length along the edge (the part inside the curve is clipped away) and the same value looks
+   * the same with any frame radius. Length, thickness, color and opacity are the registered accent properties, so
+   * the hover animation is the frame accent's. */
   .hmi-link-accents {
     position: absolute;
     border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));
@@ -1605,18 +1608,27 @@ h1, h2, h3, h4, h5, h6 {
     --frame-accent-color: var(--link-accent-color-rest);
     --frame-accent-opacity: var(--link-accent-opacity-rest);
     --frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);
-    --link-accent-corner: calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length));
-    border: var(--frame-accent-thickness) solid var(--frame-accent-tint);
-    -webkit-mask-image:
-      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
-    mask-image:
-      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
-    -webkit-mask-position: top left, top right, bottom left, bottom right;
-    mask-position: top left, top right, bottom left, bottom right;
-    -webkit-mask-size: var(--link-accent-corner) var(--link-accent-corner);
-    mask-size: var(--link-accent-corner) var(--link-accent-corner);
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
+    --link-accent-reach: calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length));
+    background-repeat: no-repeat;
+    background-image:
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
+      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint));
+    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+    background-size:
+      var(--link-accent-reach) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--link-accent-reach),
+      var(--link-accent-reach) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--link-accent-reach),
+      var(--link-accent-reach) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--link-accent-reach),
+      var(--link-accent-reach) var(--frame-accent-thickness),
+      var(--frame-accent-thickness) var(--link-accent-reach);
     transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
       --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
   }

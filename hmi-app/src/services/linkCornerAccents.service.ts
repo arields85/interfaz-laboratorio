@@ -67,7 +67,7 @@ export function applyLinkCornerAccentsOverride(): void {
 export const LINK_ACCENT_LENGTHS_STORAGE_KEY = 'hmi-link-corner-accent-lengths';
 
 /** Keep equal to `--link-accent-length-rest` / `-hover` in `index.css` (a test pins it). */
-export const DEFAULT_LINK_ACCENT_LENGTHS: LinkAccentLengths = { restPx: 18, hoverPx: 8 };
+export const DEFAULT_LINK_ACCENT_LENGTHS: LinkAccentLengths = { restPx: 12, hoverPx: 6 };
 
 export const LINK_ACCENT_LENGTH_LIMITS = { min: 0, max: 40, step: 1 } as const;
 

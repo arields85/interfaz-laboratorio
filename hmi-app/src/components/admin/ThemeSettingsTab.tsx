@@ -594,7 +594,7 @@ export default function ThemeSettingsTab({ onDirtyChange, onSaveStatusChange, sa
 
                 {/* Visible with the switch off but inactive, like a dependent control. */}
                 <p className={`mt-4 mb-3 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                    El largo es el tramo recto que continúa el arco de la esquina.
+                    El largo es el tramo recto visible que continúa el arco de la esquina, medido desde donde termina la curva.
                 </p>
                 <div className="flex flex-col gap-4">
                     {ACCENT_LENGTH_CONTROLS.map(({ key, label, numberInputAriaLabel }) => (

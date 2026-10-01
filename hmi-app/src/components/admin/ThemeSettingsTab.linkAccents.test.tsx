@@ -182,9 +182,9 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
 
             expect(accentsSection().contains(restSlider())).toBe(true);
             expect(accentsSection().contains(hoverSlider())).toBe(true);
-            expect(restSlider()).toHaveValue('18');
-            expect(hoverSlider()).toHaveValue('8');
-            expect(accentsSection().textContent ?? '').toMatch(/tramo recto/i);
+            expect(restSlider()).toHaveValue('12');
+            expect(hoverSlider()).toHaveValue('6');
+            expect(accentsSection().textContent ?? '').toMatch(/tramo recto visible/i);
             expect(accentsSection().textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
         });
 
@@ -248,7 +248,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
                 revertRef.current?.();
             });
 
-            expect(restSlider()).toHaveValue('18');
+            expect(restSlider()).toHaveValue('12');
             expect(rootValue('--link-accent-length-rest')).toBe('');
             expect(localStorage.getItem(LINK_ACCENT_LENGTHS_STORAGE_KEY)).toBeNull();
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
@@ -260,7 +260,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             render(<ThemeSettingsTab onDirtyChange={onDirtyChange} />);
 
             fireEvent.change(restSlider(), { target: { value: '25' } });
-            fireEvent.change(restSlider(), { target: { value: '18' } });
+            fireEvent.change(restSlider(), { target: { value: '12' } });
 
             expect(onDirtyChange).toHaveBeenLastCalledWith(false);
         });

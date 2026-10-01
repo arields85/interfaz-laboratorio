@@ -21,14 +21,14 @@ describe('link corner accents tokens', () => {
 
     it('declares the offset (4px) and the Contorno accent values as tokens', () => {
         expect(root).toContain('--link-accent-offset: 4px;');
-        expect(root).toContain('--link-accent-length-rest: 18px;');
-        expect(root).toContain('--link-accent-length-hover: 8px;');
+        expect(root).toContain('--link-accent-length-rest: 12px;');
+        expect(root).toContain('--link-accent-length-hover: 6px;');
         expect(root).toContain('--link-accent-thickness-rest: 1px;');
         expect(root).toContain('--link-accent-thickness-hover: 1px;');
         expect(root).toContain('--link-accent-color-rest: #ffffff;');
         expect(root).toContain('--link-accent-color-hover: #ffffff;');
         expect(root).toContain('--link-accent-opacity-rest: 0%;');
-        expect(root).toContain('--link-accent-opacity-hover: 40%;');
+        expect(root).toContain('--link-accent-opacity-hover: 60%;');
     });
 });
 
@@ -50,21 +50,29 @@ describe('link corner accents layer', () => {
         expect(body).toContain('--frame-accent-opacity: var(--link-accent-opacity-rest);');
     });
 
-    it('draws curved corner brackets: a rounded BORDER masked to the four corners (arc + straight tail)', () => {
+    it('draws the lab brackets: 8 straight gradients as background on an invisible rounded outer frame', () => {
         const body = rule('.hmi-link-accents');
 
-        // A border follows the rounded corner (a background would be clipped inside it), and the mask keeps only
-        // the corner squares of side radius + offset + length: the arc plus a straight tail of the accent length.
-        expect(body).toContain('border: var(--frame-accent-thickness) solid var(--frame-accent-tint);');
-        expect(body).not.toContain('background-image');
-        expect(body).toContain('--link-accent-corner: calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length));');
-        expect(body).toContain('mask-position: top left, top right, bottom left, bottom right;');
-        expect(body).toContain('-webkit-mask-position: top left, top right, bottom left, bottom right;');
-        expect(body).toContain('mask-size: var(--link-accent-corner) var(--link-accent-corner);');
-        expect(body).toContain('mask-repeat: no-repeat;');
+        // The rounding clips the gradient ends at the corners, exactly like `.glass-panel::after`; no border, no mask.
+        expect(body).not.toMatch(/(^|\s)border:/);
+        expect(body).not.toContain('mask');
+        expect(body.match(/linear-gradient\(/g)).toHaveLength(8);
+        expect(body).toContain('background-repeat: no-repeat;');
+        expect(body).toContain('background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;');
+        expect(body).toContain('--frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);');
         expect(body).toContain(
             'transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,\n      --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;',
         );
+    });
+
+    it('measures the length from where the corner curve ends: the gradient runs radius + offset + length along the edge', () => {
+        const body = rule('.hmi-link-accents');
+        const along = 'calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length))';
+
+        expect(body).toContain(`--link-accent-reach: ${along};`);
+        expect(body).toContain('var(--link-accent-reach) var(--frame-accent-thickness),');
+        expect(body).toContain('var(--frame-accent-thickness) var(--link-accent-reach),');
+        expect(body).not.toContain('var(--frame-accent-length) var(--frame-accent-thickness)');
     });
 
     it('switches to the hover tokens while the viewer item is hovered', () => {
