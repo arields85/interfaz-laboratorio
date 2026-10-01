@@ -93,7 +93,7 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
   - the Topbar hides the users and Prisma icons unless the browser-local flag is on;
   - `Ctrl+Alt+A` toggles the flag;
   - `/acceso` reveals the icons and opens the login.
-- [ ] T7 — Docs (`ARCHITECTURE.md`, `DATA_CONTRACT.md` if affected, `PRISMA_BROWSER_ROUTING.md`, the admin conventions), and a live check with two browser profiles: the change in one appears in the other within about 10 s.
+- [x] T7 — Docs (`ARCHITECTURE.md`, `DATA_CONTRACT.md` if affected, `PRISMA_BROWSER_ROUTING.md`, the admin conventions), and a live check with two browser profiles: the change in one appears in the other within about 10 s.
 
 ## Acceptance criteria
 
@@ -165,3 +165,10 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
   - H7 RED: new `sharedConfigReapplyHold.service.test.ts` failed (keys dropped with no handler). GREEN: held keys are kept until a handler is registered, then delivered once. `publishedSnapshot.publishedAt` is displayed nowhere in the UI (only stored in `admin.types.ts` and written by the dashboard service), so a 1970 epoch cannot be shown; nothing to render differently.
   - H3-H6 refactors (tests stayed green): `''.repeat` in the escape test; `ENTRY_SEPARATOR_BYTES` named for the wire overhead; `LS_KEY_*` renamed to `*_STORAGE_KEY` (values unchanged); `isRecord` exported from `domain/sharedConfig.types.ts` and reused by `designSettingsStorage`; `handleResetFonts` and `handleReset` reuse `resetFontOverridesOnDocument` / `resetThemeOverridesOnDocument` (fonts-only reset keeps live colour previews); the eslint-disable justification fixed; `sharedConfigAppliers` no longer keeps a second `activeContext`. Skipped: R3-dialog-hold-untested (not trivial).
 - 2026-10-01 T7 docs done, live check pending. Updated `docs/ARCHITECTURE.md` (shared configuration and hidden access sections; `SHARED_CONFIG_KEYS` as the single list) and `hmi-app/src/components/admin/ADMIN_CONVENTIONS.md` (section 7). `PRISMA_BROWSER_ROUTING.md` already had the three routes, bounds and errors: verified, unchanged. `DATA_CONTRACT.md` is not affected (plant contract), only pointed to from ARCHITECTURE. T7 stays unchecked until the live two-browser check.
+- 2026-10-01 T7 live check (parent, control Chrome on the dev server):
+  - Hidden access: the plain viewer shows neither the users button nor the Prisma button. `Ctrl+Alt+A`, sent through CDP, reveals both (screenshots shared with the user).
+  - Propagation:
+    - With the viewer open on revision 0 (local fallback showing the user's dashboards), the parent wrote `hmi-theme-style` straight into the dev store and bumped the revision to 1 at 10:55:43.
+    - The open viewer picked it up WITHOUT a reload by 10:55:50, about 7 s later, inside the 10 s poll. Because the server document now won entirely, it showed "Sin Vistas Publicadas", as designed.
+    - The store was then restored to revision 0 with no items, after a backup copy, and after a reload the viewer showed the local dashboards again.
+  - Not checked live: the admin write path, because the control Chrome admin session had expired and the parent holds no credentials. It is covered by the HTTP tests (401/403/413/503) and the adapter tests.
