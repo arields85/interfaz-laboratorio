@@ -185,7 +185,7 @@ describe('ThemeSettingsTab - Esquinas en widgets con enlace', () => {
             expect(restSlider()).toHaveValue('18');
             expect(hoverSlider()).toHaveValue('8');
             expect(accentsSection().textContent ?? '').toMatch(/tramo recto/i);
-            expect(accentsSection().textContent ?? '').not.toMatch(/tu|vos|tuyo/i);
+            expect(accentsSection().textContent ?? '').not.toMatch(/\btu\b|\bvos\b|\btuyo\b/i);
         });
 
         it('starts from the persisted overrides', () => {
