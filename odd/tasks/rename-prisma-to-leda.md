@@ -48,7 +48,7 @@ The assistant "Prisma" is now called **Leda**. Rename everything, visible and te
 - [x] L1 — Scripted rename: `git mv` the folders and every path containing prisma, then case-ordered content substitution over the tracked files (exclusions: `Directrices/`, binaries such as `.ico`, lockfiles). Regenerate the audio schema bindings. Get all gates green.
 - [x] L2 — Migration of the local state and browser and shared keys: a one-time launcher step for the state dir, the master key and the state files, plus migration of the client and server storage keys. Tests.
 - [x] L3 — Manual pass over the visible copy (UI, runtime reply texts, health JSON), the launcher, the READMEs and the docs. A final search for the old name returns only intentional hits, each documented below.
-- [ ] L4 — Live check (parent): restart the runtime from the new path, then confirm credentials are intact, the HMI loads, login works and Leda answers. Also verify the dev launcher and the control Chrome.
+- [x] L4 — Live check (parent): restart the runtime from the new path, then confirm credentials are intact, the HMI loads, login works and Leda answers. Also verify the dev launcher and the control Chrome.
 
 ## TDD
 
@@ -105,3 +105,24 @@ RED/GREEN evidence:
 - 2026-10-01: L2 done in `af14112`: migrations for local state, master key, shared keys and browser keys, with tests.
 - 2026-10-01: L3 done: copy reviewed (Spanish "usted", feminine agreement in "Leda quedó vinculada" and "Leda está lista", health JSON `"assistant": "Leda"`, tab label "Leda"); READMEs updated; leftover hits listed above.
 - Next: L4 live check by the parent.
+- 2026-10-01 L4 live check (parent):
+  - Bug 1:
+    - First start: the presentation service crashed with `LEDA_CHANNEL_A_CREDENTIAL_UNAVAILABLE`.
+    - Cause: `start-local.ps1` exports `LEDA_RUNTIME_STATE_DIR` (the default path) before it calls the migration, and the migration read any set variable as an override, so it skipped the state copy. The startup then created an empty `Leda` dir.
+    - Fix: `e45608c`. The copy is skipped only when the variable points somewhere other than the default. Test RED, then GREEN 14/14.
+    - The incomplete dir was set aside as `%LOCALAPPDATA%\CoreAnalytics\Leda.incomplete-20261001-1150`, not deleted.
+  - Bug 2 (security relevant):
+    - The copies lost their PROTECTED DACLs. On Windows PowerShell 5.1, `SetAccessControl` with a security object that was only read persists nothing and raises nothing.
+    - `LedaCredentialKey\master.key` and `Leda\credentials` inherited the parent's rules, including read for `CodexSandboxUsers`. The runtime's permission checker rejected them (`AUTH_STORAGE_PERMISSIONS_INVALID`), failing closed.
+    - Fix: `ff348ac`. A new `Copy-LedaAccessRules` copies through the SDDL form, and the key migration now copies the key DIRECTORY rules too. Tests RED (2 failed), then GREEN 16/16.
+    - The existing copies were hardened in place with the same helper. icacls now matches the originals: SYSTEM, Administradores and the user only.
+  - Result:
+    - Leda started from `services/leda-runtime`. Health reports `"assistant":"Leda"` and the voice provider `configured: true, source: protected`, so the credentials decrypted from the migrated store.
+    - The dev launcher `tools/dev-launcher/CoreAnalytics.cmd` brought up Vite, and `/api/leda/*` proxies through it with 200.
+    - In the control Chrome:
+      - the topbar shows the "Leda" button when access is revealed;
+      - the dashboards load;
+      - the browser keys were migrated to `hmi:leda-*`;
+      - the Leda panel generates the Channel A QR (Channel A credential readable).
+    - Inert legacy browser keys `hmi:prisma-runtime-mode` and `hmi:prisma-voice-tts-service-url` remain. Nothing reads them; this is harmless.
+
