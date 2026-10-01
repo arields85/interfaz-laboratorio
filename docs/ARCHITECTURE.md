@@ -12,7 +12,7 @@
 Fuente externa → service → adapter → domain model → query/store → componente UI
 ```
 
-1. **`services/`** — acceso a datos (HTTP, localStorage, mocks)
+1. **`services/`** — acceso a datos (HTTP, configuración compartida, mocks)
 2. **`adapters/`** — transforman datos crudos al modelo de dominio
 3. **`domain/`** — tipos canónicos del negocio (la única fuente de verdad de tipos)
 4. **`queries/`** — hooks TanStack Query (datos async y caché)
@@ -33,6 +33,22 @@ Fuente externa → service → adapter → domain model → query/store → comp
 - **`MetricStatus`** — umbral de la métrica (normal, warning, critical)
 
 Estos tres tipos son **independientes** y no deben mezclarse ni colapsarse en uno solo.
+
+## Configuración compartida
+
+La configuración de la propia HMI (dashboards, plantillas, jerarquía, tipos de nodo, catálogo de variables, conexión de datos, nombre, loader, opciones temporales, orbe de Prisma, tema, diseño y shader) **vive en el servidor**, no en cada navegador. Lo que un administrador guarda en un navegador lo ven todos, incluidos los que ya están abiertos. Es configuración de la HMI, nunca un comando hacia la planta (no cambia el contrato de datos de planta de [`DATA_CONTRACT.md`](DATA_CONTRACT.md)).
+
+- **Servidor**: el runtime de Prisma guarda un documento clave/valor con una revisión global (`GET /api/prisma/hmi-config`, `GET /api/prisma/hmi-config/revision`, `PUT /api/prisma/admin/hmi-config`). Rutas, límites y errores: [`prisma/PRISMA_BROWSER_ROUTING.md`](prisma/PRISMA_BROWSER_ROUTING.md).
+- **Adaptador cliente**: `hmi-app/src/services/sharedConfigStorage.service.ts` expone `getItem`/`setItem`/`removeItem` síncronos sobre una copia en memoria. Los módulos de configuración lo usan en lugar de `localStorage` y mantienen su API. Las lecturas nunca escriben.
+- **Arranque**: `main.tsx` espera `load()` antes de aplicar la configuración y renderizar. Si el servidor no responde, usa la última copia buena guardada en `localStorage` (solo caché, `hmi:shared-config-cache`).
+- **Fallback local de arranque**: mientras el servidor nunca fue escrito (revisión 0, sin claves), las claves compartidas se leen de los datos locales de este navegador (solo lectura). Cualquier revisión mayor a 0 gana por completo. El primer guardado siembra los demás valores locales, pasando por los mismos límites que cualquier escritura, y antes verifica que la revisión siga en 0. Límite conocido: dos navegadores en fallback que guardan a la vez pueden pisarse en esa ventana (en el servidor real, un navegador nuevo no tiene datos locales).
+- **Escritura**: `setItem`/`removeItem` actualizan la memoria al instante y envían lotes con sesión de administrador y CSRF. Un error de guardado es visible (`SharedConfigSaveNotice` en el layout admin) con opción de reintentar.
+- **Propagación**: cada ~10 s el cliente consulta `GET /revision`. Si cambió, vuelve a leer el documento y avisa a los suscriptores: los módulos de configuración se re-aplican (`app/sharedConfigAppliers.ts`), las páginas de contenido recargan (`useSharedConfigVersion`) y las consultas de conexión de datos se invalidan.
+- **Lista de claves**: `SHARED_CONFIG_KEYS` en `hmi-app/src/domain/sharedConfig.types.ts` es la única lista de claves compartidas; un test la fija contra la constante de cada módulo. Todo lo demás es **por navegador** (pestaña de ajustes abierta, nodos expandidos, grilla visible, historial de alertas, sesión admin, caché, bandera de acceso oculto).
+
+## Acceso oculto
+
+El visor común no muestra el ícono de usuarios ni el de Prisma. Se revelan con `Ctrl+Alt+A` (alterna) o entrando a `/acceso` (los revela, abre el login y vuelve a `/`). La bandera `hmi:hidden-access` es local a cada navegador y nunca se comparte (`services/hiddenAccess.service.ts`). Ocultar el ícono **no es** la barrera de seguridad: las rutas `/admin` y las escrituras siguen protegidas por la sesión del servidor.
 
 ## Catálogo de Variables
 

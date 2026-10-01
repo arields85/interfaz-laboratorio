@@ -341,3 +341,13 @@ Todo widget nuevo que represente estado, severidad o umbrales debe usar exclusiv
 - `subtitle` = contexto de header. `subtext` = texto inferior/footer. Nunca mezclar.
 - Template base para widgets nuevos: `.agent/skills/interfaz-widget/assets/NewWidgetTemplate.tsx`.
 - Guía detallada: `hmi-app/src/widgets/WIDGET_AUTHORING.md`.
+
+---
+
+## 7. Guardado en el servidor y acceso oculto
+
+- La configuración que guarda el modo admin va al **servidor** (adaptador `sharedConfigStorage`, sesión de administrador + CSRF), no al `localStorage`. Los servicios y módulos de configuración nuevos usan el adaptador y agregan su clave a `SHARED_CONFIG_KEYS` (`hmi-app/src/domain/sharedConfig.types.ts`) si debe compartirse; lo que es propio de cada navegador (pestaña activa, nodos expandidos) queda fuera de esa lista.
+- Un guardado fallido nunca es silencioso: `SharedConfigSaveNotice` (montado en `AdminLayout`) muestra el aviso con "Reintentar".
+- Las lecturas no escriben: aplicar o abrir una pantalla no debe guardar nada (un visor no tiene sesión y la escritura quedaría pendiente).
+- Un cambio remoto no pisa borradores: un editor con cambios sin guardar retiene la re-aplicación con `useHoldSharedConfigReapply`; los cambios que llegan mientras tanto se aplican al guardar o descartar. Las páginas de contenido recargan con `useSharedConfigVersion`, salvo el builder, que no se refresca para no perder el borrador.
+- Los íconos de usuarios y Prisma del visor están ocultos (`Ctrl+Alt+A` o `/acceso`). La barrera de seguridad es la sesión del servidor, no el ícono; un administrador autenticado conserva sus botones y la ruta `/admin`. Detalle: [`docs/ARCHITECTURE.md`](../../../../docs/ARCHITECTURE.md).
