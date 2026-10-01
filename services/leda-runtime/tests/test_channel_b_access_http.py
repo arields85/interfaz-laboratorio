@@ -279,10 +279,6 @@ class ChannelBAccessHttpTests(unittest.TestCase):
         self.assertNotIn("token", body.lower())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CreateAppChannelBWiringTests(unittest.TestCase):
     """The default composition of ``create_app`` wires the Channel B routes to the production objects."""
 
@@ -325,3 +321,7 @@ class CreateAppChannelBWiringTests(unittest.TestCase):
             self.assertEqual(len(audit_logs), 1)
             self.assertIs(bot.audit_log, audit_logs[0])
             self.assertIs(access._audit_log, audit_logs[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
