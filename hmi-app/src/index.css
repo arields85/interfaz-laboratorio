@@ -1593,12 +1593,12 @@ h1, h2, h3, h4, h5, h6 {
   /* Esquinas en widgets con enlace: capa hermana del widget en la superficie del ítem del visor
    * (fuera del marco, que recorta su desborde). Mismas propiedades registradas, mismo dibujo y
    * misma transición que el acento de `.glass-panel::after`; el hover es el del ítem del visor. */
-  /* Lab technique (like `.glass-panel::after`): the 8 straight gradients are the BACKGROUND of a layer that is
-   * rounded like an invisible outer frame (frame radius + offset); the rounding clips the gradient ends at the
-   * corners. The length is the VISIBLE straight part, measured where the corner curve ends, so the gradient runs
-   * radius + offset + length along the edge (the part inside the curve is clipped away) and the same value looks
-   * the same with any frame radius. Length, thickness, color and opacity are the registered accent properties, so
-   * the hover animation is the frame accent's. */
+  /* Each bracket is the corner ARC plus a straight tail, on an invisible outer frame rounded like the widget
+   * (frame radius + offset): a rounded BORDER masked to the four corner squares. Drawn outside the widget there is
+   * no frame border to complete the curve, so straight gradients clipped by the rounding would look cut. The length
+   * is the visible straight tail after the arc: each corner square is radius + offset + length, so the same value
+   * looks the same with any frame radius. Length, thickness, color and opacity are the registered accent
+   * properties, so the hover animation is the frame accent's. */
   .hmi-link-accents {
     position: absolute;
     border-radius: calc(var(--frame-radius-rest) + var(--link-accent-offset));
@@ -1609,26 +1609,17 @@ h1, h2, h3, h4, h5, h6 {
     --frame-accent-opacity: var(--link-accent-opacity-rest);
     --frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);
     --link-accent-reach: calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length));
-    background-repeat: no-repeat;
-    background-image:
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint)),
-      linear-gradient(var(--frame-accent-tint), var(--frame-accent-tint));
-    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
-    background-size:
-      var(--link-accent-reach) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--link-accent-reach),
-      var(--link-accent-reach) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--link-accent-reach),
-      var(--link-accent-reach) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--link-accent-reach),
-      var(--link-accent-reach) var(--frame-accent-thickness),
-      var(--frame-accent-thickness) var(--link-accent-reach);
+    border: var(--frame-accent-thickness) solid var(--frame-accent-tint);
+    -webkit-mask-image:
+      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
+    mask-image:
+      linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000), linear-gradient(#000, #000);
+    -webkit-mask-position: top left, top right, bottom left, bottom right;
+    mask-position: top left, top right, bottom left, bottom right;
+    -webkit-mask-size: var(--link-accent-reach) var(--link-accent-reach);
+    mask-size: var(--link-accent-reach) var(--link-accent-reach);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
     transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,
       --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;
   }

@@ -50,29 +50,30 @@ describe('link corner accents layer', () => {
         expect(body).toContain('--frame-accent-opacity: var(--link-accent-opacity-rest);');
     });
 
-    it('draws the lab brackets: 8 straight gradients as background on an invisible rounded outer frame', () => {
+    it('draws each bracket as the corner ARC plus a straight tail: a rounded border masked to the four corners', () => {
         const body = rule('.hmi-link-accents');
 
-        // The rounding clips the gradient ends at the corners, exactly like `.glass-panel::after`; no border, no mask.
-        expect(body).not.toMatch(/(^|\s)border:/);
-        expect(body).not.toContain('mask');
-        expect(body.match(/linear-gradient\(/g)).toHaveLength(8);
-        expect(body).toContain('background-repeat: no-repeat;');
-        expect(body).toContain('background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;');
+        // Drawn 4 px outside the widget there is no frame border to complete the corner curve, so straight gradients
+        // clipped by the rounding look cut (user, 2026-09-30): the border follows the arc and the mask keeps only the
+        // corner squares. No background gradients.
+        expect(body).not.toContain('linear-gradient(var(--frame-accent-tint)');
+        expect(body).toContain('border: var(--frame-accent-thickness) solid var(--frame-accent-tint);');
         expect(body).toContain('--frame-accent-tint: color-mix(in srgb, var(--frame-accent-color) var(--frame-accent-opacity), transparent);');
+        expect(body).toContain('-webkit-mask-position: top left, top right, bottom left, bottom right;');
+        expect(body).toContain('mask-position: top left, top right, bottom left, bottom right;');
+        expect(body).toContain('mask-repeat: no-repeat;');
         expect(body).toContain(
             'transition: --frame-accent-length 0.2s ease, --frame-accent-thickness 0.2s ease,\n      --frame-accent-color 0.2s ease, --frame-accent-opacity 0.2s ease;',
         );
     });
 
-    it('measures the length from where the corner curve ends: the gradient runs radius + offset + length along the edge', () => {
+    it('measures the length from where the corner arc ends: each corner square is radius + offset + length', () => {
         const body = rule('.hmi-link-accents');
         const along = 'calc(var(--frame-radius-rest) + var(--link-accent-offset) + var(--frame-accent-length))';
 
         expect(body).toContain(`--link-accent-reach: ${along};`);
-        expect(body).toContain('var(--link-accent-reach) var(--frame-accent-thickness),');
-        expect(body).toContain('var(--frame-accent-thickness) var(--link-accent-reach),');
-        expect(body).not.toContain('var(--frame-accent-length) var(--frame-accent-thickness)');
+        expect(body).toContain('-webkit-mask-size: var(--link-accent-reach) var(--link-accent-reach);');
+        expect(body).toContain('mask-size: var(--link-accent-reach) var(--link-accent-reach);');
     });
 
     it('switches to the hover tokens while the viewer item is hovered', () => {
