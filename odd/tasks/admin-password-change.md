@@ -52,6 +52,12 @@ Implement it before the first server deployment.
 - 2026-10-01: P2 done (`1c2388f`).
   - RED: the new vitest files and cases failed (`changePassword is not a function`, missing modules). GREEN: 193 tests in the 5 touched files, then the full suite 291 files / 3815 tests, `tsc -b`, lint and build clean.
   - Review fixup: the dialog maps the server's single `PASSWORD_POLICY_REJECTED` code to a message naming both bounds (the earlier "too short" text could be wrong for a too-long password).
+- 2026-10-01: review fixups Q1-Q6 (`33ab045` client, `f69cba0` runtime).
+  - Q1: Cancelar disabled and backdrop/Escape/onClose ignored while a request is in flight. RED: the new in-flight close test failed. GREEN: 21 dialog tests.
+  - Q2: network, `AUTH_TRANSPORT_UNAVAILABLE`, `AUTH_RESPONSE_INVALID` and unexpected errors show a specific "unknown result, may already have changed" message; definitive server errors keep their messages. RED: 3 new cases failed, GREEN with Q1.
+  - Q3: comment now names `hmi-app/src/domain/adminPasswordPolicy.types.ts`. Q4: `login_account_key()` shared by login, reservation and change; its test was RED (import error) then GREEN. Q5: request-size bound explained and `MAX_JSON_ESCAPE_BYTES_PER_SECRET_BYTE` / `MAX_CREDENTIAL_JSON_OVERHEAD_BYTES` referenced by name; `_password_bytes` wrapper removed.
+  - Q6: the two route-mapping tests (SESSION_ENDED -> 401, AuthNotConfigured -> 503) pinned existing behavior and passed on first run (no RED).
+  - Checks: `tsc -b`, lint, build clean; `npm test` 291 files / 3819 tests; offline gate exit 0.
 
 ## Decisions
 
