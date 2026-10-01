@@ -94,6 +94,12 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
   - `Ctrl+Alt+A` toggles the flag;
   - `/acceso` reveals the icons and opens the login.
 - [x] T7 — Docs (`ARCHITECTURE.md`, `DATA_CONTRACT.md` if affected, `PRISMA_BROWSER_ROUTING.md`, the admin conventions), and a live check with two browser profiles: the change in one appears in the other within about 10 s.
+- [ ] T8 — Single admin session. Added 2026-10-01 at the user's request, after the review's "two admins at once" finding.
+  - When an admin logs in while another admin session is active, the HMI warns "Hay una sesión de administrador abierta en otro equipo. Si continúa, esa sesión se cerrará." and offers Continuar / Cancelar.
+  - Continuar makes the server revoke every other session and keep only the new one.
+  - The displaced browser shows "Su sesión se cerró porque se inició sesión en otro equipo." on its next request, focus or poll, and returns to the viewer. Its unsaved work is lost, which is why the warning comes before confirming.
+  - Today the server allows several concurrent sessions (`admin_auth.py` inserts without revoking).
+  - Route: delegated writer.
 
 ## Acceptance criteria
 
@@ -180,5 +186,5 @@ Prepare the HMI for its first real deployment on a server that several PCs open 
 
 ## Status
 
-Complete. Every task is checked and every slice was reviewed and approved. Merging into main and pushing are the user's decisions. Next: the Prisma → Leda rename (a separate feature, branched from here).
+Reopened on 2026-10-01 for T8 at the user's request. T1–T7 were complete and reviewed. Merging into main and pushing are the user's decisions. Next: the Prisma → Leda rename (a separate feature, branched from here).
 
