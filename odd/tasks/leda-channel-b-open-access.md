@@ -119,6 +119,14 @@ Strict mode ON (source: global user configuration). Runners:
   - Pre-commit review (GGA) passed on the HMI commit; note only: `CHANNEL_B_INACTIVE_TEXT` and the bell labels live in the component, not the copy module.
   - Route evidence: B4b delegated (bounded writer).
 
+- 2026-10-01: parent spot check of B4b: `test_channel_b_*.py` OK; HMI bell and hook suites 28 OK. Native review (slice `77c7674..3a3d856`, medium, 388 lines): granted under standing consent, **approved** and acknowledged (lineage `review-eab5f1832b17159c`).
+  - Advisory finding `R3-wiring-test-after-main-guard` fixed inline in `e3f7129`: the wiring test class was defined after `if __name__ == "__main__"`, so running the module directly skipped it. With the guard moved to the end, a direct run gives 19 OK, wiring test included.
+  - Remaining advisory findings, recorded as follow-ups and not fixed: `R3-notice-session-close-skipped-on-error` (`local_presentation.py:900-901`) and `R3-per-chat-guard-relaxes-global-serialization` (`useChannelBAccess.ts:118-124`).
+- 2026-10-01 B7 prep:
+  - Backed up the live v2 state file to `%LOCALAPPDATA%/CoreAnalytics/Leda/leda_local_state.v2-backup-20261001.json`, because the v3 migration is one-way.
+  - Restarted the dev environment (stop-local, relaunch CoreAnalytics.cmd). Ports 5056, 5057 and 5173 are up.
+  - The state file is still v2, because it migrates on the first read or write of the bot. Waiting for the user's live test.
+
 ## Acceptance criteria
 
 - An unknown private chat that sends `/start` appears as pending in the HMI and gets no data until it is approved.
