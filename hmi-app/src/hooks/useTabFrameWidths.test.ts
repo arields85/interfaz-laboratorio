@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { TAB_FRAME_TITLE_HIDDEN } from '../utils/tabFramePath';
 import { useTabFrameWidths } from './useTabFrameWidths';
 
 describe('useTabFrameWidths', () => {
@@ -18,6 +19,15 @@ describe('useTabFrameWidths', () => {
         });
 
         expect(result.current.widths).toEqual({ a: 180, b: 96 });
+    });
+
+    it('keeps the hidden-title sentinel as a present entry: the frame is still the tab shape, only without the title tab', () => {
+        const { result } = renderHook(() => useTabFrameWidths());
+
+        act(() => result.current.reporterFor('a')(TAB_FRAME_TITLE_HIDDEN, 25));
+
+        expect(result.current.widths).toEqual({ a: TAB_FRAME_TITLE_HIDDEN });
+        expect(result.current.heights).toEqual({ a: 25 });
     });
 
     it('removes the entry when a widget reports null (frame back to standard or unmounted)', () => {
