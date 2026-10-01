@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -153,6 +153,45 @@ describe('AdminPasswordChangeDialog', () => {
 
         expect(onClose).toHaveBeenCalledTimes(1);
         expect(client.changePassword).not.toHaveBeenCalled();
+    });
+
+    it('blocks every way of closing while a request is in flight and restores them afterwards', async () => {
+        const { client, onClose, user } = setup();
+        let finish: () => void = () => undefined;
+        client.changePassword.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+        await fill(user);
+
+        await user.click(submit());
+
+        expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        const backdrop = screen.getByRole('dialog').parentElement as HTMLElement;
+        fireEvent.mouseDown(backdrop);
+        expect(onClose).not.toHaveBeenCalled();
+
+        finish();
+        await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+        expect(screen.getByRole('button', { name: 'Cancelar' })).toBeEnabled();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['a transport failure', new AdminAuthError('AUTH_TRANSPORT_UNAVAILABLE', null)],
+        ['an invalid response', new AdminAuthError('AUTH_RESPONSE_INVALID', 200)],
+        ['an unexpected fetch error', new TypeError('Failed to fetch')],
+    ])('says the result is unknown after %s, without the generic failure text', async (_name, failure) => {
+        const { client, controller, user } = setup();
+        client.changePassword.mockRejectedValue(failure);
+        await fill(user);
+
+        await user.click(submit());
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+            'No se pudo confirmar el cambio. Es posible que la contraseña ya se haya cambiado: verifique iniciando sesión con la nueva contraseña.',
+        ));
+        expect(screen.getByRole('alert')).not.toHaveTextContent('No se pudo cambiar la contraseña.');
+        expect(controller.handleProtectedRequestError).not.toHaveBeenCalled();
     });
 
     it('aborts an in-flight request when it unmounts', async () => {

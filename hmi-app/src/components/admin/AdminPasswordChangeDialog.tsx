@@ -52,6 +52,9 @@ const ERROR_TEXT: Record<string, string> = {
     CSRF_VALIDATION_FAILED: 'La sesión cambió. Vuelva a intentar la acción de forma explícita.',
 };
 const FALLBACK_ERROR_TEXT = 'No se pudo cambiar la contraseña.';
+// No definitive server answer: the transaction may have committed, so do not claim a failure.
+const UNKNOWN_OUTCOME_TEXT = 'No se pudo confirmar el cambio. Es posible que la contraseña ya se haya cambiado: verifique iniciando sesión con la nueva contraseña.';
+const UNKNOWN_OUTCOME_CODES = new Set(['AUTH_TRANSPORT_UNAVAILABLE', 'AUTH_RESPONSE_INVALID']);
 
 const SUCCESS_TEXT = 'Contraseña actualizada. Las demás sesiones de administrador se cerraron.';
 const FIELD_LABEL_CLS = 'text-industrial-muted';
@@ -62,12 +65,17 @@ function isSessionFailure(error: AdminAuthError): boolean {
     return error.code !== 'INVALID_CURRENT_PASSWORD' && (error.status === 401 || error.status === 403);
 }
 
+function isUnknownOutcome(error: unknown): boolean {
+    return !(error instanceof AdminAuthError) || UNKNOWN_OUTCOME_CODES.has(error.code);
+}
+
 function isAbort(error: unknown): boolean {
     return error instanceof DOMException && error.name === 'AbortError';
 }
 
 // Passwords live only in this component's state: they are never persisted, logged or kept
-// after a success, and an unmount aborts a request still in flight.
+// after a success. Closing is blocked while a request is in flight, so an unmount never aborts
+// a change whose server transaction may still commit; unmounting anyway still aborts it.
 export default function AdminPasswordChangeDialog({
     open,
     onClose,
@@ -82,6 +90,10 @@ export default function AdminPasswordChangeDialog({
     const requestRef = useRef<AbortController | null>(null);
 
     useEffect(() => () => requestRef.current?.abort(), []);
+
+    const close = () => {
+        if (!pending) onClose();
+    };
 
     const canSubmit = !pending && current !== '' && next !== '' && confirmation !== '';
 
@@ -106,7 +118,10 @@ export default function AdminPasswordChangeDialog({
         } catch (error) {
             if (isAbort(error)) return;
             const code = error instanceof AdminAuthError ? error.code : '';
-            setFeedback({ kind: 'error', text: ERROR_TEXT[code] ?? FALLBACK_ERROR_TEXT });
+            setFeedback({
+                kind: 'error',
+                text: isUnknownOutcome(error) ? UNKNOWN_OUTCOME_TEXT : (ERROR_TEXT[code] ?? FALLBACK_ERROR_TEXT),
+            });
             if (code === 'INVALID_CURRENT_PASSWORD') setCurrent('');
             if (error instanceof AdminAuthError && isSessionFailure(error)) {
                 await controller.handleProtectedRequestError(error);
@@ -137,10 +152,10 @@ export default function AdminPasswordChangeDialog({
         <AdminDialog
             open={open}
             title="Cambiar contraseña"
-            onClose={onClose}
+            onClose={close}
             actions={(
                 <>
-                    <HmiButton onClick={onClose}>Cancelar</HmiButton>
+                    <HmiButton onClick={close} disabled={pending}>Cancelar</HmiButton>
                     <HmiButton variant="primary" type="submit" form="admin-password-change-form" disabled={!canSubmit}>
                         <KeyRound size={14} aria-hidden="true" />
                         Cambiar contraseña
