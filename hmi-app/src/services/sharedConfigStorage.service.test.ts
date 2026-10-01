@@ -1,0 +1,383 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { AdminAuthError } from './adminAuth.service';
+import {
+    SHARED_CONFIG_CACHE_KEY,
+    SHARED_CONFIG_POLL_INTERVAL_MS,
+    createSharedConfigStorage,
+} from './sharedConfigStorage.service';
+import { MAX_SHARED_CONFIG_VALUE_BYTES, type SharedConfigBatch } from '../domain/sharedConfig.types';
+
+const DEBOUNCE_MS = 50;
+const LOAD_TIMEOUT_MS = 1_000;
+
+function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+    });
+}
+
+function createMemoryCache(initial: Record<string, string> = {}) {
+    const data = new Map(Object.entries(initial));
+    return {
+        data,
+        getItem: (key: string) => data.get(key) ?? null,
+        setItem: (key: string, value: string) => { data.set(key, value); },
+    };
+}
+
+function createHarness(options: { items?: Record<string, string>; revision?: number; cache?: Record<string, string> } = {}) {
+    const server = {
+        revision: options.revision ?? 0,
+        items: { ...(options.items ?? {}) } as Record<string, string>,
+        reachable: true,
+        hang: false,
+        writeError: null as AdminAuthError | null,
+        gate: null as Promise<void> | null,
+    };
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+        const path = String(input);
+        if (server.hang) {
+            return new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+            });
+        }
+        if (!server.reachable) throw new TypeError('network down');
+        if (path === '/api/prisma/hmi-config/revision') return jsonResponse({ ok: true, revision: server.revision });
+        if (path === '/api/prisma/hmi-config') {
+            return jsonResponse({ ok: true, revision: server.revision, items: server.items });
+        }
+        throw new Error(`unexpected request ${path}`);
+    });
+    const writeSharedConfig = vi.fn(async (batch: SharedConfigBatch) => {
+        if (server.gate) await server.gate;
+        if (server.writeError) throw server.writeError;
+        Object.assign(server.items, batch.set);
+        for (const key of batch.delete) delete server.items[key];
+        server.revision += 1;
+        return { revision: server.revision };
+    });
+    const cache = createMemoryCache(options.cache);
+    const storage = createSharedConfigStorage({
+        fetcher,
+        adminClient: { writeSharedConfig },
+        cache,
+        pollIntervalMs: SHARED_CONFIG_POLL_INTERVAL_MS,
+        debounceMs: DEBOUNCE_MS,
+        loadTimeoutMs: LOAD_TIMEOUT_MS,
+    });
+    return { server, fetcher, writeSharedConfig, cache, storage };
+}
+
+function documentFetches(fetcher: ReturnType<typeof createHarness>['fetcher']): number {
+    return fetcher.mock.calls.filter(([path]) => String(path) === '/api/prisma/hmi-config').length;
+}
+
+describe('sharedConfigStorage', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    describe('load', () => {
+        it('reads the server document and records the source, revision and cache copy', async () => {
+            const { storage, cache } = createHarness({ items: { 'hmi:a': '1' }, revision: 4 });
+
+            await storage.load();
+
+            expect(storage.getItem('hmi:a')).toBe('1');
+            expect(storage.getItem('hmi:missing')).toBeNull();
+            expect(storage.getStatus()).toMatchObject({ loaded: true, source: 'server', revision: 4, saveError: null });
+            expect(JSON.parse(cache.data.get(SHARED_CONFIG_CACHE_KEY) ?? 'null')).toEqual({
+                version: 1, revision: 4, items: { 'hmi:a': '1' },
+            });
+        });
+
+        it('falls back to the cached copy when the server is unreachable', async () => {
+            const cached = JSON.stringify({ version: 1, revision: 7, items: { 'hmi:a': 'cached' } });
+            const { storage, server } = createHarness({ cache: { [SHARED_CONFIG_CACHE_KEY]: cached } });
+            server.reachable = false;
+
+            await storage.load();
+
+            expect(storage.getItem('hmi:a')).toBe('cached');
+            expect(storage.getStatus()).toMatchObject({ loaded: true, source: 'cache', revision: 7 });
+        });
+
+        it('falls back to the cache when the server answers with an invalid payload', async () => {
+            const cached = JSON.stringify({ version: 1, revision: 2, items: { 'hmi:a': 'cached' } });
+            const harness = createHarness({ cache: { [SHARED_CONFIG_CACHE_KEY]: cached } });
+            harness.fetcher.mockResolvedValueOnce(jsonResponse({ ok: true, revision: 'x', items: {} }));
+
+            await harness.storage.load();
+
+            expect(harness.storage.getStatus().source).toBe('cache');
+            expect(harness.storage.getItem('hmi:a')).toBe('cached');
+        });
+
+        it('falls back to the cache when the server hangs past the load timeout', async () => {
+            const cached = JSON.stringify({ version: 1, revision: 2, items: { 'hmi:a': 'cached' } });
+            const { storage, server } = createHarness({ cache: { [SHARED_CONFIG_CACHE_KEY]: cached } });
+            server.hang = true;
+
+            const loading = storage.load();
+            await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS);
+            await loading;
+
+            expect(storage.getStatus().source).toBe('cache');
+        });
+
+        it('starts empty when the server is down and there is no usable cache', async () => {
+            const { storage, server, cache } = createHarness({ cache: { [SHARED_CONFIG_CACHE_KEY]: '{not json' } });
+            server.reachable = false;
+
+            await storage.load();
+
+            expect(storage.getItem('hmi:a')).toBeNull();
+            expect(storage.getStatus()).toMatchObject({ loaded: true, source: 'empty', revision: null });
+            expect(cache.data.get(SHARED_CONFIG_CACHE_KEY)).toBe('{not json');
+        });
+    });
+
+    describe('synchronous adapter', () => {
+        it('reflects local writes immediately, before the server answers', async () => {
+            const { storage } = createHarness({ items: { 'hmi:a': '1' } });
+            await storage.load();
+
+            storage.setItem('hmi:a', '2');
+            storage.setItem('hmi:b', '3');
+            expect(storage.getItem('hmi:a')).toBe('2');
+            expect(storage.getItem('hmi:b')).toBe('3');
+
+            storage.removeItem('hmi:a');
+            expect(storage.getItem('hmi:a')).toBeNull();
+            expect(storage.getStatus().unsavedKeyCount).toBe(2);
+        });
+
+        it('rejects keys and values the server would refuse, surfacing a save error', async () => {
+            const { storage, writeSharedConfig } = createHarness();
+            await storage.load();
+
+            storage.setItem('bad key', '1');
+            expect(storage.getStatus().saveError).toMatchObject({ code: 'SHARED_CONFIG_INVALID_KEY' });
+            expect(storage.getItem('bad key')).toBeNull();
+
+            storage.setItem('hmi:big', 'x'.repeat(MAX_SHARED_CONFIG_VALUE_BYTES + 1));
+            expect(storage.getStatus().saveError).toMatchObject({ code: 'SHARED_CONFIG_VALUE_TOO_LARGE' });
+            expect(storage.getItem('hmi:big')).toBeNull();
+
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
+            expect(writeSharedConfig).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('writes', () => {
+        it('batches consecutive writes into one request where the last write per key wins', async () => {
+            const { storage, writeSharedConfig, server } = createHarness({ items: { 'hmi:keep': 'k', 'hmi:gone': 'g' }, revision: 1 });
+            await storage.load();
+
+            storage.setItem('hmi:a', '1');
+            storage.setItem('hmi:a', '2');
+            storage.setItem('hmi:tmp', 'x');
+            storage.removeItem('hmi:tmp');
+            storage.removeItem('hmi:gone');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig).toHaveBeenCalledTimes(1);
+            expect(writeSharedConfig).toHaveBeenCalledWith({
+                set: { 'hmi:a': '2' },
+                delete: expect.arrayContaining(['hmi:tmp', 'hmi:gone']),
+            });
+            expect(server.items).toEqual({ 'hmi:keep': 'k', 'hmi:a': '2' });
+            expect(storage.getStatus()).toMatchObject({ saving: false, unsavedKeyCount: 0, saveError: null, revision: 2 });
+        });
+
+        it('updates the cache copy only after the server acknowledged the write', async () => {
+            const { storage, cache } = createHarness({ items: { 'hmi:a': '1' }, revision: 1 });
+            await storage.load();
+
+            storage.setItem('hmi:a', '2');
+            expect(JSON.parse(cache.data.get(SHARED_CONFIG_CACHE_KEY) ?? '{}').items).toEqual({ 'hmi:a': '1' });
+
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+            expect(JSON.parse(cache.data.get(SHARED_CONFIG_CACHE_KEY) ?? '{}')).toMatchObject({
+                revision: 2, items: { 'hmi:a': '2' },
+            });
+        });
+
+        it('surfaces a failed save, keeps the value visible and resends it on retry', async () => {
+            const { storage, server, writeSharedConfig } = createHarness({ revision: 1 });
+            await storage.load();
+            const statuses: Array<string | null> = [];
+            storage.subscribeStatus(() => statuses.push(storage.getStatus().saveError?.code ?? null));
+            server.writeError = new AdminAuthError('CSRF_VALIDATION_FAILED', 403);
+
+            storage.setItem('hmi:a', '1');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(storage.getStatus().saveError).toEqual({ code: 'CSRF_VALIDATION_FAILED', status: 403 });
+            expect(storage.getStatus()).toMatchObject({ saving: false, unsavedKeyCount: 1 });
+            expect(storage.getItem('hmi:a')).toBe('1');
+            expect(statuses).toContain('CSRF_VALIDATION_FAILED');
+
+            server.writeError = null;
+            await storage.retrySave();
+
+            expect(writeSharedConfig).toHaveBeenCalledTimes(2);
+            expect(server.items).toEqual({ 'hmi:a': '1' });
+            expect(storage.getStatus()).toMatchObject({ saveError: null, unsavedKeyCount: 0 });
+        });
+
+        it('reports an unavailable server as a save error without losing the value', async () => {
+            const { storage, server } = createHarness();
+            await storage.load();
+            server.writeError = new AdminAuthError('AUTH_TRANSPORT_UNAVAILABLE', null);
+
+            storage.setItem('hmi:a', '1');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(storage.getStatus().saveError).toEqual({ code: 'AUTH_TRANSPORT_UNAVAILABLE', status: null });
+            expect(storage.getItem('hmi:a')).toBe('1');
+        });
+
+        it('does not let a failed batch overwrite a newer local write of the same key', async () => {
+            const { storage, server } = createHarness();
+            await storage.load();
+            let release!: () => void;
+            server.gate = new Promise<void>((resolve) => { release = resolve; });
+            server.writeError = new AdminAuthError('AUTH_TRANSPORT_UNAVAILABLE', null);
+
+            storage.setItem('hmi:a', 'old');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+            storage.setItem('hmi:a', 'new');
+            release();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(storage.getItem('hmi:a')).toBe('new');
+
+            server.writeError = null;
+            await storage.retrySave();
+            expect(server.items).toEqual({ 'hmi:a': 'new' });
+        });
+    });
+
+    describe('revision poll', () => {
+        it('does nothing visible while the revision is unchanged', async () => {
+            const { storage, fetcher } = createHarness({ items: { 'hmi:a': '1' }, revision: 3 });
+            await storage.load();
+            const listener = vi.fn();
+            storage.subscribe(listener);
+            storage.startPolling();
+
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS * 2);
+
+            expect(fetcher.mock.calls.filter(([path]) => String(path) === '/api/prisma/hmi-config/revision')).toHaveLength(2);
+            expect(documentFetches(fetcher)).toBe(1);
+            expect(listener).not.toHaveBeenCalled();
+        });
+
+        it('refetches on a revision change, replaces memory, refreshes the cache and notifies subscribers', async () => {
+            const { storage, server, cache } = createHarness({ items: { 'hmi:a': '1', 'hmi:b': 'b' }, revision: 3 });
+            await storage.load();
+            const listener = vi.fn();
+            storage.subscribe(listener);
+            storage.startPolling();
+
+            server.items = { 'hmi:a': '2', 'hmi:c': 'c' };
+            server.revision = 4;
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
+
+            expect(storage.getItem('hmi:a')).toBe('2');
+            expect(storage.getItem('hmi:b')).toBeNull();
+            expect(storage.getItem('hmi:c')).toBe('c');
+            expect(storage.getStatus().revision).toBe(4);
+            expect(listener).toHaveBeenCalledTimes(1);
+            expect(listener.mock.calls[0]?.[0].changedKeys.slice().sort()).toEqual(['hmi:a', 'hmi:b', 'hmi:c']);
+            expect(JSON.parse(cache.data.get(SHARED_CONFIG_CACHE_KEY) ?? '{}')).toMatchObject({ revision: 4 });
+        });
+
+        it('keeps unsaved local writes on top of a remote replacement', async () => {
+            const { storage, server } = createHarness({ items: { 'hmi:a': '1' }, revision: 1 });
+            await storage.load();
+            const listener = vi.fn();
+            storage.subscribe(listener);
+            storage.startPolling();
+            server.writeError = new AdminAuthError('AUTH_TRANSPORT_UNAVAILABLE', null);
+            storage.setItem('hmi:a', 'local');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            server.items = { 'hmi:a': 'remote', 'hmi:b': 'b' };
+            server.revision = 2;
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
+
+            expect(storage.getItem('hmi:a')).toBe('local');
+            expect(storage.getItem('hmi:b')).toBe('b');
+            expect(listener.mock.calls[0]?.[0].changedKeys).toEqual(['hmi:b']);
+        });
+
+        it('ignores the echo of its own write', async () => {
+            const { storage, fetcher } = createHarness({ items: { 'hmi:a': '1' }, revision: 1 });
+            await storage.load();
+            const listener = vi.fn();
+            storage.subscribe(listener);
+            storage.startPolling();
+
+            storage.setItem('hmi:a', '2');
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS * 2);
+
+            expect(documentFetches(fetcher)).toBe(1);
+            expect(storage.getItem('hmi:a')).toBe('2');
+            expect(listener).not.toHaveBeenCalled();
+        });
+
+        it('refetches when another writer landed between its own revisions', async () => {
+            const { storage, server, fetcher } = createHarness({ items: { 'hmi:a': '1' }, revision: 1 });
+            await storage.load();
+            const listener = vi.fn();
+            storage.subscribe(listener);
+
+            server.items['hmi:other'] = 'o';
+            server.revision = 2;
+            storage.setItem('hmi:a', '2');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(server.revision).toBe(3);
+            expect(documentFetches(fetcher)).toBe(2);
+            expect(storage.getItem('hmi:other')).toBe('o');
+            expect(listener.mock.calls[0]?.[0].changedKeys).toEqual(['hmi:other']);
+        });
+
+        it('recovers from the cache source once the server answers again', async () => {
+            const cached = JSON.stringify({ version: 1, revision: 5, items: { 'hmi:a': 'cached' } });
+            const { storage, server } = createHarness({ items: { 'hmi:a': 'fresh' }, revision: 6, cache: { [SHARED_CONFIG_CACHE_KEY]: cached } });
+            server.reachable = false;
+            await storage.load();
+            storage.startPolling();
+
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
+            expect(storage.getItem('hmi:a')).toBe('cached');
+
+            server.reachable = true;
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
+            expect(storage.getItem('hmi:a')).toBe('fresh');
+            expect(storage.getStatus()).toMatchObject({ source: 'server', revision: 6 });
+        });
+
+        it('stops polling and unsubscribes cleanly', async () => {
+            const { storage, server, fetcher } = createHarness({ revision: 1 });
+            await storage.load();
+            const listener = vi.fn();
+            const unsubscribe = storage.subscribe(listener);
+            storage.startPolling();
+            storage.stopPolling();
+
+            server.revision = 2;
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS * 3);
+            expect(fetcher).toHaveBeenCalledTimes(1);
+
+            unsubscribe();
+            storage.startPolling();
+            await vi.advanceTimersByTimeAsync(SHARED_CONFIG_POLL_INTERVAL_MS);
+            expect(listener).not.toHaveBeenCalled();
+            storage.stopPolling();
+        });
+    });
+});
