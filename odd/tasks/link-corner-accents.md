@@ -100,6 +100,8 @@ registered accent custom properties.
 
 - 2026-09-30 user: "ahora sí se ve; las esquinas de la animación son rectas y deberían tomar la misma forma que las esquinas de los widgets". Fix (parent inline, TDD): the layer is again rounded (frame radius + offset) but draws a BORDER (follows the arc; a background would be clipped inside it) masked to the four corner squares of side radius + offset + accent length (arc + straight tail), length/opacity still the registered accent properties. RED 2 -> GREEN 23/23; full suite green; live screenshots show curved brackets around the hovered group. Commit after this line.
 
+- 2026-09-30 user: "la animación tiene 2 largos, colocá controles en el tab Temas para poder ajustar esos largos". Writer: two sliders in the "Esquinas en widgets con enlace" section ("Largo en reposo" 18 px / "Largo con el cursor" 8 px, 0-40, step 1, always visible, disabled while the switch is off, with a hint that the length is the straight part continuing the corner arc). Mechanism: overrides only in `hmi-link-corner-accent-lengths` (JSON; invalid -> default, out of range clamped, off-step snapped); the live value is `--link-accent-length-rest` / `-hover` on the document root, written only when overridden (reset removes them), same as the entrance sliders (no Zustand store: the CSS property is the live value and the layer reads it); boot apply in `main.tsx`; part of the Tema dirty / Guardar / revert / unmount-restore flow. Commits `79d26bc` (service, RED 16 -> GREEN 16), the Tema sliders commit (RED 8 failed / 11 passed -> GREEN 19/19; Tema suites 88 passed), docs commit. No `index.css` change.
+
 ## Next step
 
 Live check of the corner accents in the browser (parent), then close the feature.

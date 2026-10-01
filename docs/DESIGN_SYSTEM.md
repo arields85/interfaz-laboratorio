@@ -123,6 +123,8 @@ Configuración general → Tema → "Esquinas en widgets con enlace" (interrupto
 
 Los valores de reposo y hover replican el acento de marco de Contorno.
 
+**Largos ajustables:** la misma sección tiene dos controles numéricos, "Largo en reposo" (18 px por defecto) y "Largo con el cursor" (8 px), de 0 a 40 px en pasos de 1. El largo es el tramo recto que continúa el arco de la esquina. Se muestran siempre, pero inactivos mientras el interruptor está apagado. Solo se guardan los valores que difieren del defecto (`hmi-link-corner-accent-lengths`, JSON; un valor inválido vuelve al defecto y uno fuera de rango se ajusta al límite). La vista previa es en vivo: `services/linkCornerAccents.service.ts` escribe `--link-accent-length-rest` / `--link-accent-length-hover` en la raíz del documento solo cuando difieren del defecto (el valor en `index.css` es el defecto y la única fuente CSS), y entran en el flujo sucio / Guardar / Descartar / restauración al cerrar de la pestaña Tema; `main.tsx` los reaplica al arrancar.
+
 ## Entrada animada del visor
 
 Al entrar a un dashboard o cambiar de vista, el visor arma la pantalla con movimiento: los marcos aparecen en orden aleatorio, los indicadores (barra y aro) se llenan hasta su valor y los gráficos SVG se revelan de izquierda a derecha. Es CSS puro, no retrasa ni condiciona la carga de datos, no se reproduce con el refresco periódico y queda desactivada con `prefers-reduced-motion`. Solo aplica bajo el marco del visor (`[data-viewer-entrance='true']`): el builder nunca anima.
