@@ -16,11 +16,33 @@ function rule(selector: string): string {
     return match?.[1] ?? '';
 }
 
+/** Splits a selector list at its commas outside any parentheses, so `:is(.a, .b)` stays one selector. */
+function splitTopLevel(list: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let index = 0; index < list.length; index += 1) {
+        const char = list[index];
+        if (char === '(') {
+            depth += 1;
+        } else if (char === ')') {
+            depth -= 1;
+        } else if (char === ',' && depth === 0) {
+            parts.push(list.slice(start, index));
+            start = index + 1;
+        }
+    }
+    parts.push(list.slice(start));
+
+    return parts;
+}
+
 /** Specificity (ids excluded: none are used) of a compound selector, enough for the selectors of this file. */
 function specificity(selector: string): number {
     let score = 0;
-    const rest = selector.replace(/:is\(([^)]*)\)/g, (_match, args: string) => {
-        score += Math.max(...args.split(',').map((arg) => specificity(arg.trim())));
+    // One level of nested parentheses is enough here (`:is(:not(.a), .b)`).
+    const rest = selector.replace(/:is\(((?:[^()]|\([^()]*\))*)\)/g, (_match, args: string) => {
+        score += Math.max(...splitTopLevel(args).map((arg) => specificity(arg.trim())));
 
         return '';
     });
@@ -184,7 +206,7 @@ describe('index.css icon cutout selector guard', () => {
         const found: string[] = [];
         for (const match of withoutComments.matchAll(/([^{}]+){/g)) {
             const prelude = match[1].split(ALLOWED).join('');
-            for (const selector of prelude.split(',')) {
+            for (const selector of splitTopLevel(prelude)) {
                 if (/\.glass-panel/.test(selector) && selector.includes('[data-icon-cutout]')) {
                     found.push(selector.trim());
                 }
@@ -202,5 +224,15 @@ describe('index.css icon cutout selector guard', () => {
         expect(combiningSelectors('.glass-panel[data-icon-cutout] { color: red; }')).toHaveLength(1);
         expect(combiningSelectors('.glass-panel-group[data-icon-cutout]:hover { color: red; }')).toHaveLength(1);
         expect(combiningSelectors(`${ALLOWED}, ${ALLOWED}:hover { color: red; }`)).toEqual([]);
+    });
+
+    it('does not split a selector on the commas inside its parentheses', () => {
+        // A raw comma split would cut this one into two halves that each name only one of the two parts.
+        expect(combiningSelectors('.glass-panel:is(.a, [data-icon-cutout]) { color: red; }')).toHaveLength(1);
+        expect(combiningSelectors('.glass-panel:where(:not(.a), [data-icon-cutout]) { color: red; }')).toHaveLength(1);
+    });
+
+    it('splits a selector list only at the top level', () => {
+        expect(splitTopLevel('.a:is(.b, .c), .d, .e:not(:is(.f, .g))')).toEqual(['.a:is(.b, .c)', ' .d', ' .e:not(:is(.f, .g))']);
     });
 });
