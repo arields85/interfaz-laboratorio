@@ -106,6 +106,7 @@ Para pendientes, backlog, continuación o próximos pasos, y antes de trabajar e
 | [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | Tokens, fuentes, Tailwind v4, Regla de Oro |
 | [`docs/TESTING.md`](docs/TESTING.md) | Stack de testing, coverage, TDD, mocks, fixtures |
 | [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) | Contrato JSON estable de integración de datos en tiempo real, estados oficiales, resolución, fallbacks |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Guía de despliegue en servidor para IT: topología, nginx, variables, permisos, provisión inicial, respaldos, auto-deploy |
 | [`docs/PENDING_WORK.md`](docs/PENDING_WORK.md) | Índice activo de pendientes y referencias a su detalle en Engram |
 | [`hmi-app/src/widgets/WIDGET_AUTHORING.md`](hmi-app/src/widgets/WIDGET_AUTHORING.md) | Cómo crear widgets nuevos |
 | [`hmi-app/src/components/admin/ADMIN_CONVENTIONS.md`](hmi-app/src/components/admin/ADMIN_CONVENTIONS.md) | Convenciones operativas del modo admin |
