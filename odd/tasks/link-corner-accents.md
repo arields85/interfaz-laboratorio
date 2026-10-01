@@ -127,4 +127,6 @@ registered accent custom properties.
 
 ## Next step
 
+CLOSED 2026-09-30: accepted live by the user; the branch `feat/tab-frame-charts` was fast-forwarded into `main` by ref (no checkout) and `main` was pushed to `origin` on the user's request. Remaining items moved to `docs/PENDING_WORK.md`: PW-020 (corner finish under the icon, lab alternatives) and PW-021 (non-blocking review follow-ups, incl. the unreviewed tail `6d0c56f` + `f27d55e`, 184 lines).
+
 Live check of the corner accents in the browser (parent), then close the feature.
