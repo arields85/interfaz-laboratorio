@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut, Monitor, Settings } from 'lucide-react';
 import GlobalSettingsDialog from '../components/admin/GlobalSettingsDialog';
+import SharedConfigSaveNotice from '../components/admin/SharedConfigSaveNotice';
 import { HmiButton } from '../components/ui';
 import { requestShieldReveal } from '../hooks/useBootShield';
 import { ADMIN_SECTIONS, getAdminSectionByPath } from '../utils/adminNavigation';
@@ -104,6 +105,8 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
                     </HmiButton>
                 </div>
             </header>
+
+            <SharedConfigSaveNotice />
 
             {/* MAIN ADMIN CONTENT */}
             <main className="flex-1 min-h-0 overflow-hidden relative">

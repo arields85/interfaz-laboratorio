@@ -23,6 +23,10 @@ vi.mock('../components/admin/GlobalSettingsDialog', () => ({
     ),
 }));
 
+vi.mock('../components/admin/SharedConfigSaveNotice', () => ({
+    default: () => <div data-testid="shared-config-save-notice" />,
+}));
+
 vi.mock('../utils/adminNavigation', () => ({
     ADMIN_SECTIONS: [
         { key: 'dashboards', navTo: '/admin/dashboards', label: 'Dashboards' },
@@ -58,6 +62,15 @@ describe('AdminLayout', () => {
         vi.clearAllMocks();
         clearLoaderOptionsConfig();
         document.body.innerHTML = '';
+    });
+
+    it('mounts the shared configuration save notice below the admin header', () => {
+        render(<AdminLayout />);
+
+        const notice = screen.getByTestId('shared-config-save-notice');
+        const header = screen.getByRole('banner');
+        expect(header.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(header).not.toContainElement(notice);
     });
 
     it('logs out immediately without revealing the runtime long loader when that profile is disabled', () => {
