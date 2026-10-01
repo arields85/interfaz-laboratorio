@@ -4,7 +4,19 @@
 
 export const SHARED_CONFIG_CACHE_VERSION = 1;
 export const MAX_SHARED_CONFIG_KEY_LENGTH = 128;
-export const MAX_SHARED_CONFIG_VALUE_BYTES = 1024 * 1024;
+export const MAX_SHARED_CONFIG_VALUE_BYTES = 4 * 1024 * 1024;
+export const MAX_SHARED_CONFIG_BATCH_OPERATIONS = 200;
+export const MAX_SHARED_CONFIG_REQUEST_BYTES = 16 * 1024 * 1024;
+
+// Rejections that resending the same batch cannot fix: it is dropped instead of retried.
+export const SHARED_CONFIG_PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set([
+    'HMI_CONFIG_DOCUMENT_TOO_LARGE',
+    'HMI_CONFIG_REQUEST_TOO_LARGE',
+    'HMI_CONFIG_VALUE_TOO_LARGE',
+    'HMI_CONFIG_INVALID_REQUEST',
+    'SHARED_CONFIG_INVALID_KEY',
+    'SHARED_CONFIG_VALUE_TOO_LARGE',
+]);
 
 const SHARED_CONFIG_KEY_PATTERN = /^[A-Za-z0-9:._-]+$/;
 

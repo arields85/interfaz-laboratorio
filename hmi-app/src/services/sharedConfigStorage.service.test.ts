@@ -6,7 +6,11 @@ import {
     SHARED_CONFIG_POLL_INTERVAL_MS,
     createSharedConfigStorage,
 } from './sharedConfigStorage.service';
-import { MAX_SHARED_CONFIG_VALUE_BYTES, type SharedConfigBatch } from '../domain/sharedConfig.types';
+import {
+    MAX_SHARED_CONFIG_BATCH_OPERATIONS,
+    MAX_SHARED_CONFIG_VALUE_BYTES,
+    type SharedConfigBatch,
+} from '../domain/sharedConfig.types';
 
 const DEBOUNCE_MS = 50;
 const LOAD_TIMEOUT_MS = 1_000;
@@ -256,6 +260,101 @@ describe('sharedConfigStorage', () => {
             server.writeError = null;
             await storage.retrySave();
             expect(server.items).toEqual({ 'hmi:a': 'new' });
+        });
+    });
+
+    describe('batch splitting and permanent rejections', () => {
+        const operations = (batch: SharedConfigBatch) => Object.keys(batch.set).length + batch.delete.length;
+
+        it('splits an outgoing batch to respect the operation bound', async () => {
+            const { storage, writeSharedConfig, server } = createHarness();
+            await storage.load();
+            const total = MAX_SHARED_CONFIG_BATCH_OPERATIONS + 50;
+
+            for (let index = 0; index < total; index += 1) storage.setItem(`hmi:k${index}`, String(index));
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig.mock.calls.map(([batch]) => operations(batch))).toEqual([MAX_SHARED_CONFIG_BATCH_OPERATIONS, 50]);
+            expect(Object.keys(server.items)).toHaveLength(total);
+            expect(storage.getStatus()).toMatchObject({ unsavedKeyCount: 0, saveError: null });
+        });
+
+        it('splits an outgoing batch to respect the request size bound', async () => {
+            const { storage, writeSharedConfig } = createHarness();
+            await storage.load();
+            const big = 'x'.repeat(MAX_SHARED_CONFIG_VALUE_BYTES);
+
+            for (let index = 0; index < 5; index += 1) storage.setItem(`hmi:big${index}`, big);
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig.mock.calls.map(([batch]) => operations(batch))).toEqual([3, 2]);
+            expect(storage.getStatus()).toMatchObject({ unsavedKeyCount: 0, saveError: null });
+        });
+
+        it.each([
+            ['HMI_CONFIG_DOCUMENT_TOO_LARGE', 413],
+            ['HMI_CONFIG_REQUEST_TOO_LARGE', 413],
+            ['HMI_CONFIG_VALUE_TOO_LARGE', 413],
+            ['HMI_CONFIG_INVALID_REQUEST', 400],
+        ])('drops a batch rejected as %s, keeps the error visible and lets later writes flow', async (code, status) => {
+            const { storage, writeSharedConfig, server } = createHarness({ items: { 'hmi:a': 'server' }, revision: 1 });
+            await storage.load();
+            const changes: string[][] = [];
+            storage.subscribe((change) => changes.push([...change.changedKeys]));
+            server.writeError = new AdminAuthError(code, status);
+
+            storage.setItem('hmi:a', 'poison');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(storage.getStatus().saveError).toEqual({ code, status });
+            expect(storage.getStatus()).toMatchObject({ saving: false, unsavedKeyCount: 0 });
+            expect(storage.getItem('hmi:a')).toBe('server');
+            expect(changes).toEqual([['hmi:a']]);
+
+            server.writeError = null;
+            storage.setItem('hmi:b', 'later');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(server.items).toEqual({ 'hmi:a': 'server', 'hmi:b': 'later' });
+            expect(storage.getStatus()).toMatchObject({ unsavedKeyCount: 0, saveError: { code } });
+            expect(writeSharedConfig).toHaveBeenCalledTimes(2);
+
+            await storage.retrySave();
+            expect(storage.getStatus().saveError).toBeNull();
+            expect(writeSharedConfig).toHaveBeenCalledTimes(2);
+        });
+
+        it('keeps sending the remaining chunks after one chunk is permanently rejected', async () => {
+            const { storage, writeSharedConfig, server } = createHarness();
+            await storage.load();
+            writeSharedConfig.mockImplementationOnce(async () => {
+                throw new AdminAuthError('HMI_CONFIG_INVALID_REQUEST', 400);
+            });
+
+            for (let index = 0; index < MAX_SHARED_CONFIG_BATCH_OPERATIONS + 10; index += 1) {
+                storage.setItem(`hmi:k${index}`, String(index));
+            }
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+            expect(writeSharedConfig).toHaveBeenCalledTimes(2);
+            expect(Object.keys(server.items)).toHaveLength(10);
+            expect(storage.getStatus()).toMatchObject({ unsavedKeyCount: 0, saveError: { code: 'HMI_CONFIG_INVALID_REQUEST' } });
+        });
+
+        it('keeps retrying transient failures, including a 5xx from the runtime', async () => {
+            const { storage, server, writeSharedConfig } = createHarness();
+            await storage.load();
+            server.writeError = new AdminAuthError('HMI_CONFIG_UNAVAILABLE', 503);
+
+            storage.setItem('hmi:a', '1');
+            await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+            expect(storage.getStatus()).toMatchObject({ unsavedKeyCount: 1, saveError: { code: 'HMI_CONFIG_UNAVAILABLE' } });
+
+            server.writeError = null;
+            await storage.retrySave();
+            expect(writeSharedConfig).toHaveBeenCalledTimes(2);
+            expect(server.items).toEqual({ 'hmi:a': '1' });
+            expect(storage.getStatus()).toMatchObject({ unsavedKeyCount: 0, saveError: null });
         });
     });
 

@@ -1,4 +1,7 @@
 import {
+    MAX_SHARED_CONFIG_BATCH_OPERATIONS,
+    MAX_SHARED_CONFIG_REQUEST_BYTES,
+    SHARED_CONFIG_PERMANENT_ERROR_CODES,
     isSharedConfigValueWithinLimit,
     isValidSharedConfigKey,
     parseSharedConfigCache,
@@ -63,6 +66,45 @@ function createBrowserCache(): SharedConfigCachePort {
 function toSaveError(error: unknown): SharedConfigSaveError {
     if (error instanceof AdminAuthError) return { code: error.code, status: error.status };
     return { code: 'SHARED_CONFIG_SAVE_FAILED', status: null };
+}
+
+const encoder = new TextEncoder();
+// `{"set":{},"delete":[]}`
+const EMPTY_WIRE_BYTES = 23;
+
+function jsonBytes(text: string): number {
+    return encoder.encode(JSON.stringify(text)).length;
+}
+
+function toWire(chunk: ReadonlyMap<string, string | null>): SharedConfigBatch {
+    const wire: SharedConfigBatch = { set: {}, delete: [] };
+    for (const [key, value] of chunk) {
+        if (value === null) wire.delete.push(key);
+        else wire.set[key] = value;
+    }
+    return wire;
+}
+
+/** Splits staged edits so every request respects the server's operation and size bounds. */
+function splitIntoChunks(batch: ReadonlyMap<string, string | null>): Array<Map<string, string | null>> {
+    const chunks: Array<Map<string, string | null>> = [];
+    let current = new Map<string, string | null>();
+    let bytes = EMPTY_WIRE_BYTES;
+    for (const [key, value] of batch) {
+        // key + colon/comma, plus the value for a set.
+        const entryBytes = jsonBytes(key) + 2 + (value === null ? 0 : jsonBytes(value));
+        const full = current.size >= MAX_SHARED_CONFIG_BATCH_OPERATIONS
+            || (current.size > 0 && bytes + entryBytes > MAX_SHARED_CONFIG_REQUEST_BYTES);
+        if (full) {
+            chunks.push(current);
+            current = new Map();
+            bytes = EMPTY_WIRE_BYTES;
+        }
+        current.set(key, value);
+        bytes += entryBytes;
+    }
+    if (current.size > 0) chunks.push(current);
+    return chunks;
 }
 
 export class SharedConfigStorage {
@@ -251,36 +293,62 @@ export class SharedConfigStorage {
         this.pending = new Map();
         this.inFlight = batch;
         this.updateStatus();
-        const wire: SharedConfigBatch = { set: {}, delete: [] };
-        for (const [key, value] of batch) {
-            if (value === null) wire.delete.push(key);
-            else wire.set[key] = value;
-        }
-        try {
-            const result = await this.adminClient.writeSharedConfig(wire);
-            const expected = this.revision === null ? null : this.revision + 1;
-            for (const [key, value] of batch) {
-                if (value === null) this.serverItems.delete(key);
-                else this.serverItems.set(key, value);
+        const chunks = splitIntoChunks(batch);
+        let failure: SharedConfigSaveError | null = null;
+        let rejected: SharedConfigSaveError | null = null;
+        const droppedKeys: string[] = [];
+        for (const [index, chunk] of chunks.entries()) {
+            try {
+                const result = await this.adminClient.writeSharedConfig(toWire(chunk));
+                this.acknowledge(chunk, result.revision);
+            } catch (error) {
+                const saveError = toSaveError(error);
+                if (SHARED_CONFIG_PERMANENT_ERROR_CODES.has(saveError.code)) {
+                    // Resending cannot fix it: drop the chunk so it does not poison later saves.
+                    rejected = saveError;
+                    for (const key of chunk.keys()) {
+                        this.inFlight?.delete(key);
+                        droppedKeys.push(key);
+                    }
+                    continue;
+                }
+                // Transient (network, 5xx, session): keep this and every unsent chunk for a retry.
+                failure = saveError;
+                for (const rest of chunks.slice(index)) {
+                    for (const [key, value] of rest) {
+                        if (!this.pending.has(key)) this.pending.set(key, value);
+                    }
+                }
+                break;
             }
-            this.inFlight = null;
-            this.saveError = null;
-            this.revision = result.revision;
-            // Own echo: the next revision is ours and needs no reload. Anything else means
-            // another writer landed in between (or the document was never loaded).
-            const isOwnEcho = expected === result.revision && this.source === 'server';
-            if (isOwnEcho) this.persistCache();
-            this.updateStatus();
-            if (!isOwnEcho) void this.refresh();
-            if (this.pending.size > 0) this.scheduleFlush();
-        } catch (error) {
-            this.inFlight = null;
-            for (const [key, value] of batch) {
-                if (!this.pending.has(key)) this.pending.set(key, value);
-            }
-            this.saveError = toSaveError(error);
-            this.updateStatus();
         }
+        this.inFlight = null;
+        if (failure !== null) this.saveError = failure;
+        else if (rejected !== null) this.saveError = rejected;
+        else if (!this.hasPermanentError()) this.saveError = null;
+        this.updateStatus();
+        const reverted = droppedKeys.filter((key) => !this.isOverlaid(key));
+        if (reverted.length > 0) this.notifyChange({ changedKeys: reverted });
+        if (failure === null && this.pending.size > 0) this.scheduleFlush();
+    }
+
+    private hasPermanentError(): boolean {
+        return this.saveError !== null && SHARED_CONFIG_PERMANENT_ERROR_CODES.has(this.saveError.code);
+    }
+
+    private acknowledge(chunk: ReadonlyMap<string, string | null>, revision: number): void {
+        const expected = this.revision === null ? null : this.revision + 1;
+        for (const [key, value] of chunk) {
+            if (value === null) this.serverItems.delete(key);
+            else this.serverItems.set(key, value);
+            this.inFlight?.delete(key);
+        }
+        this.revision = revision;
+        // Own echo: the next revision is ours and needs no reload. Anything else means
+        // another writer landed in between (or the document was never loaded).
+        const isOwnEcho = expected === revision && this.source === 'server';
+        if (isOwnEcho) this.persistCache();
+        else void this.refresh();
     }
 
     private scheduleFlush(): void {

@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+    MAX_SHARED_CONFIG_BATCH_OPERATIONS,
     MAX_SHARED_CONFIG_KEY_LENGTH,
+    MAX_SHARED_CONFIG_REQUEST_BYTES,
     MAX_SHARED_CONFIG_VALUE_BYTES,
     isSharedConfigValueWithinLimit,
     isValidSharedConfigKey,
@@ -47,5 +52,28 @@ describe('shared config domain', () => {
         expect(parseSharedConfigCache(JSON.stringify({ version: 1, revision: 1, items: { 'hmi:a': 3 } }))).toBeNull();
         expect(parseSharedConfigCache(JSON.stringify({ version: 1, revision: 3, items: { 'hmi:a': 'x' } })))
             .toEqual({ revision: 3, items: { 'hmi:a': 'x' } });
+    });
+
+    it('keeps its bounds identical to the runtime store and route', () => {
+        const here = path.dirname(fileURLToPath(import.meta.url));
+        const runtime = path.resolve(here, '../../../services/prisma-runtime/src/prisma_runtime');
+        const store = readFileSync(path.join(runtime, 'hmi_config_store.py'), 'utf-8');
+        const route = readFileSync(path.join(runtime, 'admin_http.py'), 'utf-8');
+        const mib = (source: string, name: string): number => {
+            const match = new RegExp(`^${name} = (\\d+) \\* 1024 \\* 1024`, 'm').exec(source);
+            if (!match) throw new Error(`missing ${name}`);
+            return Number(match[1]) * 1024 * 1024;
+        };
+        const count = (source: string, name: string): number => {
+            const match = new RegExp(`^${name} = (\\d+)`, 'm').exec(source);
+            if (!match) throw new Error(`missing ${name}`);
+            return Number(match[1]);
+        };
+
+        expect(MAX_SHARED_CONFIG_VALUE_BYTES).toBe(mib(store, 'MAX_VALUE_BYTES'));
+        expect(MAX_SHARED_CONFIG_KEY_LENGTH).toBe(count(store, 'MAX_KEY_LENGTH'));
+        expect(MAX_SHARED_CONFIG_BATCH_OPERATIONS).toBe(count(store, 'MAX_BATCH_OPERATIONS'));
+        expect(MAX_SHARED_CONFIG_REQUEST_BYTES).toBe(mib(route, 'MAX_HMI_CONFIG_REQUEST_BYTES'));
+        expect(MAX_SHARED_CONFIG_VALUE_BYTES).toBe(4 * 1024 * 1024);
     });
 });
