@@ -59,6 +59,12 @@ vi.mock('./LedaPairingControl', () => ({
     ),
 }));
 
+// Isolation mock only: the real bell (query, polling, panel) is covered by NotificationBell.test.tsx.
+// Rendered only where Topbar itself mounts it, so an un-integrated source fails the wiring tests.
+vi.mock('./NotificationBell', () => ({
+    default: () => <div data-testid="notification-bell" />,
+}));
+
 const unauthenticatedSession: AuthSession = {
     user: null,
     isAuthenticated: false,
@@ -259,6 +265,41 @@ describe('Topbar', () => {
         expect(container.querySelector('.led-glow-red')).not.toBeInTheDocument();
     });
 
+    it('keeps the disabled bell for a viewer without an admin session', () => {
+        renderTopbar('/explorer');
+
+        expect(screen.queryByTestId('notification-bell')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Notificaciones' })).toBeDisabled();
+    });
+
+    it('swaps the disabled bell for the notification bell with an admin session', () => {
+        useAuthStore.setState({
+            session: adminSession,
+            isHydrated: true,
+            isAuthenticating: false,
+            error: null,
+        });
+
+        renderTopbar('/explorer');
+
+        expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Notificaciones' })).not.toBeInTheDocument();
+    });
+
+    it('keeps the disabled bell until auth hydration completes', () => {
+        useAuthStore.setState({
+            session: adminSession,
+            isHydrated: false,
+            isAuthenticating: false,
+            error: null,
+        });
+
+        renderTopbar('/explorer');
+
+        expect(screen.queryByTestId('notification-bell')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Notificaciones' })).toBeDisabled();
+    });
+
     it('hides Core-only notifications while keeping the EPPI profile actions', () => {
         useAuthStore.setState({
             session: adminSession,
@@ -269,6 +310,7 @@ describe('Topbar', () => {
         renderTopbar('/eppi/orders');
 
         expect(screen.queryByRole('button', { name: 'Notificaciones' })).not.toBeInTheDocument();
+        expect(screen.queryByTestId('notification-bell')).not.toBeInTheDocument();
         expect(screen.getByTitle('Personalizar fondo')).toBeInTheDocument();
         expect(screen.getByTitle('Administracion')).toBeInTheDocument();
         expect(screen.getByTitle('Usuario')).toBeInTheDocument();

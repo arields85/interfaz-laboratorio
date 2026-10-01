@@ -3,6 +3,7 @@ import { Bell, Search, User, Home, FolderTree, Activity, AlertTriangle, Box, Set
 import { useLocation, useNavigate } from 'react-router-dom';
 import LoginOverlay from '../auth/LoginOverlay';
 import ShaderSettingsPanel from './ShaderSettingsPanel';
+import NotificationBell from './NotificationBell';
 import { useAuthStore } from '../../store/auth.store';
 import { useLoginOverlayStore } from '../../store/loginOverlay.store';
 import { useHiddenAccess } from '../../hooks/useHiddenAccess';
@@ -195,15 +196,19 @@ export default function Topbar() {
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1">
                     {!isEppiMode ? (
-                        <button
-                            type="button"
-                            disabled
-                            title="Notificaciones"
-                            aria-label="Notificaciones"
-                            className="cursor-default rounded-lg p-2 text-industrial-muted/50 transition-colors"
-                        >
-                            <Bell size={20} />
-                        </button>
+                        shouldShowAdminActions ? (
+                            <NotificationBell />
+                        ) : (
+                            <button
+                                type="button"
+                                disabled
+                                title="Notificaciones"
+                                aria-label="Notificaciones"
+                                className="cursor-default rounded-lg p-2 text-industrial-muted/50 transition-colors"
+                            >
+                                <Bell size={20} />
+                            </button>
+                        )
                     ) : null}
                     {shouldShowAdminActions ? (
                         <button
