@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Download, Upload } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import AdminActionButton from './AdminActionButton';
 import CopyValueButton from './CopyValueButton';
@@ -22,6 +23,12 @@ import {
     saveDataEndpoint,
     saveDataHistoryEndpoint,
 } from '../../config/dataConnection.config';
+import {
+    buildDataConnectionExport,
+    parseDataConnectionFile,
+} from '../../utils/dataConnectionPortability';
+import { validateDataConnectionValues } from '../../utils/dataConnectionValidation';
+import { downloadJsonFile } from '../../utils/portableFile';
 import { DATA_OVERVIEW_QUERY_KEY } from '../../queries/useDataOverview';
 import { ACTIVITY_SERIES_QUERY_KEY_PREFIX } from '../../queries/useActivitySeries';
 import { DATA_HISTORY_QUERY_KEY_PREFIX } from '../../queries/useDataHistory';
@@ -42,6 +49,11 @@ const COPY_FIELD_TEXT: Record<CopyFieldId, { label: string; success: string }> =
     historyEndpoint: { label: 'Copiar endpoint histórico', success: 'Endpoint histórico copiado.' },
     activitySeriesEndpoint: { label: 'Copiar endpoint activity-series', success: 'Endpoint activity-series copiado.' },
 };
+
+interface PortabilityFeedback {
+    kind: 'success' | 'error';
+    message: string;
+}
 
 interface ConnectionSettingsTabProps {
     onDirtyChange?: (dirty: boolean) => void;
@@ -92,6 +104,63 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
     const copyStatusMessage = copyFailed
         ? COPY_FAILURE_MESSAGE
         : copiedField ? COPY_FIELD_TEXT[copiedField].success : '';
+
+    const [portabilityFeedback, setPortabilityFeedback] = useState<PortabilityFeedback | null>(null);
+    const importInputRef = useRef<HTMLInputElement | null>(null);
+
+    const handleExport = useCallback(() => {
+        // Exports the current form values (including unsaved edits), so the file
+        // matches what the user sees; the UI states this next to the button.
+        const validation = validateDataConnectionValues({
+            baseUrl: draftUrl,
+            endpoint: draftEndpoint,
+            historyEndpoint: draftHistoryEndpoint,
+            activitySeriesEndpoint: draftActivitySeriesEndpoint,
+        });
+
+        if (!validation.ok) {
+            setPortabilityFeedback({ kind: 'error', message: `No se puede exportar: ${validation.message}` });
+            return;
+        }
+
+        const { fileName, json } = buildDataConnectionExport(validation.values);
+        downloadJsonFile(fileName, json);
+        setPortabilityFeedback(null);
+    }, [draftActivitySeriesEndpoint, draftEndpoint, draftHistoryEndpoint, draftUrl]);
+
+    const handleImportFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+        const input = event.target;
+        const file = input.files?.[0];
+
+        if (!file) {
+            return;
+        }
+
+        try {
+            const result = parseDataConnectionFile(await file.text());
+
+            if (!result.ok) {
+                setPortabilityFeedback({ kind: 'error', message: `No pudimos importar el archivo: ${result.message}` });
+                return;
+            }
+
+            // Fill the form only: the user reviews the values and presses Guardar.
+            setDraftUrl(result.values.baseUrl);
+            setDraftEndpoint(result.values.endpoint);
+            setDraftHistoryEndpoint(result.values.historyEndpoint);
+            setDraftActivitySeriesEndpoint(result.values.activitySeriesEndpoint);
+            onDirtyChange?.(true);
+            setSaveStatus('dirty');
+            setPortabilityFeedback({
+                kind: 'success',
+                message: 'Valores importados. Revíselos y presione Guardar para aplicarlos.',
+            });
+        } catch {
+            setPortabilityFeedback({ kind: 'error', message: 'No pudimos importar el archivo: no se pudo leer.' });
+        } finally {
+            input.value = '';
+        }
+    }, [onDirtyChange]);
 
     const previewSnapshotUrl = useMemo(() => {
         const baseUrl = draftUrl.trim().replace(/\/+$/, '');
@@ -351,10 +420,40 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                 {copyStatusMessage}
             </p>
 
-            <div>
+            <div className="flex flex-wrap items-center gap-2">
                 <AdminActionButton variant="secondary" onClick={handleClear}>
                     Limpiar URL guardada
                 </AdminActionButton>
+                <AdminActionButton variant="secondary" onClick={handleExport}>
+                    <Download size={14} />
+                    Exportar
+                </AdminActionButton>
+                <AdminActionButton variant="secondary" onClick={() => importInputRef.current?.click()}>
+                    <Upload size={14} />
+                    Importar
+                </AdminActionButton>
+                <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="sr-only"
+                    aria-label="Seleccionar archivo de conexión"
+                    onChange={(event) => void handleImportFileChange(event)}
+                />
+            </div>
+            <p className={ADMIN_SIDEBAR_HINT_CLS}>
+                Exportar guarda en un archivo los valores actuales del formulario, aunque todavía no estén guardados.
+                Importar completa el formulario sin guardar.
+            </p>
+            <div aria-live="polite">
+                {portabilityFeedback && (
+                    <p
+                        role={portabilityFeedback.kind === 'error' ? 'alert' : undefined}
+                        className={portabilityFeedback.kind === 'error' ? 'text-status-critical' : 'text-industrial-muted'}
+                    >
+                        {portabilityFeedback.message}
+                    </p>
+                )}
             </div>
         </div>
     );

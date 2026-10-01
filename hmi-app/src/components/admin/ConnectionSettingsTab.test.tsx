@@ -1,9 +1,15 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConnectionSettingsTab from './ConnectionSettingsTab';
+import { downloadJsonFile } from '../../utils/portableFile';
 
 const invalidateQueries = vi.fn();
+
+vi.mock('../../utils/portableFile', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../utils/portableFile')>()),
+    downloadJsonFile: vi.fn(),
+}));
 
 vi.mock('@tanstack/react-query', () => ({
     useQueryClient: () => ({ invalidateQueries }),
@@ -225,5 +231,166 @@ describe('ConnectionSettingsTab copy buttons', () => {
         });
 
         expect(onDirtyChange).not.toHaveBeenCalled();
+    });
+});
+
+describe('ConnectionSettingsTab export and import', () => {
+    const VALUES = {
+        baseUrl: 'https://node-red.prod.local:1880',
+        endpoint: '/api/prod',
+        historyEndpoint: '/api/prod/history',
+        activitySeriesEndpoint: '/api/prod/series',
+    };
+
+    function connectionFile(connection: Record<string, unknown> = VALUES): File {
+        return new File(
+            [JSON.stringify({
+                format: 'interfaz-laboratorio-data-connection',
+                schemaVersion: 1,
+                exportedAt: '2026-10-01T12:00:00.000Z',
+                connection,
+            })],
+            'connection.json',
+            { type: 'application/json' },
+        );
+    }
+
+    function chooseFile(file: File) {
+        const input = screen.getByLabelText('Seleccionar archivo de conexión') as HTMLInputElement;
+        fireEvent.change(input, { target: { files: [file] } });
+        return input;
+    }
+
+    beforeEach(() => {
+        localStorage.clear();
+        vi.stubEnv('VITE_NODE_RED_BASE_URL', '');
+        vi.mocked(downloadJsonFile).mockReset();
+    });
+
+    afterEach(() => {
+        invalidateQueries.mockReset();
+        localStorage.clear();
+        vi.unstubAllEnvs();
+    });
+
+    it('exports the current (unsaved) form values as a connection file', () => {
+        render(<ConnectionSettingsTab />);
+
+        fireEvent.change(screen.getByLabelText('URL Base de Node-RED'), { target: { value: VALUES.baseUrl } });
+        fireEvent.change(screen.getByLabelText('Endpoint Snapshot'), { target: { value: VALUES.endpoint } });
+        fireEvent.click(screen.getByRole('button', { name: 'Exportar' }));
+
+        expect(downloadJsonFile).toHaveBeenCalledTimes(1);
+        const [fileName, json] = vi.mocked(downloadJsonFile).mock.calls[0];
+        expect(fileName).toMatch(/^interfaz-laboratorio-connection-\d{8}-\d{4}\.json$/);
+        expect(JSON.parse(json)).toMatchObject({
+            format: 'interfaz-laboratorio-data-connection',
+            schemaVersion: 1,
+            connection: {
+                baseUrl: VALUES.baseUrl,
+                endpoint: VALUES.endpoint,
+                historyEndpoint: '/api/hmi-data/history',
+                activitySeriesEndpoint: '/api/hmi-data/activity-series',
+            },
+        });
+        expect(localStorage.length).toBe(0);
+    });
+
+    it('explains that the export uses the current form values', () => {
+        render(<ConnectionSettingsTab />);
+
+        expect(screen.getByText(/valores actuales del formulario/i)).toBeInTheDocument();
+    });
+
+    it('refuses to export invalid values and says why', () => {
+        render(<ConnectionSettingsTab />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Exportar' }));
+
+        expect(downloadJsonFile).not.toHaveBeenCalled();
+        expect(screen.getByRole('alert')).toHaveTextContent('No se puede exportar: La URL base es obligatoria.');
+    });
+
+    it('opens the file picker from the Importar button', () => {
+        render(<ConnectionSettingsTab />);
+        const input = screen.getByLabelText('Seleccionar archivo de conexión') as HTMLInputElement;
+        const click = vi.spyOn(input, 'click');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Importar' }));
+
+        expect(click).toHaveBeenCalledTimes(1);
+    });
+
+    it('fills the form from a valid file and marks the tab dirty without saving', async () => {
+        const onDirtyChange = vi.fn();
+        const onSaveStatusChange = vi.fn();
+        render(<ConnectionSettingsTab onDirtyChange={onDirtyChange} onSaveStatusChange={onSaveStatusChange} />);
+
+        chooseFile(connectionFile());
+
+        await waitFor(() => {
+            expect(screen.getByLabelText('URL Base de Node-RED')).toHaveValue(VALUES.baseUrl);
+        });
+        expect(screen.getByLabelText('Endpoint Snapshot')).toHaveValue(VALUES.endpoint);
+        expect(screen.getByLabelText('Endpoint Histórico')).toHaveValue(VALUES.historyEndpoint);
+        expect(screen.getByLabelText('Endpoint Activity-Series')).toHaveValue(VALUES.activitySeriesEndpoint);
+        expect(onDirtyChange).toHaveBeenCalledWith(true);
+        expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+        expect(localStorage.length).toBe(0);
+        expect(invalidateQueries).not.toHaveBeenCalled();
+        expect(screen.getByText(/presione Guardar/)).toBeInTheDocument();
+    });
+
+    it('saves the imported values only when Guardar runs the save ref', async () => {
+        const saveRef = { current: null as null | (() => void) };
+        render(<ConnectionSettingsTab saveRef={saveRef} />);
+
+        chooseFile(connectionFile());
+        await waitFor(() => {
+            expect(screen.getByLabelText('Endpoint Snapshot')).toHaveValue(VALUES.endpoint);
+        });
+        act(() => {
+            saveRef.current?.();
+        });
+
+        expect(localStorage.getItem('hmi:node-red-base-url')).toBe(VALUES.baseUrl);
+        expect(localStorage.getItem('hmi:node-red-endpoint')).toBe(VALUES.endpoint);
+    });
+
+    it('rejects an invalid file with a clear message and changes nothing', async () => {
+        const onDirtyChange = vi.fn();
+        render(<ConnectionSettingsTab onDirtyChange={onDirtyChange} />);
+
+        fireEvent.change(screen.getByLabelText('URL Base de Node-RED'), { target: { value: 'https://keep.local' } });
+        onDirtyChange.mockClear();
+
+        chooseFile(connectionFile({ ...VALUES, baseUrl: 'not-a-url' }));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+            'No pudimos importar el archivo: La URL base debe ser una URL absoluta http o https.',
+        );
+        expect(screen.getByLabelText('URL Base de Node-RED')).toHaveValue('https://keep.local');
+        expect(screen.getByLabelText('Endpoint Snapshot')).toHaveValue('/api/hmi-data');
+        expect(onDirtyChange).not.toHaveBeenCalled();
+    });
+
+    it('rejects a file that is not JSON', async () => {
+        render(<ConnectionSettingsTab />);
+
+        chooseFile(new File(['{nope'], 'bad.json', { type: 'application/json' }));
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(
+            'No pudimos importar el archivo: El archivo no es un JSON válido.',
+        );
+    });
+
+    it('resets the file input so the same file can be chosen again', async () => {
+        render(<ConnectionSettingsTab />);
+
+        const input = chooseFile(connectionFile());
+
+        await waitFor(() => {
+            expect(input.value).toBe('');
+        });
     });
 });
