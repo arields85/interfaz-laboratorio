@@ -115,6 +115,8 @@ registered accent custom properties.
   (the cutout guard splits selector lists on raw commas inside `:is()`), and the edge case of a locked group WITHOUT a
   frame whose inherited members then get no accents at all.
 
+- 2026-09-30 user: "se ve cortada" (lab technique 4 px outside: no frame border completes the corner curve, so the clipped straight gradients look cut). The parent previewed the arc version on the user's group (CSS injected in the page only, removed after) and sent before/after screenshots; user: "sí". Applied (parent inline, TDD): rounded border (frame radius + offset) masked to the four corner squares of side radius + offset + length (arc + visible straight tail), defaults unchanged (12/6 px, 0 %/60 %), Tema length sliders keep their meaning. RED 2 -> GREEN 24/24; full suite, tsc, lint, build green; served CSS checked; live screenshot matches the preview.
+
 ## Next step
 
 Live check of the corner accents in the browser (parent), then close the feature.
