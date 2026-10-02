@@ -1638,6 +1638,12 @@ incrustar un SHA autorreferencial. Esta versión documental no afirma que ese co
 
 ## 12. Changelog
 
+### 2.0.24 — 2026-10-02
+
+- Registro configurable de los mensajes fijos de Leda (PW-025, decisión del usuario). El ajuste «Trato al usuario» de Configuración general → Leda elige entre **usted** (por defecto), **rioplatense** (vos) y **neutro** (tú). Lo siguen los mensajes fijos del Canal A, del Canal B y las respuestas a notas de voz. Las menciones anteriores a «mensaje de usted» de este documento se leen como «mensaje en el registro configurado».
+- El ajuste se guarda en la configuración compartida (`hmi:copy-register`). El runtime lo lee en el mismo proceso con un caché de 5 s, así que un cambio se aplica al siguiente mensaje sin reiniciar. Un valor ausente o inválido equivale a usted.
+- No cambian: las respuestas con datos (en tercera persona), la voz y el orbe de la HMI, la instrucción de transcripción al modelo y los textos de la HMI, que siguen siempre de usted.
+
 ### 2.0.23 — 2026-10-01
 
 - Canal B abierto por solicitud y aprobación (PW-022, decisión del usuario). Reemplaza la limitación
