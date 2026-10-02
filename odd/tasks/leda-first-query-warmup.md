@@ -32,7 +32,7 @@ The user reported on 2026-10-02 that the first question sent to the Channel B bo
 - [x] W1 — Instrumentation: one redacted timing line per Channel B message (stage names and milliseconds only, no text, no chat names) in the presentation process (received → status → answer → text sent → voice requested) and in the voice process (job create, Gemini time to first byte, sendVoice, total). Both must be visible in the runtime log files. Route: delegated.
 - [x] W2 — Live measurement with the user: restart; question after 2+ min idle; question right after; question after 30 s; question after 90 s. Note whether the text or only the voice note is late.
 - [x] W3 — Fix according to the evidence. If the Gemini keep-alive is confirmed: a lightweight periodic keep-warm (e.g. `client.models.get` every ~45 s while Channel B or the voice service is active; no tokens). Possibly also keep the Telegram voice session warm, or pre-warm ffmpeg at boot if W2 points there. Route: delegated.
-- [ ] W4 — Live re-check with the user, native review, and close PW-026.
+- [x] W4 — Live re-check with the user, native review, and close PW-026.
 
 ## TDD
 
@@ -116,3 +116,10 @@ Default test-first policy:
   - **Mechanism (urllib3 2.7.0):** `KeepAliveHTTPAdapter.init_poolmanager` sets `poolmanager.pool_classes_by_scheme` to pool classes whose `ConnectionCls` overrides `_new_conn`: it resolves the host, then dials IPv4 addresses first and IPv6 after by swapping `_dns_host` per attempt (`self.host` is untouched, so SNI and certificate verification use the hostname). Each attempt keeps the connect timeout; W3b socket options and no-retry are unchanged. Nothing process-wide is patched.
   - **Edge cases:** IPv6-only host or name-resolution failure takes urllib3's unchanged path. Proxied requests use `ProxyManager`, which bypasses the pool classes and the socket options (as already for keep-alive); documented, not worse.
   - **Smoke (public `GET https://api.telegram.org/`, fresh session each, no credentials):** 5/5 over IPv4 (149.154.167.99), 1521-1618 ms each (includes DNS, TCP and TLS from this network).
+- 2026-10-02 18:19: **W4 passed** (user): a question after about 1.5 h idle.
+  - Cold: `text_send_ms=1060` (was 20908) and voice `total_ms=2057` with `send_voice_ms=770` (was about 7 s).
+  - Warm follow-up: text 373 ms, voice 2004 ms.
+  - The final slice `c98f7f7..0eb8698` (W3c, 156 lines) was reviewed and **approved** (lineage `review-18c79fb316e86137`). Follow-ups: `R3-private-urllib3-surface` (it relies on urllib3 2.7 internals `_new_conn`/`_dns_host`; re-check on urllib3 upgrades), `R3-fallback-only-tested-with-timeouts`, `R3-tls-hostname-not-proved-by-handshake`.
+  - Not caused by PW-022/PW-025. The root cause is the intermittent IPv6 path to Telegram from this network.
+  - PW-026 closed in `docs/PENDING_WORK.md`.
+  - Note: the IPv6 failure is intermittent, so the user may re-check a cold question a couple of times; the timing logs stay in place.
