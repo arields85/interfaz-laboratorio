@@ -4,6 +4,7 @@ import { KeyRound, LogOut, Monitor, Settings } from 'lucide-react';
 import AdminPasswordChangeDialog from '../components/admin/AdminPasswordChangeDialog';
 import GlobalSettingsDialog from '../components/admin/GlobalSettingsDialog';
 import SharedConfigSaveNotice from '../components/admin/SharedConfigSaveNotice';
+import NotificationBell from '../components/layout/NotificationBell';
 import { HmiButton } from '../components/ui';
 import { requestShieldReveal } from '../hooks/useBootShield';
 import { ADMIN_SECTIONS, getAdminSectionByPath } from '../utils/adminNavigation';
@@ -61,6 +62,7 @@ export default function AdminLayout({ controller = adminSessionController }: Adm
                 </div>
 
                 <div className="flex items-center gap-4">
+                    <NotificationBell />
                     <button
                         aria-label="Configuracion general"
                         className="rounded-lg p-2 text-industrial-muted transition-colors hover:bg-industrial-hover hover:text-industrial-text"

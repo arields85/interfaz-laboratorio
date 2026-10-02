@@ -1,13 +1,27 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { clearLoaderOptionsConfig, saveLoaderOptionsConfig } from '../config/loaderOptions.config';
 import AdminLayout from './AdminLayout';
 import { SHIELD_REVEAL_REQUEST_EVENT } from '../hooks/useBootShield';
 
-const { logoutMock, navigateMock } = vi.hoisted(() => ({
+const { logoutMock, navigateMock, decideMock } = vi.hoisted(() => ({
     logoutMock: vi.fn(),
     navigateMock: vi.fn(),
+    decideMock: vi.fn(),
+}));
+
+vi.mock('../hooks/useChannelBAccess', () => ({
+    useChannelBAccess: () => ({
+        chats: [
+            { chatId: 7, status: 'pending', displayName: 'Ana Pérez', username: 'ana', requestedAt: '2026-10-01T10:00:00Z', decidedAt: null },
+            { chatId: 8, status: 'approved', displayName: 'Luis', username: null, requestedAt: '2026-10-01T09:00:00Z', decidedAt: '2026-10-01T09:30:00Z' },
+        ],
+        isLoading: false,
+        error: null,
+        pendingChatId: null,
+        decide: decideMock,
+    }),
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -68,6 +82,25 @@ describe('AdminLayout', () => {
         vi.clearAllMocks();
         clearLoaderOptionsConfig();
         document.body.innerHTML = '';
+    });
+
+    it('shows the Channel B notification bell in the admin bar with the pending count', () => {
+        render(<AdminLayout />);
+
+        const header = screen.getByRole('banner');
+        const bell = within(header).getByRole('button', { name: 'Notificaciones: 1 pendiente' });
+        expect(bell).toBeInTheDocument();
+        expect(within(header).getByTestId('notification-badge')).toHaveTextContent('1');
+    });
+
+    it('opens the panel from the admin bar and forwards an approval', async () => {
+        decideMock.mockResolvedValue({ chat: { chatId: 7, status: 'approved' }, noticeSent: true });
+        render(<AdminLayout />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Notificaciones: 1 pendiente' }));
+        fireEvent.click(await screen.findByRole('button', { name: /Aprobar/ }));
+
+        expect(decideMock).toHaveBeenCalledWith(7, 'approve');
     });
 
     it('mounts the shared configuration save notice below the admin header', () => {

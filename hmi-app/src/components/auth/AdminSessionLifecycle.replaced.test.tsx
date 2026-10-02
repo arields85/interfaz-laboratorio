@@ -11,6 +11,10 @@ import { AdminSessionController } from '../../services/adminSession.controller';
 import RequirePermission from './RequirePermission';
 import AdminSessionLifecycle from './AdminSessionLifecycle';
 
+// The Channel B bell polls through the module-singleton client, which these session-lifecycle
+// tests do not drive; its own behavior is covered by NotificationBell.test.tsx.
+vi.mock('../layout/NotificationBell', () => ({ default: () => null }));
+
 vi.mock('../admin/GlobalSettingsDialog', () => ({ default: () => null }));
 
 const CSRF_TOKEN = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
