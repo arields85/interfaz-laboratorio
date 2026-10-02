@@ -88,3 +88,18 @@ Default test-first policy:
   - **Gemini:** `models.get` (no tokens) on the `WarmGeminiClient` every 45 s (`GEMINI_KEEP_WARM_INTERVAL_SECONDS`, below the 55 s keep-alive; a test enforces it). The credential is re-resolved each cycle and `WarmGeminiClient.get` rebuilds on rotation; `GeminiCredentialUnavailable` means skip, silently.
   - **Logging (`leda_runtime.timing`, leda-voice-stderr.log):** one `Leda keep-warm: target=telegram|gemini interval_s=N` line per loop start, then `outcome=failed error_type=<Type>` and `outcome=recovered` on state changes only (exception type only, never message, URL or token). Daemon threads plus a stop event set when `app.run` returns.
   - **Stale-connection guard: not added.** urllib3 retries a dead pooled socket as a read error, the case where a non-idempotent `sendVoice` could be duplicated, and a connect-only retry does not address a silent drop. The keep-warm is the fix; W4 live re-check decides whether anything more is needed.
+- 2026-10-02 16:15: **W4 attempt (live, ~11 min idle, W3 keep-warm active):**
+
+  | Metric | Cold (first after idle) | Warm (next) |
+  |---|---|---|
+  | Voice process `send_voice_ms` | 762 ms | 769 ms |
+  | Voice total (`voice_request_ms`) | 2094 ms | 2847 ms |
+  | Presentation `text_send_ms` | **20932 ms** | 382 ms |
+
+  - The voice process is fixed (was 4.5-5.3 s cold); W3 works there.
+  - **Diagnosis:** ~21 s is Windows' TCP data-retransmission give-up time on a dead connection, after which urllib3 reconnects and succeeds. Idle pooled connections to api.telegram.org are silently dropped by the network (NAT/firewall idle timeout, no RST). `TelegramLocalBot.session` is shared by the long poll (one connection always busy) and by concurrent senders (`_typing` thread's `sendChatAction`, main `sendMessage`), so the pool holds a second connection that idles between questions and goes stale. The W3 `getMe` probe only exercises one connection and exists only in the voice process.
+- 2026-10-02: W3b done in `5e07229` (`fix(leda-runtime): keep every Telegram connection alive at the TCP level`, route: delegated writer). RED observed first: `tests/test_http_keepalive.py` failed with `ImportError` (no `http_keepalive` module). GREEN: full runtime suite, 2132 tests OK (2122 + 10 new; fresh state dir, `GEMINI_API_KEY` and `TELEGRAM_BOT_TOKEN` unset, no real network I/O).
+  - **Mechanism:** `http_keepalive.KeepAliveHTTPAdapter` passes `socket_options` to urllib3: its defaults (`TCP_NODELAY`) plus `SO_KEEPALIVE=1`, `TCP_KEEPIDLE=20 s`, `TCP_KEEPINTVL=10 s`, `TCP_KEEPCNT=3`, each guarded by `hasattr(socket, ...)`. Probes keep the NAT mapping alive or detect a dead connection (~50 s) while idle. No request retries (POSTs are never duplicated).
+  - **Sessions switched:** `TelegramLocalBot.session` and `_notice_session` (`local_presentation.py`), `_TELEGRAM_HTTP_SESSION` (`voice_service.py`), the Channel A default session (`channel_a_transport.py:_default_session`, `trust_env=False` kept).
+  - **Not switched:** `telegram_verification.py` (one-shot verification session, outside the allowed surface) and loopback or non-Telegram sessions.
+  - **W3 `getMe` keep-warm kept:** it is cheap and measured working; it also refreshes the connection at the application layer where TCP keep-alive cannot (for example a middlebox that ignores keep-alive probes).
