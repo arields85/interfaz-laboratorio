@@ -51,7 +51,7 @@ It applies to Leda's fixed messages (Channel A, Channel B, voice-note replies) a
 
 ## Tasks
 
-- [ ] R1 — Setting: shared-config key, domain type, reader/writer, hook, server validation, and the "Trato al usuario" selector in Opciones. Route: delegated (runtime + HMI).
+- [x] R1 — Setting: shared-config key, domain type, reader/writer, hook, server validation, and the "Trato al usuario" selector in Opciones. Route: delegated (runtime + HMI).
 - [ ] R2 — Runtime: register-aware copy module for the ~28 fixed messages, the register resolver over `HmiConfigStore`, the bot wiring, and a register test matrix that replaces the usted-only guards. Route: delegated.
 - [ ] R3 — HMI copy mechanism: the helper and hook, migrating `channelBAccessCopy.ts`, Leda pairing (`LedaPairingControl.tsx`) and auth/login (`LoginOverlay`, `SessionReplacedNotice`, `adminSession.controller`). Route: delegated.
 - [ ] R4 — HMI sweep, admin components (`components/admin/**`: dialogs, settings, PropertyDock, BuilderCanvas, VoiceCredentialSettings…). Route: delegated.
@@ -84,3 +84,4 @@ Strict mode ON (global configuration). Runners:
 ## Progress
 
 - 2026-10-02: code mapped (read-only explorer), feature document created.
+- 2026-10-02: R1 done (delegated writer). Commits 46eabb8 (runtime validation, `HMI_CONFIG_INVALID_COPY_REGISTER`) and e155d8d (key `hmi:copy-register`, `CopyRegister` domain type, service, `useCopyRegister` hook, "Trato al usuario" selector in the Opciones tab). RED: runtime tests failed on the missing `copy_register` module; HMI tests failed on missing modules plus the new permanent-code case. GREEN: runtime 2020 tests OK, HMI `npm test` 300 files / 4005 tests, `npx tsc -b` and `npm run lint` clean.
