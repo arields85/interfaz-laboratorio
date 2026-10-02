@@ -105,8 +105,8 @@ server {
     }
 
     # Misma ruta en :5057 (sin URI en proxy_pass se conservan ruta y consulta).
-    # Regex anclado: solo estas 18 rutas exactas; cualquier otra cae al 404 de abajo.
-    location ~ ^/api/leda/(hmi-config(/revision)?|admin/(hmi-config|credentials|auth/(status|login|session|logout|password)|credentials/(gemini(/verify)?|telegram(/apply|/verify)?|telegram_channel_a(/status|/apply|/verify)?)))$ {
+    # Regex anclado: solo estas 22 rutas exactas (la lista de acceso del Canal B y sus tres decisiones, con id de chat numérico, incluidas); cualquier otra cae al 404 de abajo.
+    location ~ ^/api/leda/(hmi-config(/revision)?|admin/(hmi-config|credentials|auth/(status|login|session|logout|password)|credentials/(gemini(/verify)?|telegram(/apply|/verify)?|telegram_channel_a(/status|/apply|/verify)?)|channel-b/access(/-?[0-9]{1,19}/(approve|reject|revoke))?))$ {
         include /etc/nginx/snippets/leda-proxy.conf;
         proxy_pass http://leda_presentation;
         proxy_set_header X-Leda-Session-Capability "";
