@@ -30,7 +30,7 @@ The user reported on 2026-10-02 that the first question sent to the Channel B bo
 ## Tasks
 
 - [x] W1 — Instrumentation: one redacted timing line per Channel B message (stage names and milliseconds only, no text, no chat names) in the presentation process (received → status → answer → text sent → voice requested) and in the voice process (job create, Gemini time to first byte, sendVoice, total). Both must be visible in the runtime log files. Route: delegated.
-- [ ] W2 — Live measurement with the user: restart; question after 2+ min idle; question right after; question after 30 s; question after 90 s. Note whether the text or only the voice note is late.
+- [x] W2 — Live measurement with the user: restart; question after 2+ min idle; question right after; question after 30 s; question after 90 s. Note whether the text or only the voice note is late.
 - [ ] W3 — Fix according to the evidence. If the Gemini keep-alive is confirmed: a lightweight periodic keep-warm (e.g. `client.models.get` every ~45 s while Channel B or the voice service is active; no tokens). Possibly also keep the Telegram voice session warm, or pre-warm ffmpeg at boot if W2 points there. Route: delegated.
 - [ ] W4 — Live re-check with the user, native review, and close PW-026.
 
@@ -61,3 +61,25 @@ Default test-first policy:
     - `Leda Channel B voice timing: outcome=<sent|send_failed|error> job_create_ms=N [gemini_client_reused=true|false] [gemini_ttfb_ms=N] [tts_total_ms=N] [opus_finish_ms=N] [send_voice_ms=N] total_ms=N` (one per Channel B voice reply; `tts_total_ms` runs from generator start to the start of delivery; `gemini_*` are absent on an exact-text cache hit; HMI voice and Channel A jobs log no such line);
     - `Leda Gemini warm-up: outcome=ok elapsed_ms=N` or `Leda Gemini warm-up: outcome=failed stage=<credential|client|connect> error_type=<ExceptionTypeName> elapsed_ms=N` (once at boot; a missing credential also logs `failed stage=credential`).
   - **Limits:** the voice-side token resolve (loopback call back to the presentation process) has no stage of its own: it is the gap between `voice_request_ms` and the voice line's `total_ms`. Open: none blocking W2.
+- 2026-10-02: W1 native review (slice `71215f9..a2f8b40`, medium, 753 lines): granted under standing consent, **approved** and acknowledged (lineage `review-48a663bd7925fa2a`).
+  - Follow-ups not fixed: `R3-flaky-worker-line-leak` (`test_telegram_lifecycle.py:1427-1429`), `R3-answered-before-send`, `R3-document-fallback-mislabel`.
+  - Boot warm-up logged `outcome=ok elapsed_ms=2024`.
+- 2026-10-02: **W2 live measurement** (user; the first question came after ~32 min idle):
+
+  | Question | Idle before | Text total | Voice total | gemini_ttfb | send_voice |
+  |---|---|---|---|---|---|
+  | 1 | ~32 min | 391 ms | 7619 ms | 816 ms | **5300 ms** |
+  | 2 | ~16 min | 938 ms | 6995 ms | 754 ms | **4531 ms** |
+  | 3 | 33 s | 384 ms | 2781 ms | 542 ms | 838 ms |
+  | 4 | 52 s | 391 ms | 1145 ms | cache hit | 1056 ms |
+
+  - The **text is never slow** (under 1 s even cold).
+  - The cold penalty is almost entirely **Telegram `sendVoice` in the voice process**: about 4.5-5.3 s cold against about 0.8-1 s warm.
+  - **Gemini is not the cause**: 0.8 s cold against 0.5 s warm. The main hypothesis is refuted.
+  - `job_create_ms=774` only on the first voice note after a restart (ffmpeg spawn), 1 ms afterwards.
+  - PW-022/PW-025 are not the cause: the voice path is untouched.
+- 2026-10-02: connection probe to api.telegram.org (no credentials):
+  - DNS 38 ms; IPv6 and IPv4 connect about 235 ms; TLS about 235 ms;
+  - a new `requests` session GET takes about 1.5 s.
+  - A fresh connection therefore does not explain about 4 s extra. The likely cause is reusing a pooled connection that the network silently dropped while idle, then waiting and reconnecting. This is inferred, not proven.
+  - Fix chosen for W3: keep the voice process's Telegram session warm (lightweight `getMe` about every 30 s while Channel B is enabled), plus a Gemini keep-warm (`models.get`, no tokens) inside the 55 s keep-alive window.
