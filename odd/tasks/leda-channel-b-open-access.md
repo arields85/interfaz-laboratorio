@@ -54,7 +54,7 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - [x] B5b — HMI: enable the topbar bell (`Topbar.tsx:198-206`, today a disabled placeholder) as a notification panel that lists pending Channel B requests, with approve and reject actions and a pending-count badge. It is only active with an admin session (`shouldShowAdminActions`). Other viewers keep today's disabled bell, so requester names are never shown to them. It polls only while the admin session is active. Route: delegated.
 - [x] B8 — Runtime: Channel B is enabled from the admin, not from the server. User decision (2026-10-02): everything must be controlled from the admin. Today the bot only starts with `LEDA_LOCAL_TELEGRAM_ENABLED=1` (`telegram_config.py:33`); without it, ▶ fails with `TELEGRAM_DISABLED` and every reboot leaves Channel B off. Mirror Channel A (`channel_a_manager.py:753`): in protected mode the bot is enabled exactly when its credential is stored and starts on boot; 🗑 deletion stops it. Remove the variable from `docs/DEPLOYMENT.md`. Route: delegated.
 - [x] B9 — HMI: show the same notification bell inside the admin (AdminLayout context bar, next to "SESIÓN ADMIN ACTIVA"). User request (2026-10-02, live check). It reuses `NotificationBell` and the shared query, with no duplicate polling logic. Route: delegated.
-- [ ] B10 — Bug found in the live check (2026-10-02): Channel B answers "Todavía no hay datos del dashboard cargados." to approved chats while the HMI shows live data and keeps posting `/hmi/current-snapshot` (202). The branch did not touch that path. Root cause under investigation by a read-only explorer.
+- [x] B10 — Bug found in the live check (2026-10-02): Channel B answers "Todavía no hay datos del dashboard cargados." to approved chats while the HMI shows live data and keeps posting `/hmi/current-snapshot` (202). The branch did not touch that path. Root cause under investigation by a read-only explorer.
 - [ ] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
 - [ ] B7 — Live check with the real bot (request, approve, use, revoke) and native review of the work-unit commits.
 
@@ -159,6 +159,10 @@ Strict mode ON (source: global user configuration). Runners:
 - 2026-10-02: native review of slice `331bbf6..4528464` (B9 + boot probe fix): high (it touches auth tests), four lenses, **approved** and acknowledged (lineage `review-3ac28598747f619a`).
   - `R2/R4-boot-probe-exception-swallowed` fixed in `1088678`: a redacted warning with the exception type only. RED: no log. GREEN: the `test_telegram*.py` modules pass.
   - Follow-ups not fixed: `R3-adminlayout-bell-hook-mocked`, `R3-bell-session-lifecycle-unproved` (the lifecycle tests mock the bell) and `R2-explode-stub-signature-masks-cause`.
+
+- 2026-10-02: B10 closed. The user confirmed the cause (viewer not visible) and chose the clearer message; the definitive fix stays in PW-003.
+  - New shared reply `NO_DASHBOARD_OPEN_REPLY`: "En este momento no hay ningún dashboard abierto en la HMI. Vuelva a consultar cuando haya uno en pantalla." It replaces "Todavía no hay datos del dashboard cargados." in `answer_from_snapshot`, so all three channels use it.
+  - RED: the test module failed to import the constant. GREEN: full runtime suite 2010 tests OK.
 
 ## Acceptance criteria
 
