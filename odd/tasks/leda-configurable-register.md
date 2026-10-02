@@ -56,8 +56,8 @@ It applies ONLY to Leda's fixed messages (Channel A, Channel B, voice-note repli
 - [x] R3 — Move the "Trato al usuario" selector from Opciones to the Leda tab, with Leda-only helper text, keeping the dialog's Guardar flow. Route: delegated.
 - [-] ~~R4 — HMI sweep, admin components~~ — cancelled (scope is Leda only).
 - [-] ~~R5 — HMI sweep, admin pages, widgets, layout, ui and viewer~~ — cancelled (scope is Leda only). The first R3 attempt (HMI copy mechanism, commit `0b30545` plus uncommitted area changes) was stopped and discarded with `git reset --hard 5cedde5`.
-- [ ] R6 — Docs: AGENTS.md §5, docs/CONVENTIONS.md, ADMIN_CONVENTIONS.md and the Leda master document. Close PW-025 in `docs/PENDING_WORK.md`. Route: inline.
-- [ ] R7 — Live check (switch the register; check both Telegram channels; the HMI copy stays usted) and native review of the last slice.
+- [x] R6 — Docs: AGENTS.md §5, docs/CONVENTIONS.md, ADMIN_CONVENTIONS.md and the Leda master document. Close PW-025 in `docs/PENDING_WORK.md`. Route: inline.
+- [x] R7 — Live check (switch the register; check both Telegram channels; the HMI copy stays usted) and native review of the last slice.
 
 ## TDD
 
@@ -105,3 +105,7 @@ Strict mode ON (global configuration). Runners:
   - `6e1f0ae`: AGENTS.md §5 and docs/CONVENTIONS.md now say the HMI is always usted, Leda's fixed messages follow the register, and new ones go to `leda_copy.py` in three variants.
   - `aec5c78`: master document changelog 2.0.24.
   - Closing PW-025 waits for R7.
+- 2026-10-02: R7 live check passed (user): switching the register in the Leda tab changed the Telegram fixed messages; back on usted they match today's text.
+  - R6 closed: PW-025 removed from `docs/PENDING_WORK.md`.
+  - The user reported that the first question after idle is slow and later ones are fast. It is recorded as PW-026 (`backlog/leda-first-query-warmup`), not verified.
+  - Next: merge and push are the user's decision.
