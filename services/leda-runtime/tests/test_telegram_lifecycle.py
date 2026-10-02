@@ -28,6 +28,7 @@ from leda_runtime.hmi_sessions import HmiSessionRegistry
 from leda_runtime.local_presentation import (
     CHANNEL_B_VOICE_QUEUE_MAX_PENDING,
     MAX_PENDING_ACCESS_REQUESTS,
+    NO_DASHBOARD_OPEN_REPLY,
     TELEGRAM_STOPPING,
     TelegramLocalBot,
     build_telegram_bot,
@@ -1768,7 +1769,8 @@ class ChannelBActiveScreenTests(unittest.TestCase):
 
         bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 2, "text": "¿Cuál es el OEE?"})
 
-        bot.send_message.assert_called_once_with(7, "Todavía no hay datos del dashboard cargados.")
+        bot.send_message.assert_called_once_with(7, NO_DASHBOARD_OPEN_REPLY)
+        self.assertEqual(NO_DASHBOARD_OPEN_REPLY, "En este momento no hay ningún dashboard abierto en la HMI. Vuelva a consultar cuando haya uno en pantalla.")
 
     def test_answers_from_the_most_recently_updated_session_among_several(self):
         registry = HmiSessionRegistry()

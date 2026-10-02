@@ -152,6 +152,9 @@ CHANNEL_B_VOICE_QUEUE_MAX_PENDING = 3
 
 # Channel B admission: at most this many chats may wait for approval at once,
 # so a spammer cannot fill the state file with access requests.
+# Shared by every channel: no live HMI session is showing a dashboard (the viewer is closed,
+# hidden or on an admin page), so there is no screen to answer from until PW-003.
+NO_DASHBOARD_OPEN_REPLY = "En este momento no hay ningún dashboard abierto en la HMI. Vuelva a consultar cuando haya uno en pantalla."
 MAX_PENDING_ACCESS_REQUESTS = 20
 ACCESS_REQUESTED_REPLY = "Su solicitud de acceso quedó registrada. Se le avisará cuando un administrador la apruebe."
 ACCESS_REQUESTS_FULL_REPLY = "En este momento no es posible registrar nuevas solicitudes. Intente más tarde."
@@ -528,7 +531,7 @@ def answer_from_snapshot(snapshot: dict[str, Any] | None, question: str) -> Loca
     if not question:
         return LocalAnswer(question, "La pregunta está vacía.", [])
     if not snapshot or not isinstance(snapshot.get("widgets"), list):
-        return LocalAnswer(question, "Todavía no hay datos del dashboard cargados.", [])
+        return LocalAnswer(question, NO_DASHBOARD_OPEN_REPLY, [])
     widgets = [widget for widget in snapshot["widgets"] if isinstance(widget, dict)]
     q = normalize(question)
     machine = snapshot.get("machine") if isinstance(snapshot.get("machine"), dict) else {}
