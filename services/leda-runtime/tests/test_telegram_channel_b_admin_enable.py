@@ -131,6 +131,19 @@ class ProtectedLifecycleTests(unittest.TestCase):
         self.assertFalse(status["running"])
         self.assertEqual(status["lastError"], "CREDENTIAL_STORAGE_UNAVAILABLE")
 
+    def test_boot_with_an_unexpected_storage_error_never_raises(self):
+        store = FakeStore("stored-token")
+        manager, created = build_manager(store)
+
+        def explode():
+            raise OSError("disk unavailable")
+
+        manager.resolver.resolve = explode
+        status = manager.startup_apply()
+        self.assertEqual(created, [])
+        self.assertFalse(status["running"])
+        self.assertEqual(status["lastError"], "CREDENTIAL_STORAGE_UNAVAILABLE")
+
     def test_apply_without_a_credential_reports_the_missing_credential_not_disabled(self):
         manager, created = build_manager(FakeStore())
         with self.assertRaises(TelegramLifecycleError) as context:

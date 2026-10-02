@@ -504,6 +504,11 @@ class TelegramLifecycleManager:
             except TelegramCredentialError as error:
                 if error.args and error.args[0] == "TELEGRAM_CREDENTIAL_MISSING":
                     return self.status()
+            except Exception:
+                # Boot must never crash on the credential probe; report it like
+                # any other storage failure and leave the channel stopped.
+                self._update(lastError="CREDENTIAL_STORAGE_UNAVAILABLE")
+                return self.status()
         elif not self.config.enabled:
             return self.status()
         try:
