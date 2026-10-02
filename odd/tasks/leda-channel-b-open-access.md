@@ -151,6 +151,15 @@ Strict mode ON (source: global user configuration). Runners:
 - 2026-10-02: B9 done in `c9837f6` (delegated writer). RED: the two new `AdminLayout` tests failed (no bell in the admin bar). GREEN: full HMI suite 297 files, 3988 tests OK; `npx tsc -b` and `npm run lint` clean. `AdminLayout` mounts the existing container `NotificationBell` first in the right-hand icon group, before Settings and the key icon; no refactor was needed (the panel is `fixed top-16 right-4`, within the viewport below the 3.5rem bar, and closes on outside click and Escape). Same hook, query key, in-flight guard and 30 s polling, so no duplicated logic. `AdminSessionLifecycle.integration` and `.replaced` tests render the real `AdminLayout`, so they now mock `NotificationBell` (the bell polls through the module-singleton client those tests do not drive; wrapping them in a `QueryClientProvider` still broke the StrictMode session-count assertion).
   - Route evidence: B9 delegated (bounded writer).
 
+- 2026-10-02: B10 diagnosis (read-only explorer): it is not a code defect.
+  - Channel B answers from the most recent live HMI context. The viewer publishes every 5 s only while it is open and visible (`Dashboard.tsx:71-92`), and it invalidates on route leave, hidden tab or offline. Publish and invalidate both answer 202.
+  - The live log shows the last publish at 12:31:09, when the browser moved to the admin to approve, then a session reset. Channel B therefore had no context.
+  - Options offered to the user: a clearer message (recommended for PW-022), retaining the last snapshot with an age, or PW-003. Waiting for the user's check with the viewer visible.
+  - Test gap: there is no end-to-end test of publish → bot answer.
+- 2026-10-02: native review of slice `331bbf6..4528464` (B9 + boot probe fix): high (it touches auth tests), four lenses, **approved** and acknowledged (lineage `review-3ac28598747f619a`).
+  - `R2/R4-boot-probe-exception-swallowed` fixed in `1088678`: a redacted warning with the exception type only. RED: no log. GREEN: the `test_telegram*.py` modules pass.
+  - Follow-ups not fixed: `R3-adminlayout-bell-hook-mocked`, `R3-bell-session-lifecycle-unproved` (the lifecycle tests mock the bell) and `R2-explode-stub-signature-masks-cause`.
+
 ## Acceptance criteria
 
 - An unknown private chat that sends `/start` appears as pending in the HMI and gets no data until it is approved.
