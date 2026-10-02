@@ -139,7 +139,11 @@ class ProtectedLifecycleTests(unittest.TestCase):
             raise OSError("disk unavailable")
 
         manager.resolver.resolve = explode
-        status = manager.startup_apply()
+        with self.assertLogs("leda_runtime.telegram_lifecycle", level="WARNING") as logs:
+            status = manager.startup_apply()
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("reason=OSError", logs.output[0])
+        self.assertNotIn("disk unavailable", logs.output[0])
         self.assertEqual(created, [])
         self.assertFalse(status["running"])
         self.assertEqual(status["lastError"], "CREDENTIAL_STORAGE_UNAVAILABLE")

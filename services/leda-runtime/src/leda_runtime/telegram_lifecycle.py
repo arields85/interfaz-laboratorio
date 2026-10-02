@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -12,6 +13,8 @@ from typing import Any, Callable, TypeVar
 
 from .bot_identity_reservation import BotIdentityReservationError, TELEGRAM_BOT_IDENTITY_RESERVED
 from .telegram_credentials import TelegramCredentialError
+
+_logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
@@ -504,9 +507,10 @@ class TelegramLifecycleManager:
             except TelegramCredentialError as error:
                 if error.args and error.args[0] == "TELEGRAM_CREDENTIAL_MISSING":
                     return self.status()
-            except Exception:
+            except Exception as error:
                 # Boot must never crash on the credential probe; report it like
                 # any other storage failure and leave the channel stopped.
+                _logger.warning("Leda Channel B boot credential probe failed: reason=%s", type(error).__name__)
                 self._update(lastError="CREDENTIAL_STORAGE_UNAVAILABLE")
                 return self.status()
         elif not self.config.enabled:
