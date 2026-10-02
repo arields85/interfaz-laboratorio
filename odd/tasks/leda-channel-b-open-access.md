@@ -141,6 +141,11 @@ Strict mode ON (source: global user configuration). Runners:
   - Verification: full offline suite in Git Bash with a fresh temp state dir and override variables cleared: 2009 tests OK.
   - Flagged, not edited (outside the allowed surface): the stale comment in `voice_service.py:146-157` that still mentions the opt-in gate.
 
+- 2026-10-02: native review of slice `3a3d856..331bbf6` (proxy route fix, B8, docs; medium, 490 lines): granted under standing consent, **approved** and acknowledged (lineage `review-1763dbc87d89fd83`).
+  - `R3-startup-probe-outside-guard` (`telegram_lifecycle.py:502-506`) fixed in `8e04564`: an unexpected exception from the boot credential probe escaped `startup_apply` and could crash the runtime start. It is now reported as `CREDENTIAL_STORAGE_UNAVAILABLE`, like Channel A. RED: the new test failed with OSError. GREEN: the `test_telegram*.py` modules pass.
+  - Follow-ups not fixed: `R3-enabled-diverges-from-credential-presence` (with storage unavailable at boot, `enabled` shows false until an apply) and `R3-voice-missing-credential-unproved` (test gap).
+  - Live check: relaunched the dev env from the registry environment with NO `LEDA_LOCAL_TELEGRAM_ENABLED`. `/health` reports Telegram enabled, configured, connected and verified as `@Interfaz_hmi_bot`. B8 is confirmed live.
+
 ## Acceptance criteria
 
 - An unknown private chat that sends `/start` appears as pending in the HMI and gets no data until it is approved.
