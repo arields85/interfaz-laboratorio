@@ -21,6 +21,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from .copy_register import DEFAULT_COPY_REGISTER
+from .leda_copy import leda_text
+
 MAX_VOICE_NOTE_DURATION_SECONDS = 30
 # Telegram bots may download files up to 20 MB; a 30 s Opus/OGG voice note is
 # normally well under 1 MB, so this stays a generous independent safety cap,
@@ -53,6 +56,12 @@ GEMINI_TRANSCRIPTION_MAX_OUTPUT_TOKENS = 128
 # itself fall back to this one named default instead of a repeated literal.
 DEFAULT_VOICE_NOTE_MIME_TYPE = "audio/ogg"
 
+
+def voice_note_reply(message_id: str, register: object) -> str:
+    """One voice-note failure reply in a register, stating the configured duration limit where it applies."""
+    return leda_text(message_id, register, max_seconds=MAX_VOICE_NOTE_DURATION_SECONDS)
+
+
 DOMAIN_VOCABULARY_TERMS = (
     "lote",
     "producto",
@@ -68,22 +77,14 @@ DOMAIN_VOCABULARY_TERMS = (
     "alertas",
 )
 
-VOICE_NOTE_TOO_LONG_REPLY = (
-    f"La nota de voz dura más de {MAX_VOICE_NOTE_DURATION_SECONDS} segundos. "
-    "Por favor, envíe una nota más breve."
-)
-VOICE_NOTE_TOO_LARGE_REPLY = (
-    "La nota de voz es demasiado pesada. Por favor, envíe una nota más breve."
-)
-VOICE_NOTE_DOWNLOAD_FAILED_REPLY = (
-    "No se pudo descargar su nota de voz. Intente nuevamente."
-)
-VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY = (
-    "No se pudo entender la nota de voz. Intente nuevamente o escriba su pregunta."
-)
-VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY = (
-    "El servicio de voz no está disponible en este momento. "
-    "Intente nuevamente en unos minutos o escriba su pregunta."
+# The failure replies sent to the user, in the default (usted) register. Both bots send the variant of the
+# configured register through ``voice_note_reply``; these constants stay the usted wording for importers.
+VOICE_NOTE_TOO_LONG_REPLY = voice_note_reply("voice_note_too_long", DEFAULT_COPY_REGISTER)
+VOICE_NOTE_TOO_LARGE_REPLY = voice_note_reply("voice_note_too_large", DEFAULT_COPY_REGISTER)
+VOICE_NOTE_DOWNLOAD_FAILED_REPLY = voice_note_reply("voice_note_download_failed", DEFAULT_COPY_REGISTER)
+VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY = voice_note_reply("voice_note_transcription_empty", DEFAULT_COPY_REGISTER)
+VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY = voice_note_reply(
+    "voice_note_transcription_unavailable", DEFAULT_COPY_REGISTER
 )
 
 

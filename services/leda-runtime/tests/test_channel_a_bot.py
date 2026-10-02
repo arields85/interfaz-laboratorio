@@ -14,7 +14,7 @@ import time
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
@@ -117,6 +117,7 @@ from leda_runtime.channel_a_query import (
     ChannelAQueryCoordinator,
 )
 from leda_runtime.hmi_sessions import HmiSessionRegistry
+from leda_runtime.leda_copy import leda_text
 from leda_runtime.local_presentation import answer_from_snapshot
 
 BOT_ID = 700100
@@ -3778,6 +3779,128 @@ class DisplayLabelFallbackTests(unittest.TestCase):
     def test_a_missing_label_falls_back_capitalized_at_a_sentence_start(self):
         self.assertEqual(bot_module._display_label(None, sentence_start=True), "La HMI")
         self.assertEqual(bot_module._display_label("", sentence_start=True), "La HMI")
+
+
+class ChannelARegisterTests(ChannelABotTestCase):
+    """Every register-dependent Channel A message follows the configured register."""
+
+    REGISTERS = ("usted", "rioplatense", "neutro")
+
+    def fresh(self, register):
+        """Rebuild the whole fixture so each register starts from a clean pairing state."""
+        ChannelABotTestCase.setUp(self)
+        self.register = [register]
+        self.dialogue = self.build(copy_register=lambda: self.register[0])
+
+    def text(self, message_id, **params):
+        return leda_text(message_id, self.register[0], **params)
+
+    def setUp(self):
+        super().setUp()
+        self.register = ["usted"]
+        self.dialogue = self.build(copy_register=lambda: self.register[0])
+
+    def test_the_confirmation_prompt_and_the_welcome_use_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.pair_up(4, 5)
+                prompt, welcome = self.transport.sent[-2]["text"], self.transport.sent[-1]["text"]
+                self.assertEqual(prompt, self.text("confirmation_prompt", label=self.labels["value"]))
+                self.assertEqual(welcome, self.text("welcome", label=self.labels["value"]))
+
+    def test_the_unlink_confirmation_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.pair_up(4, 5)
+                self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+                self.assertEqual(self.transport.sent[-1]["text"], self.text("unlink_confirm_prompt"))
+
+    def test_the_inactivity_warning_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.pair_up(4, 5)
+                self.now[0] = 1540.0
+                self.dialogue.send_inactivity_warnings()
+                self.assertEqual(
+                    self.transport.sent[-1]["text"], self.text("inactivity_warning", label=self.labels["value"])
+                )
+
+    def test_the_refused_action_notice_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.prompted(4)
+                ticket = self.prompt_ticket()
+                self.handle(callback_update(5, CALLBACK_CONFIRM + ":" + ticket, chat=CHAT_ID_2))
+                self.assertEqual(self.transport.answered[-1]["text"], self.text("action_refused"))
+
+    def test_the_unavailable_destination_notice_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.labels["value"] = None
+                self.handle(message_update(4, "/start " + self.issue(), chat=CHAT_ID))
+                self.assertEqual(self.transport.sent[-1]["text"], self.text("destination_unavailable", label="La HMI"))
+
+    def test_the_voice_note_rejection_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.dialogue.enable_queries(
+                    read_context=Mock(), context_is_current=Mock(), parse=Mock(),
+                    freshness_bound=30.0, max_question_bytes=4096, max_answer_chars=4096,
+                )
+                self.dialogue.enable_voice_notes(transcribe=Mock())
+                self.pair_up(4, 5)
+                self.handle(voice_update(6, chat=CHAT_ID, duration=MAX_VOICE_NOTE_DURATION_SECONDS + 1))
+                self.assertEqual(
+                    self.transport.sent[-1]["text"],
+                    self.text("voice_note_too_long", max_seconds=MAX_VOICE_NOTE_DURATION_SECONDS),
+                )
+
+    def test_the_query_unavailable_notice_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                self.fresh(register)
+                self.dialogue.enable_queries(
+                    read_context=Mock(side_effect=RuntimeError("no context")), context_is_current=Mock(),
+                    parse=Mock(), freshness_bound=30.0, max_question_bytes=4096, max_answer_chars=4096,
+                )
+                self.pair_up(4, 5)
+                self.handle(message_update(6, "hola", chat=CHAT_ID))
+                self.assertEqual(
+                    self.transport.sent[-1]["text"], self.text("query_unavailable", label=self.labels["value"])
+                )
+
+    def test_a_register_change_applies_to_the_next_message_without_a_restart(self):
+        self.register[0] = "neutro"
+        self.prompted(4)
+        ticket = self.prompt_ticket()
+        self.register[0] = "rioplatense"
+        self.handle(callback_update(5, CALLBACK_CONFIRM + ":" + ticket, chat=CHAT_ID))
+        self.assertEqual(self.transport.sent[-2]["text"], leda_text("confirmation_prompt", "neutro", label=self.labels["value"]))
+        self.assertEqual(self.transport.sent[-1]["text"], leda_text("welcome", "rioplatense", label=self.labels["value"]))
+
+    def test_a_failing_or_unknown_resolver_falls_back_to_usted(self):
+        def broken():
+            raise RuntimeError("config store down")
+
+        for resolver in (broken, lambda: "voseo", lambda: None):
+            with self.subTest(resolver=resolver):
+                ChannelABotTestCase.setUp(self)
+                self.dialogue = self.build(copy_register=resolver)
+                self.prompted(4)
+                self.assertEqual(self.transport.sent[-1]["text"], CONFIRMATION_PROMPT_TEMPLATE.format(label=self.labels["value"]))
+
+    def test_the_impersonal_messages_do_not_change_with_the_register(self):
+        self.register[0] = "rioplatense"
+        self.pair_up(4, 5)
+        self.handle(message_update(6, "Desvincular", chat=CHAT_ID))
+        self.handle(callback_update(7, self.button_data(0), chat=CHAT_ID, callback_id="cb-7"))
+        self.assertEqual(self.transport.answered[-1]["text"], COPY_UNLINKED)
 
 
 if __name__ == "__main__":

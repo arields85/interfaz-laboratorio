@@ -38,12 +38,14 @@ from .channel_a_manager import ChannelAManager
 from .channel_a_pairing import OPAQUE_CHARS, LEDA_CHANNEL_A_CONFLICT, ChannelAPairingConflict
 from .channel_a_transport import ChannelATransport
 from .credential_store import CredentialService
+from .copy_register import DEFAULT_COPY_REGISTER, CopyRegisterResolver, active_register
 from .hmi_config_store import HmiConfigStore
 from .gemini_credentials import GeminiCredentialResolver, GeminiVerificationService
 from .hmi_sessions import (
     CAPABILITY_HEADER, HmiSessionCapacity, HmiSessionContextTooLarge,
     HmiSessionContextUnavailable, HmiSessionError, HmiSessionRegistry, HmiSessionUnauthorized,
 )
+from .leda_copy import leda_template, leda_text
 from .paths import runtime_paths
 from .storage_permissions import SecureStoragePermissions
 from .telegram_config import TelegramConfig, read_telegram_config
@@ -69,11 +71,7 @@ from .voice_events import (
 from .voice_transcription import (
     DEFAULT_VOICE_NOTE_MIME_TYPE,
     MAX_VOICE_NOTE_FILE_SIZE_BYTES,
-    VOICE_NOTE_DOWNLOAD_FAILED_REPLY,
-    VOICE_NOTE_TOO_LARGE_REPLY,
-    VOICE_NOTE_TOO_LONG_REPLY,
-    VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY,
-    VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY,
+    voice_note_reply,
     VoiceNoteTooLarge,
     VoiceNoteTooLong,
     VoiceTranscriptionEmpty,
@@ -154,15 +152,17 @@ CHANNEL_B_VOICE_QUEUE_MAX_PENDING = 3
 # so a spammer cannot fill the state file with access requests.
 # Shared by every channel: no live HMI session is showing a dashboard (the viewer is closed,
 # hidden or on an admin page), so there is no screen to answer from until PW-003.
-NO_DASHBOARD_OPEN_REPLY = "En este momento no hay ningún dashboard abierto en la HMI. Vuelva a consultar cuando haya uno en pantalla."
+# The fixed replies below are kept in the register table (leda_copy.py) and sent in the configured register;
+# these constants are their usted wording, for importers.
+NO_DASHBOARD_OPEN_REPLY = leda_template("no_dashboard_open", DEFAULT_COPY_REGISTER)
 MAX_PENDING_ACCESS_REQUESTS = 20
-ACCESS_REQUESTED_REPLY = "Su solicitud de acceso quedó registrada. Se le avisará cuando un administrador la apruebe."
-ACCESS_REQUESTS_FULL_REPLY = "En este momento no es posible registrar nuevas solicitudes. Intente más tarde."
-ACCESS_REQUEST_HINT_REPLY = "Para solicitar acceso, envíe /start."
-ACCESS_PENDING_REPLY = "Su solicitud de acceso está pendiente de aprobación."
-ACCESS_DENIED_REPLY = "No tiene acceso a este asistente."
-ACCESS_APPROVED_REPLY = "Su acceso fue aprobado. Ya puede realizar sus consultas."
-MESSAGE_LIMIT_REPLY = "Ha enviado demasiadas consultas seguidas. Espere un momento y vuelva a intentarlo."
+ACCESS_REQUESTED_REPLY = leda_template("access_requested", DEFAULT_COPY_REGISTER)
+ACCESS_REQUESTS_FULL_REPLY = leda_template("access_requests_full", DEFAULT_COPY_REGISTER)
+ACCESS_REQUEST_HINT_REPLY = leda_template("access_request_hint", DEFAULT_COPY_REGISTER)
+ACCESS_PENDING_REPLY = leda_template("access_pending", DEFAULT_COPY_REGISTER)
+ACCESS_DENIED_REPLY = leda_template("access_denied", DEFAULT_COPY_REGISTER)
+ACCESS_APPROVED_REPLY = leda_template("access_approved", DEFAULT_COPY_REGISTER)
+MESSAGE_LIMIT_REPLY = leda_template("message_limit", DEFAULT_COPY_REGISTER)
 
 # PW-013: bounds the presentation -> voice process call for a voice-note
 # QUESTION's transcription (both channels). Unlike CHANNEL_B_VOICE_REPLY_
@@ -526,12 +526,14 @@ class LocalAnswer:
         return {"ok": True, "source": "leda_local_snapshot_parser", "question": self.question, "answerText": self.answer_text, "datosRelevantes": self.relevant_data}
 
 
-def answer_from_snapshot(snapshot: dict[str, Any] | None, question: str) -> LocalAnswer:
+def answer_from_snapshot(snapshot: dict[str, Any] | None, question: str, copy_register=None) -> LocalAnswer:
+    """Answer one question from the visible snapshot; ``copy_register`` is the optional register resolver
+    for the only fixed message addressed to the user (no dashboard open). Data answers are third person."""
     question = str(question or "").strip()
     if not question:
         return LocalAnswer(question, "La pregunta está vacía.", [])
     if not snapshot or not isinstance(snapshot.get("widgets"), list):
-        return LocalAnswer(question, NO_DASHBOARD_OPEN_REPLY, [])
+        return LocalAnswer(question, leda_text("no_dashboard_open", active_register(copy_register)), [])
     widgets = [widget for widget in snapshot["widgets"] if isinstance(widget, dict)]
     q = normalize(question)
     machine = snapshot.get("machine") if isinstance(snapshot.get("machine"), dict) else {}
@@ -698,12 +700,15 @@ class TelegramLocalBot:
     never overwrite a live lease.
     """
 
-    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None, typing_enabled=False, rate_limiter=None, audit_log=None):
+    def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None, typing_enabled=False, rate_limiter=None, audit_log=None, copy_register=None):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         # Channel B admission safeguards: a per-chat message limit (always on) and an
         # optional redacted audit log of admission events.
         self.rate_limiter = rate_limiter if rate_limiter is not None else ChatMessageLimiter()
         self.audit_log = audit_log
+        # Optional resolver of the configured copy register, read for every fixed reply addressed to the user.
+        # Left unset (or failing) the replies stay in the default usted register.
+        self.copy_register = copy_register
         self.api_base, self.session = api_base.rstrip("/"), requests.Session()
         # The admin HTTP thread's approval notice gets its own session: a lock around the shared one
         # would make the notice (and the admin request) wait out a 35 s getUpdates long poll. Notices
@@ -814,6 +819,14 @@ class TelegramLocalBot:
             return payload
         finally:
             response.close()
+
+    def _text(self, message_id):
+        """One fixed reply in the register configured right now."""
+        return leda_text(message_id, active_register(self.copy_register))
+
+    def _voice_reply(self, message_id):
+        """One voice-note failure reply in the register configured right now."""
+        return voice_note_reply(message_id, active_register(self.copy_register))
 
     def send_message(self, chat_id, text):
         if self.stop_event.is_set():
@@ -1003,11 +1016,11 @@ class TelegramLocalBot:
     def _reply_to_unapproved(self, chat_id, status, message, chat, *, is_start):
         """Fixed replies for a chat without access; nothing else is ever done for it."""
         if status == "pending":
-            self.send_message(chat_id, ACCESS_PENDING_REPLY)
+            self.send_message(chat_id, self._text("access_pending"))
         elif status in ("rejected", "revoked"):
-            self.send_message(chat_id, ACCESS_DENIED_REPLY)
+            self.send_message(chat_id, self._text("access_denied"))
         elif not is_start:
-            self.send_message(chat_id, ACCESS_REQUEST_HINT_REPLY)
+            self.send_message(chat_id, self._text("access_request_hint"))
         else:
             display_name, username = self._requester_identity(message, chat)
             # One locked repository step: the cap check and the insert cannot interleave.
@@ -1016,17 +1029,17 @@ class TelegramLocalBot:
             )
             if outcome == ACCESS_REQUEST_ADDED:
                 self._audit("requested", chat_id)
-                self.send_message(chat_id, ACCESS_REQUESTED_REPLY)
+                self.send_message(chat_id, self._text("access_requested"))
             elif outcome == ACCESS_REQUEST_FULL:
                 self._audit("request_refused_full", chat_id)
-                self.send_message(chat_id, ACCESS_REQUESTS_FULL_REPLY)
+                self.send_message(chat_id, self._text("access_requests_full"))
             # ACCESS_REQUEST_EXISTS: the chat was decided after this message was read; its next message gets the right reply.
 
     def send_approval_notice(self, chat_id) -> bool:
         """Tell a chat its access was approved; only ever sent while the chat is currently approved."""
         if self.bot_id is None or self.state_store.status_of(self.bot_id, chat_id) != "approved":
             return False
-        self._send_notice_message(chat_id, ACCESS_APPROVED_REPLY)
+        self._send_notice_message(chat_id, self._text("access_approved"))
         return True
 
     def _handle_message(self, message, *, migration_active=False):
@@ -1040,16 +1053,16 @@ class TelegramLocalBot:
         verdict = self.rate_limiter.admit(chat_id)
         if verdict is not MessageVerdict.ALLOWED:
             if verdict is MessageVerdict.LIMITED_NOTIFY and self.state_store.status_of(self.bot_id, chat_id) == "approved":
-                self.send_message(chat_id, MESSAGE_LIMIT_REPLY)
+                self.send_message(chat_id, self._text("message_limit"))
             return
         if is_start and migration_active:
-            self.send_message(chat_id, "Envíe /start nuevamente cuando finalice la migración."); return
+            self.send_message(chat_id, self._text("migration_restart")); return
         # Read on every message, never cached: an admin revocation must apply to the very next one.
         status = self.state_store.status_of(self.bot_id, chat_id)
         if status != "approved":
             self._reply_to_unapproved(chat_id, status, message, chat, is_start=is_start); return
         if is_start:
-            self.send_message(chat_id, "Leda está lista para responder sus consultas."); return
+            self.send_message(chat_id, self._text("bot_ready")); return
         # Live test 2026-09-25 (F6): "typing…" while this paired chat's
         # question (text or voice note) is processed, non-blocking, marked
         # answered in `finally` right after the reply for this exact
@@ -1069,8 +1082,8 @@ class TelegramLocalBot:
             if command.startswith("/status"):
                 snapshot = self._active_snapshot(); self.send_message(chat_id, f"Leda está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
             if command.startswith("/help"):
-                self.send_message(chat_id, "Puede consultar lote, producto, orden, cliente, OEE, estado, actividad, potencia, progreso, tiempo restante, alertas o pedir un resumen."); return
-            answer = answer_from_snapshot(self._active_snapshot(), text); self.send_message(chat_id, answer.answer_text)
+                self.send_message(chat_id, self._text("bot_help")); return
+            answer = answer_from_snapshot(self._active_snapshot(), text, self.copy_register); self.send_message(chat_id, answer.answer_text)
             self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
         finally:
             if answered is not None:
@@ -1080,7 +1093,7 @@ class TelegramLocalBot:
         """Download and transcribe one voice-note question (PW-013).
 
         Returns the transcript string, or ``None`` after already sending a
-        short formal-usted failure reply -- the caller (``_handle_message``)
+        short failure reply in the configured register -- the caller (``_handle_message``)
         simply stops in that case. Duration/size are validated BEFORE any
         download (user decision); every failure is caught here so a Gemini
         or network problem can never crash the receive loop.
@@ -1093,10 +1106,10 @@ class TelegramLocalBot:
             validate_voice_note_duration(duration)
             validate_voice_note_size(file_size)
         except VoiceNoteTooLong:
-            self.send_message(chat_id, VOICE_NOTE_TOO_LONG_REPLY)
+            self.send_message(chat_id, self._voice_reply("voice_note_too_long"))
             return None
         except VoiceNoteTooLarge:
-            self.send_message(chat_id, VOICE_NOTE_TOO_LARGE_REPLY)
+            self.send_message(chat_id, self._voice_reply("voice_note_too_large"))
             return None
         try:
             file_path = self._call("getFile", timeout=20, data={"file_id": file_id}).get("result", {}).get("file_path")
@@ -1104,10 +1117,10 @@ class TelegramLocalBot:
             if not audio_bytes:
                 raise RuntimeError("TELEGRAM_VOICE_FILE_EMPTY")
         except Exception:
-            self.send_message(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
+            self.send_message(chat_id, self._voice_reply("voice_note_download_failed"))
             return None
         if not self.voice_url or self.local_http is None:
-            self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            self.send_message(chat_id, self._voice_reply("voice_note_transcription_unavailable"))
             return None
         extra_terms = self._voice_note_domain_terms()
         try:
@@ -1115,10 +1128,10 @@ class TelegramLocalBot:
             token = self.voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
             return _request_voice_transcription(self.local_http, self.voice_url, token)
         except VoiceTranscriptionEmpty:
-            self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
+            self.send_message(chat_id, self._voice_reply("voice_note_transcription_empty"))
             return None
         except Exception:
-            self.send_message(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            self.send_message(chat_id, self._voice_reply("voice_note_transcription_unavailable"))
             return None
 
     def _download_voice_file(self, file_path):
@@ -1384,6 +1397,10 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
     # One process-local identity registry, shared by the manager factory, the
     # standalone bot builder and any later channel A wiring.
     identity_reservation = process_bot_identity_reservation()
+    # One HMI config store for the whole presentation process: the admin boundary writes the settings and
+    # the bots read the copy register from it, so a change in the admin applies without a restart.
+    hmi_config_store = HmiConfigStore(paths.hmi_config_database)
+    copy_register = CopyRegisterResolver(hmi_config_store)
     # Channel A: an explicitly injected manager is preserved verbatim and shared
     # with the default-built admin boundary; only this root's own default
     # composition may construct one. An injected admin boundary owns its
@@ -1411,7 +1428,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 lambda token: TelegramLocalBot(
                     token, snapshot_store, state_store, voice_events, reservation=identity_reservation,
                     voice_url=voice_url, local_http=local_http, session_registry=session_registry,
-                    typing_enabled=True, audit_log=admission_audit,
+                    typing_enabled=True, audit_log=admission_audit, copy_register=copy_register,
                 ),
             )
 
@@ -1554,6 +1571,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
                 transcribe=channel_a_transcribe,
                 notify_thinking=channel_a_notify_thinking,
                 notify_cancelled=channel_a_notify_cancelled,
+                copy_register=copy_register,
             )
 
         # The root builds Channel A before its admin boundary and injects that
@@ -1600,7 +1618,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             gemini_verification_service=gemini_verification_service,
             telegram_verification_service=telegram_verification_service,
             channel_a_verification_service=channel_a_verification_service,
-            hmi_config_store=HmiConfigStore(paths.hmi_config_database),
+            hmi_config_store=hmi_config_store,
         )
     app.config.update(snapshot_store=snapshot_store, voice_events=voice_events, telegram_bot=telegram_bot, telegram_manager=telegram_manager, session_registry=session_registry, channel_a_manager=channel_a_manager)
     admin_http.register(app)
@@ -1877,7 +1895,7 @@ def create_app(snapshot_store=None, voice_events=None, telegram_bot=None, telegr
             snapshot, revision = None, None
         except HmiSessionError:
             return jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 409
-        answer = answer_from_snapshot(snapshot, question)
+        answer = answer_from_snapshot(snapshot, question, copy_register)
         if revision is not None and not session_registry.is_owner_context_current(owner_id, revision):
             return jsonify({"ok": False, "error": "NO_SNAPSHOT"}), 409
         publish_started = time.monotonic()

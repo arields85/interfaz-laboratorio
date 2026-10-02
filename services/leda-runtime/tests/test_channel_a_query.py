@@ -40,6 +40,7 @@ from leda_runtime.channel_a_query import (
 )
 from leda_runtime.channel_a_pairing import ChannelAPairingRegistry
 from leda_runtime.hmi_sessions import HmiSessionRegistry
+from leda_runtime.leda_copy import leda_text
 from leda_runtime.local_presentation import LocalAnswer, answer_from_snapshot
 
 OWNER = "00000000-0000-4000-8000-000000000001"
@@ -1420,6 +1421,45 @@ class QueryEnvelopeDeadlineTests(unittest.TestCase):
         self.assertTrue(math.isfinite(envelope.captured_deadline))
         self.assertGreater(envelope.captured_deadline, harness.mono[0])
         self.assertTrue(is_query_envelope_well_formed(envelope))
+
+
+class ChannelAQueryRegisterTests(unittest.TestCase):
+    """The generic unavailable notice follows the configured register."""
+
+    def notice(self, **overrides):
+        harness = QueryHarness()
+        harness.open_session(OWNER, snapshot=None)  # forces the notice path
+        link = harness.pair()
+        coordinator = harness.build(**overrides)
+        outcome = coordinator.handle_query(harness.binding(link), QUESTION)
+        harness.assert_outcome(outcome, QUERY_UNAVAILABLE, delivery=DELIVERED)
+        return harness.deliveries[0][1]
+
+    def test_the_notice_uses_the_register_of_the_resolver(self):
+        for register in ("usted", "rioplatense", "neutro"):
+            with self.subTest(register=register):
+                self.assertEqual(
+                    self.notice(copy_register=lambda register=register: register),
+                    leda_text("query_unavailable", register, label=QueryHarness().labels["value"]),
+                )
+
+    def test_without_a_resolver_the_notice_stays_usted(self):
+        self.assertEqual(self.notice(), COPY_QUERY_UNAVAILABLE.format(label=QueryHarness().labels["value"]))
+
+    def test_a_failing_or_unknown_resolver_falls_back_to_usted(self):
+        def broken():
+            raise RuntimeError("config store down")
+
+        for resolver in (broken, lambda: "voseo"):
+            with self.subTest(resolver=resolver):
+                self.assertEqual(
+                    self.notice(copy_register=resolver),
+                    COPY_QUERY_UNAVAILABLE.format(label=QueryHarness().labels["value"]),
+                )
+
+    def test_a_non_callable_resolver_is_a_configuration_error(self):
+        with self.assertRaises(ChannelAQueryConfigInvalid):
+            QueryHarness().build(copy_register="neutro")
 
 
 if __name__ == "__main__":

@@ -59,6 +59,8 @@ import uuid
 from dataclasses import dataclass, field
 
 from .channel_a_pairing import ChannelAPairingError, ChannelAPairingRegistry
+from .copy_register import DEFAULT_COPY_REGISTER, active_register
+from .leda_copy import leda_text, leda_template
 
 QUERY_ANSWER_DELIVERED = "query_answer_delivered"
 QUERY_ANSWER_REJECTED = "query_answer_rejected"
@@ -77,9 +79,8 @@ LEDA_CHANNEL_A_QUERY_CONFIG_INVALID = "LEDA_CHANNEL_A_QUERY_CONFIG_INVALID"
 # The generic, context-free notice. It never echoes the question, the owner, the
 # snapshot or any freshness detail, and it is sent only while the binding is
 # still current.
-COPY_QUERY_UNAVAILABLE = (
-    "No se pudieron leer los datos de {label} en este momento. Intente de nuevo en unos segundos."
-)
+# The usted wording; the coordinator sends the variant of the configured register (see leda_copy).
+COPY_QUERY_UNAVAILABLE = leda_template("query_unavailable", DEFAULT_COPY_REGISTER)
 
 # PW-011 M7: this module deliberately has no access to the Telegram/pairing
 # destination label (see the module docstring's "deliberately absent" list);
@@ -281,6 +282,7 @@ class ChannelAQueryCoordinator:
         rejected_label,
         unknown_label,
         clock=time.monotonic,
+        copy_register=None,
     ):
         if not isinstance(registry, ChannelAPairingRegistry):
             raise ChannelAQueryConfigInvalid(LEDA_CHANNEL_A_QUERY_CONFIG_INVALID)
@@ -297,6 +299,8 @@ class ChannelAQueryCoordinator:
         if not callable(resolve_label):
             raise ChannelAQueryConfigInvalid(LEDA_CHANNEL_A_QUERY_CONFIG_INVALID)
         if not callable(clock):
+            raise ChannelAQueryConfigInvalid(LEDA_CHANNEL_A_QUERY_CONFIG_INVALID)
+        if copy_register is not None and not callable(copy_register):
             raise ChannelAQueryConfigInvalid(LEDA_CHANNEL_A_QUERY_CONFIG_INVALID)
         delivered = _label(delivered_label)
         rejected = _label(rejected_label)
@@ -318,6 +322,8 @@ class ChannelAQueryCoordinator:
         self.rejected_label = rejected
         self.unknown_label = unknown
         self.clock = clock
+        # Optional: the register resolver for the fixed notice; absent, the notice stays usted.
+        self.copy_register = copy_register
         self._lock = threading.RLock()
         self._last_sample: float | None = None
 
@@ -590,6 +596,8 @@ class ChannelAQueryCoordinator:
         """Fail closed: a generic notice only while the binding is still current."""
         if not self._binding_current(binding):
             return QueryOutcome(QUERY_IGNORED_STALE)
-        text = COPY_QUERY_UNAVAILABLE.format(label=self._resolved_label(binding.owner_id))
+        text = leda_text(
+            "query_unavailable", active_register(self.copy_register), label=self._resolved_label(binding.owner_id)
+        )
         delivery = self._attempt_deliver(binding, text)
         return QueryOutcome(QUERY_UNAVAILABLE, delivery)

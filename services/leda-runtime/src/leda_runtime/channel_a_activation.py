@@ -65,6 +65,7 @@ class ChannelAActivation:
         transcribe=None,
         notify_thinking=None,
         notify_cancelled=None,
+        copy_register=None,
     ) -> None:
         self._registry: ChannelAPairingRegistry | None = None
         self._dialogue: ChannelAPairingDialogue | None = None
@@ -96,6 +97,7 @@ class ChannelAActivation:
                 registry=registry,
                 transport=transport,
                 destination_label=destination_label,
+                copy_register=copy_register,
             )
             dialogue.enable_queries(
                 read_context=sessions.capture_owner_context,

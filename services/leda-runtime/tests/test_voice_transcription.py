@@ -9,6 +9,7 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
 from leda_runtime import voice_transcription as vt
+from leda_runtime.leda_copy import leda_text
 
 
 class LimitsTests(unittest.TestCase):
@@ -171,21 +172,54 @@ class TranscribeVoiceNoteTests(unittest.TestCase):
 
 
 class SpanishCopyTests(unittest.TestCase):
-    def test_every_reply_constant_is_formal_usted_and_nonempty(self):
-        replies = (
+    REPLY_IDS = (
+        "voice_note_too_long",
+        "voice_note_too_large",
+        "voice_note_download_failed",
+        "voice_note_transcription_empty",
+        "voice_note_transcription_unavailable",
+    )
+    VOSEO_MARKERS = ("enviá", "intentá", "escribí", "probá", "podés")
+    TUTEO_MARKERS = ("envía ", "intenta ", "escribe ", "puedes")
+    USTED_MARKERS = ("envíe", "intente", "escriba", "puede ")
+
+    def reply(self, message_id, register):
+        return leda_text(message_id, register, max_seconds=vt.MAX_VOICE_NOTE_DURATION_SECONDS)
+
+    def test_the_reply_constants_are_the_usted_variants(self):
+        constants = (
             vt.VOICE_NOTE_TOO_LONG_REPLY,
             vt.VOICE_NOTE_TOO_LARGE_REPLY,
             vt.VOICE_NOTE_DOWNLOAD_FAILED_REPLY,
             vt.VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY,
             vt.VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY,
         )
-        voseo_or_tuteo_markers = ("enviá", "envia ", "intentá", "intenta ", "escribí", "probá", "podés")
-        for reply in replies:
-            self.assertIsInstance(reply, str)
-            self.assertTrue(reply.strip())
-            lowered = reply.lower()
-            for marker in voseo_or_tuteo_markers:
+        self.assertEqual(constants, tuple(self.reply(message_id, "usted") for message_id in self.REPLY_IDS))
+
+    def test_usted_replies_have_no_voseo_or_tuteo_markers(self):
+        for message_id in self.REPLY_IDS:
+            lowered = self.reply(message_id, "usted").lower()
+            self.assertTrue(lowered.strip())
+            for marker in self.VOSEO_MARKERS + self.TUTEO_MARKERS:
                 self.assertNotIn(marker, lowered)
+
+    def test_rioplatense_replies_have_no_tuteo_or_usted_markers(self):
+        for message_id in self.REPLY_IDS:
+            lowered = self.reply(message_id, "rioplatense").lower()
+            self.assertTrue(lowered.strip())
+            for marker in self.TUTEO_MARKERS + self.USTED_MARKERS:
+                self.assertNotIn(marker, lowered)
+
+    def test_neutro_replies_have_no_voseo_or_usted_markers(self):
+        for message_id in self.REPLY_IDS:
+            lowered = self.reply(message_id, "neutro").lower()
+            self.assertTrue(lowered.strip())
+            for marker in self.VOSEO_MARKERS + self.USTED_MARKERS:
+                self.assertNotIn(marker, lowered)
+
+    def test_the_duration_limit_is_stated_in_every_register(self):
+        for register in ("usted", "rioplatense", "neutro"):
+            self.assertIn(str(vt.MAX_VOICE_NOTE_DURATION_SECONDS), self.reply("voice_note_too_long", register))
 
 
 if __name__ == "__main__":

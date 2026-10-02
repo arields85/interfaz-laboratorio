@@ -98,19 +98,17 @@ from .channel_a_query import (
     QueryBinding,
     is_query_envelope_well_formed,
 )
+from .copy_register import DEFAULT_COPY_REGISTER, active_register
+from .leda_copy import leda_template, leda_text
 from .voice_transcription import (
     DEFAULT_VOICE_NOTE_MIME_TYPE,
     MAX_VOICE_NOTE_FILE_SIZE_BYTES,
-    VOICE_NOTE_DOWNLOAD_FAILED_REPLY,
-    VOICE_NOTE_TOO_LARGE_REPLY,
-    VOICE_NOTE_TOO_LONG_REPLY,
-    VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY,
-    VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY,
     VoiceNoteTooLarge,
     VoiceNoteTooLong,
     VoiceTranscriptionEmpty,
     validate_voice_note_duration,
     validate_voice_note_size,
+    voice_note_reply,
 )
 
 LEDA_CHANNEL_A_BOT_CONFIG_INVALID = "LEDA_CHANNEL_A_BOT_CONFIG_INVALID"
@@ -190,37 +188,20 @@ BUTTON_UNLINK = "Desvincular"
 # against an accidental tap of the persistent reply-keyboard button below).
 BUTTON_UNLINK_CONFIRM = "Confirmar desvinculación"
 
-CONFIRMATION_PROMPT_TEMPLATE = (
-    "Un teléfono quiere conectarse con:\n"
-    "{label}\n"
-    "\n"
-    "Confirme para hacerle preguntas a Leda desde aquí; le responderá en pantalla y con voz."
-)
-WELCOME_TEMPLATE = (
-    "Vinculación confirmada con:\n"
-    "{label}\n"
-    "\n"
-    "Ya puede realizar sus consultas. Use el botón «Desvincular» de este chat para dejar de "
-    "recibir respuestas en este teléfono."
-)
+# Messages that address the user are kept in the register table (leda_copy.py) and sent in the configured
+# register. The constants below are their usted wording, for importers; impersonal messages are plain constants.
+CONFIRMATION_PROMPT_TEMPLATE = leda_template("confirmation_prompt", DEFAULT_COPY_REGISTER)
+WELCOME_TEMPLATE = leda_template("welcome", DEFAULT_COPY_REGISTER)
 COPY_REFUSED = (
     "No se pudo iniciar la vinculación: el código no es válido, ya venció o este teléfono ya está vinculado."
 )
-COPY_DESTINATION_UNAVAILABLE = (
-    "{label} ya no está disponible. Genere un código nuevo desde la pantalla."
-)
+COPY_DESTINATION_UNAVAILABLE = leda_template("destination_unavailable", DEFAULT_COPY_REGISTER)
 COPY_CANCELLED = "Vinculación cancelada."
 COPY_CONFIRMED = "Vinculación confirmada."
 COPY_KEEP_CONNECTED = "Listo, seguimos conectados."
 COPY_UNLINKED = "Este teléfono quedó desvinculado."
-COPY_ACTION_REFUSED = (
-    "Ese botón ya no es válido. Genere un código nuevo desde la pantalla del HMI."
-)
-COPY_INACTIVITY_WARNING = (
-    "La vinculación con {label} se va a cerrar por inactividad.\n"
-    "Use el botón para seguir conectado, o el botón «Desvincular» de este chat para desvincular "
-    "este teléfono."
-)
+COPY_ACTION_REFUSED = leda_template("action_refused", DEFAULT_COPY_REGISTER)
+COPY_INACTIVITY_WARNING = leda_template("inactivity_warning", DEFAULT_COPY_REGISTER)
 # PW-011 M3: sent once, to the phone, when a periodic sweep finds a link the
 # registry already released by idle expiry -- never a delivery contract (the
 # release already happened), just the visible counterpart of the cleanup
@@ -231,9 +212,7 @@ COPY_INACTIVITY_WARNING = (
 COPY_EXPIRED = "La vinculación con {label} se cerró por inactividad."
 # T3: shown when the persistent "Desvincular" button is pressed, before any
 # unlink actually happens -- guards against an accidental tap.
-COPY_UNLINK_CONFIRM_PROMPT = (
-    "¿Confirma que desea desvincular este teléfono? Ya no recibirá respuestas de Leda en este chat."
-)
+COPY_UNLINK_CONFIRM_PROMPT = leda_template("unlink_confirm_prompt", DEFAULT_COPY_REGISTER)
 
 # T14: the always-visible Telegram menu entry (chat menu button + one
 # chat-scoped command), shown alongside the T3 persistent reply keyboard so
@@ -739,6 +718,7 @@ class ChannelAPairingDialogue:
         epoch_factory=None,
         max_link_actions=64,
         max_pending_claims=64,
+        copy_register=None,
     ):
         bounded_bot = _bounded_id(bot_id)
         if bounded_bot is None:
@@ -765,6 +745,8 @@ class ChannelAPairingDialogue:
         resolved_epoch_factory = secrets.token_hex if epoch_factory is None else epoch_factory
         if not callable(resolved_epoch_factory):
             raise ChannelABotConfigInvalid(LEDA_CHANNEL_A_BOT_CONFIG_INVALID)
+        if copy_register is not None and not callable(copy_register):
+            raise ChannelABotConfigInvalid(LEDA_CHANNEL_A_BOT_CONFIG_INVALID)
         epoch = _read_epoch(resolved_epoch_factory)
 
         self.bot_id = bounded_bot
@@ -775,6 +757,9 @@ class ChannelAPairingDialogue:
         self.clock = resolved_clock
         self.max_link_actions = bounded_actions
         self.max_pending_claims = bounded_claims
+        # Optional resolver of the configured copy register, read for every fixed message addressed to
+        # the user. Left unset (or failing) the messages stay in the default usted register.
+        self.copy_register = copy_register
         self._lock = threading.RLock()
         self._last_update_id = -1
         self._pending_claims: dict = {}
@@ -794,6 +779,14 @@ class ChannelAPairingDialogue:
         # voice-note handling is completely unchanged.
         self._notify_thinking = None
         self._notify_cancelled = None
+
+    def _text(self, message_id, **params) -> str:
+        """One fixed message in the register configured right now."""
+        return leda_text(message_id, active_register(self.copy_register), **params)
+
+    def _voice_reply(self, message_id) -> str:
+        """One voice-note failure reply in the register configured right now."""
+        return voice_note_reply(message_id, active_register(self.copy_register))
 
     # -- ingress -----------------------------------------------------------
 
@@ -1009,6 +1002,7 @@ class ChannelAPairingDialogue:
                 delivered_label=SEND_DELIVERED,
                 rejected_label=SEND_REJECTED,
                 unknown_label=SEND_UNKNOWN,
+                copy_register=self.copy_register,
                 **options,
             )
             self.query = coordinator
@@ -1257,10 +1251,10 @@ class ChannelAPairingDialogue:
             validate_voice_note_duration(duration)
             validate_voice_note_size(file_size)
         except VoiceNoteTooLong:
-            delivery = self._send(chat_id, VOICE_NOTE_TOO_LONG_REPLY)
+            delivery = self._send(chat_id, self._voice_reply("voice_note_too_long"))
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
         except VoiceNoteTooLarge:
-            delivery = self._send(chat_id, VOICE_NOTE_TOO_LARGE_REPLY)
+            delivery = self._send(chat_id, self._voice_reply("voice_note_too_large"))
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_REJECTED, True, delivery)
         # voice-ux U1: the note passed the cheap checks and is about to be downloaded and
         # transcribed -- signal "thinking" to the HMI now, so the orb shows feedback for the
@@ -1275,7 +1269,7 @@ class ChannelAPairingDialogue:
                 file_path=file_path, max_bytes=MAX_VOICE_NOTE_FILE_SIZE_BYTES
             )
         except Exception:
-            delivery = self._send(chat_id, VOICE_NOTE_DOWNLOAD_FAILED_REPLY)
+            delivery = self._send(chat_id, self._voice_reply("voice_note_download_failed"))
             self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_DOWNLOAD_FAILED, True, delivery)
         try:
@@ -1287,7 +1281,7 @@ class ChannelAPairingDialogue:
             # names (see local_presentation.channel_a_transcribe).
             transcript = self._transcribe(audio_bytes, mime_type, owner_id=record.owner_id)
         except VoiceTranscriptionEmpty:
-            delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_EMPTY_REPLY)
+            delivery = self._send(chat_id, self._voice_reply("voice_note_transcription_empty"))
             self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
         except Exception:
@@ -1295,7 +1289,7 @@ class ChannelAPairingDialogue:
             # subtypes as well as an unexpected raise from the caller-built
             # callable -- must still never crash the poll loop (user
             # decision): fail closed with the same generic unavailable reply.
-            delivery = self._send(chat_id, VOICE_NOTE_TRANSCRIPTION_UNAVAILABLE_REPLY)
+            delivery = self._send(chat_id, self._voice_reply("voice_note_transcription_unavailable"))
             self._signal_cancelled(record.owner_id)
             return IngressOutcome(update_id, VARIANT_MESSAGE, VOICE_NOTE_TRANSCRIPTION_FAILED, True, delivery)
         # voice-ux U1: no explicit "cancel" here on the happy path -- the real
@@ -1319,7 +1313,7 @@ class ChannelAPairingDialogue:
             return IngressOutcome(update_id, VARIANT_MESSAGE, INGRESS_IGNORED_UNRELATED, True)
         delivery = self._send(
             chat_id,
-            COPY_UNLINK_CONFIRM_PROMPT,
+            self._text("unlink_confirm_prompt"),
             _keyboard(
                 (BUTTON_UNLINK_CONFIRM, CALLBACK_UNLINK + ":" + record.nonce),
                 (BUTTON_CANCEL, CALLBACK_UNLINK_CANCEL + ":" + record.nonce),
@@ -1383,8 +1377,9 @@ class ChannelAPairingDialogue:
                 VARIANT_MESSAGE,
                 PAIRING_DESTINATION_UNAVAILABLE,
                 chat_id,
-                COPY_DESTINATION_UNAVAILABLE.format(
-                    label=_display_label(None, sentence_start=True)
+                self._text(
+                    "destination_unavailable",
+                    label=_display_label(None, sentence_start=True),
                 ),
             )
         self._pending_claims[_digest(ticket)] = _Claim(
@@ -1392,7 +1387,7 @@ class ChannelAPairingDialogue:
         )
         delivery = self._send(
             chat_id,
-            CONFIRMATION_PROMPT_TEMPLATE.format(label=label),
+            self._text("confirmation_prompt", label=label),
             _keyboard(
                 (BUTTON_CONFIRM, CALLBACK_CONFIRM + ":" + ticket),
                 (BUTTON_CANCEL, CALLBACK_CANCEL + ":" + ticket),
@@ -1451,7 +1446,7 @@ class ChannelAPairingDialogue:
             # A lookup/config/clock failure is not an authoritative absence: keep
             # the live pending claim instead of deleting authority.
             return self._acknowledge(
-                update_id, callback_id, COPY_ACTION_REFUSED, PAIRING_REFUSED
+                update_id, callback_id, self._text("action_refused"), PAIRING_REFUSED
             )
         if label is None or label != claim.label:
             # The destination presented in the prompt is gone or has changed: the
@@ -1462,8 +1457,9 @@ class ChannelAPairingDialogue:
             # against (claim.label, always usable -- see its own assignment
             # below), never the new/changed one, and never the internal
             # "documento" term.
-            unavailable_text = COPY_DESTINATION_UNAVAILABLE.format(
-                label=_display_label(claim.label, sentence_start=True)
+            unavailable_text = self._text(
+                "destination_unavailable",
+                label=_display_label(claim.label, sentence_start=True),
             )
             acknowledged = self._answer(callback_id, unavailable_text)
             delivery = self._send(actor_id, unavailable_text)
@@ -1481,7 +1477,7 @@ class ChannelAPairingDialogue:
             self._forget_claim(ticket)
             self._cancel_claim(ticket, phone_id)
             return self._acknowledge(
-                update_id, callback_id, COPY_ACTION_REFUSED, PAIRING_REFUSED
+                update_id, callback_id, self._text("action_refused"), PAIRING_REFUSED
             )
         try:
             link = self.registry.confirm(ticket, phone_id)
@@ -1495,13 +1491,13 @@ class ChannelAPairingDialogue:
             # pending claim so a later attempt can still confirm it. Never retry
             # or announce a success inside this call.
             return self._acknowledge(
-                update_id, callback_id, COPY_ACTION_REFUSED, PAIRING_REFUSED
+                update_id, callback_id, self._text("action_refused"), PAIRING_REFUSED
             )
         self._forget_claim(ticket)
         if not self._link_matches(phone_id, link.owner_id, link.generation):
             # The freshly confirmed link is already gone or replaced underneath.
-            acknowledged = self._answer(callback_id, COPY_ACTION_REFUSED)
-            delivery = self._send(actor_id, COPY_ACTION_REFUSED)
+            acknowledged = self._answer(callback_id, self._text("action_refused"))
+            delivery = self._send(actor_id, self._text("action_refused"))
             return IngressOutcome(
                 update_id, VARIANT_CALLBACK, PAIRING_REFUSED, True, delivery, acknowledged
             )
@@ -1510,16 +1506,16 @@ class ChannelAPairingDialogue:
         except ChannelABotError:
             # The registry keeps the freshly confirmed link; it still expires by
             # its own idle deadline, so nothing is silently transferred or rebound.
-            acknowledged = self._answer(callback_id, COPY_ACTION_REFUSED)
-            delivery = self._send(actor_id, COPY_ACTION_REFUSED)
+            acknowledged = self._answer(callback_id, self._text("action_refused"))
+            delivery = self._send(actor_id, self._text("action_refused"))
             return IngressOutcome(
                 update_id, VARIANT_CALLBACK, PAIRING_REFUSED, True, delivery, acknowledged
             )
         if not self._link_matches(phone_id, link.owner_id, link.generation):
             # The entropy draw may have replaced the captured link as a side
             # effect: validate before the success acknowledgement, never after it.
-            acknowledged = self._answer(callback_id, COPY_ACTION_REFUSED)
-            delivery = self._send(actor_id, COPY_ACTION_REFUSED)
+            acknowledged = self._answer(callback_id, self._text("action_refused"))
+            delivery = self._send(actor_id, self._text("action_refused"))
             return IngressOutcome(
                 update_id, VARIANT_CALLBACK, PAIRING_REFUSED, True, delivery, acknowledged
             )
@@ -1541,7 +1537,7 @@ class ChannelAPairingDialogue:
         # later message regardless of what markup those carry.
         delivery = self._send(
             actor_id,
-            WELCOME_TEMPLATE.format(label=label),
+            self._text("welcome", label=label),
             _unlink_reply_keyboard(),
         )
         # T14: the always-visible Telegram menu entry complements the T3
@@ -1967,7 +1963,7 @@ class ChannelAPairingDialogue:
         return IngressOutcome(update_id, VARIANT_CALLBACK, kind, True, SEND_NONE, acknowledged)
 
     def _refuse_action(self, update_id, callback_id) -> IngressOutcome:
-        return self._acknowledge(update_id, callback_id, COPY_ACTION_REFUSED, ACTION_REFUSED)
+        return self._acknowledge(update_id, callback_id, self._text("action_refused"), ACTION_REFUSED)
 
     # -- proactive inactivity warnings (RCA-3c) ----------------------------
 
@@ -2028,7 +2024,7 @@ class ChannelAPairingDialogue:
         # HMI reference rather than skipping a warning that is otherwise due.
         delivery = self._send(
             chat_id,
-            COPY_INACTIVITY_WARNING.format(label=_display_label(record.label)),
+            self._text("inactivity_warning", label=_display_label(record.label)),
             _keyboard(
                 (BUTTON_KEEP_CONNECTED, CALLBACK_KEEP_CONNECTED + ":" + record.nonce),
             ),

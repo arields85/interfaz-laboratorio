@@ -7,6 +7,7 @@ import time
 import uuid
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import requests
@@ -14,8 +15,13 @@ import requests
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT / "src"))
 
+from leda_runtime.copy_register import COPY_REGISTER_KEY, active_register
+from leda_runtime.hmi_config_store import HmiConfigStore
+from leda_runtime.leda_copy import leda_text
+from leda_runtime.paths import runtime_paths
 from leda_runtime.local_presentation import (
     JsonFileStore,
+    NO_DASHBOARD_OPEN_REPLY,
     VoiceEventStore,
     _request_voice_transcription,
     _voice_note_context_terms,
@@ -694,9 +700,9 @@ class LocalAskRevisionTests(unittest.TestCase):
             registry.set_context(capability, demo_snapshot())
             parsed = []
 
-            def replace_during_parse(snapshot, question):
+            def replace_during_parse(snapshot, question, copy_register=None):
                 parsed.append((snapshot, question))
-                answer = answer_from_snapshot(snapshot, question)
+                answer = answer_from_snapshot(snapshot, question, copy_register)
                 registry.set_context(capability, {"widgets": []})
                 return answer
 
@@ -964,6 +970,55 @@ class VoiceTimelineDiagnosticsRouteTests(unittest.TestCase):
         headers = {"X-Leda-Session-Capability": capability}
         response = client.post("/hmi/voice/timeline", json={"records": [self._record()]}, headers=headers)
         self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+
+
+class CopyRegisterWiringTests(unittest.TestCase):
+    """create_app builds one HmiConfigStore and every register-aware consumer reads the setting from it."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        environment = patch.dict(os.environ, {"LEDA_RUNTIME_STATE_DIR": self.temporary.name}, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def store_register(self, register: str) -> None:
+        HmiConfigStore(runtime_paths().hmi_config_database).apply_batch(
+            {COPY_REGISTER_KEY: json.dumps({"version": 1, "register": register})}, []
+        )
+
+    def test_the_answers_of_the_hmi_follow_the_stored_register_when_no_dashboard_is_open(self) -> None:
+        for register in ("usted", "rioplatense", "neutro"):
+            with self.subTest(register=register):
+                self.store_register(register)
+                client = create_app(
+                    JsonFileStore(Path(self.temporary.name) / "snapshot.json"), VoiceEventStore(), None,
+                    **DISABLED_HTTP_OPTIONS,
+                ).test_client()
+                response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=session_headers(client))
+                self.assertEqual(response.get_json()["answerText"], leda_text("no_dashboard_open", register))
+
+    def test_an_unset_register_keeps_the_hmi_answers_in_usted(self) -> None:
+        client = create_app(
+            JsonFileStore(Path(self.temporary.name) / "snapshot.json"), VoiceEventStore(), None,
+            **DISABLED_HTTP_OPTIONS,
+        ).test_client()
+        response = client.post("/local/ask", json={"question": "¿Cuál es el OEE?"}, headers=session_headers(client))
+        self.assertEqual(response.get_json()["answerText"], NO_DASHBOARD_OPEN_REPLY)
+
+    def test_the_channel_b_bot_factory_hands_the_bot_a_resolver_over_the_shared_store(self) -> None:
+        self.store_register("neutro")
+        app = create_app(JsonFileStore(Path(self.temporary.name) / "snapshot.json"), VoiceEventStore(), None)
+        bot = app.config["telegram_manager"].bot_factory("token")
+        self.assertEqual(active_register(bot.copy_register), "neutro")
+
+    def test_the_channel_a_activation_factory_hands_the_activation_a_resolver_over_the_shared_store(self) -> None:
+        self.store_register("rioplatense")
+        app = create_app(JsonFileStore(Path(self.temporary.name) / "snapshot.json"), VoiceEventStore(), None)
+        desired = SimpleNamespace(warning_lead_seconds=60.0)
+        with patch("leda_runtime.local_presentation.ChannelAActivation") as activation:
+            app.config["channel_a_manager"]._factory("token", desired, 1, Mock())
+        self.assertEqual(active_register(activation.call_args.kwargs["copy_register"]), "rioplatense")
 
 
 if __name__ == "__main__":

@@ -24,7 +24,9 @@ from leda_runtime.bot_identity_reservation import (
     process_bot_identity_reservation,
 )
 from leda_runtime.channel_b_admission import ChatMessageLimiter
+from leda_runtime.copy_register import COPY_REGISTER_KEY, COPY_REGISTER_TTL_SECONDS, CopyRegisterResolver
 from leda_runtime.hmi_sessions import HmiSessionRegistry
+from leda_runtime.leda_copy import leda_text
 from leda_runtime.local_presentation import (
     CHANNEL_B_VOICE_QUEUE_MAX_PENDING,
     MAX_PENDING_ACCESS_REQUESTS,
@@ -2620,6 +2622,145 @@ class ChannelBAdmissionTests(unittest.TestCase):
         self.assertEqual(decided, [True])
         self.assertEqual(record["nextUpdateOffset"], 3)
         self.assertEqual((record["chats"]["7"]["status"], record["chats"]["8"]["status"]), ("revoked", "approved"))
+
+
+class ChannelBRegisterTests(unittest.TestCase):
+    """The fixed Channel B replies follow the configured register, falling back to usted."""
+
+    REGISTERS = ("usted", "rioplatense", "neutro")
+
+    def setUp(self):
+        install_offline_dispatch_guard(self)
+
+    def build_bot(self, chats=None, *, copy_register=None, **bot_options):
+        bot = TelegramLocalBot(
+            "secret-token", Mock(), MemoryStateStore(v3_state(chats)), Mock(),
+            reservation=BotIdentityReservation(), copy_register=copy_register, **bot_options,
+        )
+        bot._call = identity_transport(username="bot")
+        bot.prepare()
+        bot.send_message = Mock()
+        return bot
+
+    @staticmethod
+    def sent(bot):
+        return [call.args for call in bot.send_message.call_args_list]
+
+    def test_the_replies_for_a_chat_without_access_use_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                unknown = self.build_bot(copy_register=lambda register=register: register)
+                unknown._handle_message(private_message(7, "hola"))
+                unknown._handle_message(private_message(7, "/start"))
+                pending = self.build_bot({"7": pending_chat()}, copy_register=lambda register=register: register)
+                pending._handle_message(private_message(7, "hola"))
+                denied = self.build_bot({"7": approved_chat(status="rejected")}, copy_register=lambda register=register: register)
+                denied._handle_message(private_message(7, "hola"))
+                self.assertEqual(self.sent(unknown), [
+                    (7, leda_text("access_request_hint", register)),
+                    (7, leda_text("access_requested", register)),
+                ])
+                self.assertEqual(self.sent(pending), [(7, leda_text("access_pending", register))])
+                self.assertEqual(self.sent(denied), [(7, leda_text("access_denied", register))])
+
+    def test_the_full_queue_reply_uses_the_register(self):
+        chats = {str(100 + index): pending_chat() for index in range(MAX_PENDING_ACCESS_REQUESTS)}
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                bot = self.build_bot(chats, copy_register=lambda register=register: register)
+                bot._handle_message(private_message(7, "/start"))
+                self.assertEqual(self.sent(bot), [(7, leda_text("access_requests_full", register))])
+
+    def test_the_replies_for_an_approved_chat_use_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                bot = self.build_bot({"7": approved_chat()}, copy_register=lambda register=register: register)
+                bot._handle_message(private_message(7, "/start"))
+                bot._handle_message(private_message(7, "/help"))
+                bot._handle_message(private_message(7, "/start"), migration_active=True)
+                self.assertEqual(self.sent(bot), [
+                    (7, leda_text("bot_ready", register)),
+                    (7, leda_text("bot_help", register)),
+                    (7, leda_text("migration_restart", register)),
+                ])
+
+    def test_the_approval_notice_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                bot = self.build_bot({"1": approved_chat()}, copy_register=lambda register=register: register)
+                bot._send_notice_message = Mock()
+                self.assertTrue(bot.send_approval_notice(1))
+                bot._send_notice_message.assert_called_once_with(1, leda_text("access_approved", register))
+
+    def test_the_rate_limit_reply_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                bot = self.build_bot(
+                    {"7": approved_chat()}, copy_register=lambda register=register: register,
+                    rate_limiter=ChatMessageLimiter(clock=FakeClock()),
+                )
+                bot.snapshot_store.read = Mock(return_value=None)
+                for _ in range(11):
+                    bot._handle_message(private_message(7, "/status"))
+                self.assertEqual(self.sent(bot)[-1], (7, leda_text("message_limit", register)))
+
+    def test_the_no_dashboard_reply_uses_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                bot = self.build_bot(
+                    {"7": approved_chat()}, copy_register=lambda register=register: register,
+                    session_registry=HmiSessionRegistry(),
+                )
+                bot._handle_message(private_message(7, "¿Cuál es el OEE?"))
+                self.assertEqual(self.sent(bot), [(7, leda_text("no_dashboard_open", register))])
+
+    def test_the_voice_note_replies_use_the_register(self):
+        for register in self.REGISTERS:
+            with self.subTest(register=register):
+                bot = self.build_bot({"7": approved_chat()}, copy_register=lambda register=register: register)
+                bot._handle_message({
+                    "chat": {"id": 7, "type": "private"}, "message_id": 2,
+                    "voice": {"file_id": "f", "duration": MAX_VOICE_NOTE_DURATION_SECONDS + 5},
+                })
+                self.assertEqual(self.sent(bot), [
+                    (7, leda_text("voice_note_too_long", register, max_seconds=MAX_VOICE_NOTE_DURATION_SECONDS)),
+                ])
+
+    def test_without_a_resolver_the_replies_stay_usted(self):
+        bot = self.build_bot()
+        bot._handle_message(private_message(7, "hola"))
+        self.assertEqual(self.sent(bot), [(7, "Para solicitar acceso, envíe /start.")])
+
+    def test_a_failing_resolver_falls_back_to_usted_and_never_breaks_the_reply(self):
+        def broken():
+            raise RuntimeError("config store down")
+
+        bot = self.build_bot(copy_register=broken)
+        bot._handle_message(private_message(7, "hola"))
+        self.assertEqual(self.sent(bot), [(7, "Para solicitar acceso, envíe /start.")])
+
+    def test_an_unreadable_config_store_falls_back_to_usted(self):
+        store = Mock()
+        store.read_document.side_effect = RuntimeError("disk gone")
+        bot = self.build_bot(copy_register=CopyRegisterResolver(store, clock=FakeClock()))
+        bot._handle_message(private_message(7, "hola"))
+        self.assertEqual(self.sent(bot), [(7, "Para solicitar acceso, envíe /start.")])
+
+    def test_a_changed_setting_applies_after_the_ttl_without_a_restart(self):
+        store, clock = Mock(), FakeClock()
+        document = {COPY_REGISTER_KEY: '{"version": 1, "register": "neutro"}'}
+        store.read_document.side_effect = lambda: (1, dict(document))
+        bot = self.build_bot(copy_register=CopyRegisterResolver(store, clock=clock))
+        bot._handle_message(private_message(7, "hola"))
+        document[COPY_REGISTER_KEY] = '{"version": 1, "register": "rioplatense"}'
+        bot._handle_message(private_message(7, "hola"))
+        clock.advance(COPY_REGISTER_TTL_SECONDS)
+        bot._handle_message(private_message(7, "hola"))
+        self.assertEqual(self.sent(bot), [
+            (7, leda_text("access_request_hint", "neutro")),
+            (7, leda_text("access_request_hint", "neutro")),
+            (7, leda_text("access_request_hint", "rioplatense")),
+        ])
 
 
 if __name__ == "__main__":

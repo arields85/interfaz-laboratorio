@@ -165,6 +165,7 @@ from leda_runtime.channel_a_query import (
 )
 from leda_runtime.channel_a_transport import ChannelABotIdentity
 from leda_runtime.hmi_sessions import HmiSessionRegistry
+from leda_runtime.leda_copy import leda_text
 from leda_runtime.local_presentation import HMI_QUESTION_MAX_BYTES, answer_from_snapshot
 
 # A fixed, non-disclosing refusal shared by both offline dispatch layers.
@@ -578,6 +579,7 @@ class ActivationHarnessTestCase(unittest.TestCase):
         transcribe=None,
         notify_thinking=None,
         notify_cancelled=None,
+        copy_register=None,
     ):
         """Build the real composition over inert boundaries and fake clocks.
 
@@ -617,6 +619,7 @@ class ActivationHarnessTestCase(unittest.TestCase):
             transcribe=transcribe,
             notify_thinking=notify_thinking,
             notify_cancelled=notify_cancelled,
+            copy_register=copy_register,
         )
         self.activations.append(activation)
         return ActivationUnderTest(activation, transport, observed, parse_calls, sweep_timers)
@@ -850,6 +853,23 @@ class ChannelAActivationFlowTests(ActivationHarnessTestCase):
         self.assertEqual([outcome.kind for outcome in unlinked.outcomes], [ACTION_REFUSED])
         self.assertEqual(unlinked.outcomes[0].delivery, SEND_NONE)
         self.assertEqual(published_envelopes(fixture.observed), [])
+
+    def test_the_register_resolver_reaches_the_pairing_dialogue_and_the_unavailable_notice(self):
+        owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
+        register = ["rioplatense"]
+        fixture = self.activate(copy_register=lambda: register[0])
+        transport = fixture.transport
+        self.assertTrue(fixture.activation.prepare())
+        self.link(fixture, PHONE_A, owner_a, 1)
+        self.assertEqual(transport.sent[-2]["text"], leda_text("confirmation_prompt", "rioplatense", label=LABEL_A))
+        self.assertEqual(transport.sent[-1]["text"], leda_text("welcome", "rioplatense", label=LABEL_A))
+
+        register[0] = "neutro"
+        self.wall_now[0] += 16.0
+        transport.batches.append((question_update(5, PHONE_A, QUESTION),))
+        stale = fixture.activation.poll_once()
+        self.assertEqual([outcome.kind for outcome in stale.outcomes], [QUERY_UNAVAILABLE])
+        self.assertEqual(transport.sent[-1]["text"], leda_text("query_unavailable", "neutro", label=LABEL_A))
 
     def test_a_stale_hmi_context_is_rejected_before_the_parser_runs(self):
         owner_a = self.new_owner(SNAPSHOT_A, LABEL_A)
