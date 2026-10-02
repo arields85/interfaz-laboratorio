@@ -36,6 +36,7 @@ from .channel_a_activation import ChannelAActivation
 from .channel_a_bot import send_chat_action_unless_answered
 from .channel_a_configuration import ChannelAConfigurationStore
 from .channel_a_manager import ChannelAManager
+from .http_keepalive import keepalive_session
 from .channel_a_pairing import OPAQUE_CHARS, LEDA_CHANNEL_A_CONFLICT, ChannelAPairingConflict
 from .channel_a_transport import ChannelATransport
 from .credential_store import CredentialService
@@ -729,11 +730,11 @@ class TelegramLocalBot:
         # Optional resolver of the configured copy register, read for every fixed reply addressed to the user.
         # Left unset (or failing) the replies stay in the default usted register.
         self.copy_register = copy_register
-        self.api_base, self.session = api_base.rstrip("/"), requests.Session()
+        self.api_base, self.session = api_base.rstrip("/"), keepalive_session()
         # The admin HTTP thread's approval notice gets its own session: a lock around the shared one
         # would make the notice (and the admin request) wait out a 35 s getUpdates long poll. Notices
         # share this one session among themselves, so they are serialized by their own lock.
-        self._notice_session, self._notice_lock = requests.Session(), threading.Lock()
+        self._notice_session, self._notice_lock = keepalive_session(), threading.Lock()
         # B1: both optional -- a bot built without them (e.g. build_telegram_
         # bot's legacy standalone path) simply never requests a Channel B
         # voice reply; _request_channel_b_voice_reply is a no-op in that case.

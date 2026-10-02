@@ -87,6 +87,7 @@ from .channel_a_bot import (
     MAX_TELEGRAM_ID,
 )
 from .credential_store import MAX_SECRET_BYTES
+from .http_keepalive import mount_keepalive
 
 # T5: no `logging.basicConfig` exists anywhere in this runtime (see the T16
 # comment in `channel_a_manager.py`); a module logger with no handler falls
@@ -404,6 +405,7 @@ def _default_session() -> object:
     session = requests.Session()
     try:
         session.trust_env = False
+        mount_keepalive(session)
     except Exception:
         _close_quietly(session)
         raise _unavailable() from None

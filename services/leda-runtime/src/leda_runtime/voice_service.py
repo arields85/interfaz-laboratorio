@@ -33,6 +33,7 @@ from flask import Flask, Response, jsonify, request
 from .access_log_redaction import install_access_log_query_redaction
 from .audio_observability import BoundedAudioSink
 from .credential_store import CredentialService
+from .http_keepalive import keepalive_session
 from .event_audio import AudioCapacityError, AudioCoordinator, AudioCoordinatorError
 from .hmi_sessions import CAPABILITY_HEADER
 from .gemini_credentials import GeminiCredentialResolver, GeminiCredentialUnavailable, WarmGeminiClient, create_gemini_client
@@ -81,7 +82,7 @@ CHANNELS = 1
 SAMPLE_WIDTH = 2
 LEDA_VOICE_HOST = "127.0.0.1"
 leda_audio_sink = BoundedAudioSink()
-_TELEGRAM_HTTP_SESSION = requests.Session()
+_TELEGRAM_HTTP_SESSION = keepalive_session()
 _TELEGRAM_HTTP_LOCK = threading.Lock()
 _VOICE_EVENT_URL = "http://127.0.0.1:5057/internal/leda/voice-events"
 _VOICE_EVENT_MAX_BYTES = 32 * 1024
