@@ -103,3 +103,12 @@ Default test-first policy:
   - **Sessions switched:** `TelegramLocalBot.session` and `_notice_session` (`local_presentation.py`), `_TELEGRAM_HTTP_SESSION` (`voice_service.py`), the Channel A default session (`channel_a_transport.py:_default_session`, `trust_env=False` kept).
   - **Not switched:** `telegram_verification.py` (one-shot verification session, outside the allowed surface) and loopback or non-Telegram sessions.
   - **W3 `getMe` keep-warm kept:** it is cheap and measured working; it also refreshes the connection at the application layer where TCP keep-alive cannot (for example a middlebox that ignores keep-alive probes).
+- 2026-10-02: W3/W3b native review (slice `a2f8b40..c98f7f7`, medium, 527 lines): **approved** and acknowledged (lineage `review-97936ac8519484b3`).
+  - Follow-ups: `R3-probe-holds-send-lock` (`voice_service.py:156-157`: a slow getMe can delay a send by up to 5 s), `R3-proxy-path-no-keepalive`, `R3-main-wiring-probe-first-unasserted`.
+- 2026-10-02 16:44: **W4 attempt 2 failed for the text.** Cold `text_send_ms=20908` (second question 372 ms). Voice OK: `send_voice_ms` 778/833 ms.
+  - The text delay is almost identical to the first attempt (20932 ms) and equals the 20 s `sendMessage` timeout plus about 0.9 s.
+  - **Refined root cause (measured):** IPv6 to api.telegram.org fails intermittently from this network. Repeated connect probes: IPv4 149.154.166.110 succeeded 6 of 6 (about 235 ms); IPv6 2001:67c:4e8:f004::9 timed out 1 of 6.
+  - urllib3 tries the IPv6 address first (getaddrinfo order). A NEW connection hitting the bad IPv6 attempt waits the whole connect timeout (20 s presentation `sendMessage`, 5 s voice `sendChatAction`/getMe) before falling back to IPv4.
+  - This also explains the earlier 4.5-5.3 s voice cases.
+  - TCP keep-alive (W3b) does not help, because the delay is in opening a connection, not in a stale one.
+- [ ] W3c — Prefer IPv4 for Telegram connections, with IPv6 fallback only when no IPv4 address exists. Route: delegated.
