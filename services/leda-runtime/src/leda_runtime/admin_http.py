@@ -115,6 +115,12 @@ def parse_chat_id(raw: str) -> int | None:
     return value if str(value) == raw else None
 
 
+def _error_code(error: Exception, fallback: str) -> str:
+    """The closed wire code an HMI-config error carries as ``args[0]``, or ``fallback`` when it carries none."""
+    code = error.args[0] if error.args else None
+    return code if isinstance(code, str) and code else fallback
+
+
 # Frozen admin Channel A wire contract: exactly ten status keys (T15 adds
 # `paired`, T16 adds `retrying`/`retryAttempt`) with a nested activation
 # projection; no raw manager object or credential is ever exposed.
@@ -526,9 +532,9 @@ class AdminHttpBoundary:
             try:
                 revision = self.hmi_config_store.apply_batch(*batch)
             except HmiConfigInvalid as error:
-                return self._error(error.args[0], 400)
+                return self._error(_error_code(error, "HMI_CONFIG_INVALID_REQUEST"), 400)
             except HmiConfigTooLarge as error:
-                return self._error(error.args[0], 413)
+                return self._error(_error_code(error, "HMI_CONFIG_DOCUMENT_TOO_LARGE"), 413)
             except HmiConfigUnavailable:
                 return self._error("HMI_CONFIG_UNAVAILABLE", 503)
             response = jsonify({"ok": True, "revision": revision})

@@ -263,6 +263,12 @@ class HmiConfigHttpTests(unittest.TestCase):
         for route in (READ_ROUTE, REVISION_ROUTE):
             self.assertEqual(client.get(route, environ_overrides=self.environ).status_code, 503)
 
+    def test_an_invalid_error_without_a_code_still_reports_the_generic_invalid_request(self) -> None:
+        self.store.apply_batch = Mock(side_effect=HmiConfigInvalid())
+        response = self.write({"set": {"hmi:a": "1"}})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "HMI_CONFIG_INVALID_REQUEST"})
+
     def test_missing_store_write_reports_unavailable(self) -> None:
         boundary = AdminHttpBoundary(self.auth)
         client = create_app(
