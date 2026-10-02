@@ -151,9 +151,9 @@ def _telegram_token():
     # encoder creation, both gated on this). Protected mode resolves the
     # SAME "telegram" secret the presentation process's own Channel B bot
     # construction already reads (see local_presentation.create_app's
-    # TelegramCredentialResolver(os.environ, lambda: credentials)); the
-    # LEDA_LOCAL_TELEGRAM_ENABLED opt-in gate still applies in both modes,
-    # exactly as read_telegram_config already enforced for environment mode.
+    # TelegramCredentialResolver(os.environ, lambda: credentials)). The
+    # LEDA_LOCAL_TELEGRAM_ENABLED opt-in gate applies only in environment
+    # mode; in protected mode Channel B follows its stored admin credential.
     config = read_telegram_config()
     if not config.enabled:
         return ""
