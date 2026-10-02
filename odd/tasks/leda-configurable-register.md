@@ -11,12 +11,12 @@ Today every Spanish text addressed to the user uses "usted" (AGENTS.md §5, docs
 - **rioplatense** (vos: "podés", "ingresá", "tu");
 - **neutro** (tú: "puedes", "ingresa", "tu").
 
-It applies to Leda's fixed messages (Channel A, Channel B, voice-note replies) and to the HMI UI copy.
+It applies ONLY to Leda's fixed messages (Channel A, Channel B, voice-note replies). The HMI UI copy stays in usted (user decision 2026-10-02).
 
 ## User decisions (2026-10-01)
 
 - Three registers: usted, rioplatense and neutro. Default usted.
-- The HMI adopts the setting too, not only Leda.
+- ~~The HMI adopts the setting too~~ — superseded on 2026-10-02: the user clarified that only Leda changes; the HMI stays in usted. ("La hmi también lo adopta" had been read as the HMI copy changing too.)
 - Default taken (the user can override): ONE global setting for the HMI and both Leda channels.
 
 ## Findings (read-only map, 2026-10-02)
@@ -45,19 +45,19 @@ It applies to Leda's fixed messages (Channel A, Channel B, voice-note replies) a
   - A small typed helper, `RegisterCopy = { usted, rioplatense, neutro }`, plus a hook that reads the shared config value, so components pick the active variant.
   - Copy moves into per-area copy modules, next to the components, like `channelBAccessCopy.ts`.
   - Impersonal labels stay as they are.
-- **Admin UI.** A "Trato al usuario" selector in Configuración general → Opciones with three options. It is saved with Guardar like the rest of the dialog. The placement is a default; the user can move it.
+- **Admin UI.** A "Trato al usuario" selector with three options. R1 put it in Opciones; because the setting now affects only Leda, R3 moves it to the Leda tab and makes its helper text say it changes how Leda addresses people.
 - **Server validation.** The HMI-config PUT rejects values of `hmi:copy-register` other than the three registers.
-- **Rule change.** AGENTS.md §5 and docs/CONVENTIONS.md change from "siempre de usted" to "registro configurable, usted por defecto". New copy must be written in all three registers.
+- **Rule change.** AGENTS.md §5 and docs/CONVENTIONS.md: HMI text stays always in usted; Leda's fixed messages follow the configurable register (usted by default), and every new Leda fixed message must be added to `leda_copy.py` in all three registers.
 
 ## Tasks
 
 - [x] R1 — Setting: shared-config key, domain type, reader/writer, hook, server validation, and the "Trato al usuario" selector in Opciones. Route: delegated (runtime + HMI).
 - [x] R2 — Runtime: register-aware copy module for the ~28 fixed messages, the register resolver over `HmiConfigStore`, the bot wiring, and a register test matrix that replaces the usted-only guards. Route: delegated.
-- [ ] R3 — HMI copy mechanism: the helper and hook, migrating `channelBAccessCopy.ts`, Leda pairing (`LedaPairingControl.tsx`) and auth/login (`LoginOverlay`, `SessionReplacedNotice`, `adminSession.controller`). Route: delegated.
-- [ ] R4 — HMI sweep, admin components (`components/admin/**`: dialogs, settings, PropertyDock, BuilderCanvas, VoiceCredentialSettings…). Route: delegated.
-- [ ] R5 — HMI sweep, admin pages, widgets, layout, ui and viewer. Route: delegated.
+- [ ] R3 — Move the "Trato al usuario" selector from Opciones to the Leda tab, with Leda-only helper text, keeping the dialog's Guardar flow. Route: delegated.
+- [-] ~~R4 — HMI sweep, admin components~~ — cancelled (scope is Leda only).
+- [-] ~~R5 — HMI sweep, admin pages, widgets, layout, ui and viewer~~ — cancelled (scope is Leda only). The first R3 attempt (HMI copy mechanism, commit `0b30545` plus uncommitted area changes) was stopped and discarded with `git reset --hard 5cedde5`.
 - [ ] R6 — Docs: AGENTS.md §5, docs/CONVENTIONS.md, ADMIN_CONVENTIONS.md and the Leda master document. Close PW-025 in `docs/PENDING_WORK.md`. Route: inline.
-- [ ] R7 — Live check (switch the register; check the HMI and both Telegram channels) and native review of the last slice.
+- [ ] R7 — Live check (switch the register; check both Telegram channels; the HMI copy stays usted) and native review of the last slice.
 
 ## TDD
 
