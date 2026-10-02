@@ -21,12 +21,18 @@
 
 ## Registro del texto visible al usuario (obligatorio)
 
-Todo texto en español visible para el usuario se escribe tratando de **usted**, nunca con voseo ni tuteo. Aplica a la HMI (etiquetas, mensajes, placeholders, tooltips, `aria-label`, errores), a los mensajes fijos de Leda (bot de Telegram, respuestas predefinidas) y a las instrucciones de estilo que se entregan a modelos de lenguaje.
+**HMI: siempre de usted.** Todo texto en español visible en la HMI se escribe tratando de **usted**, nunca con voseo ni tuteo: etiquetas, mensajes, placeholders, tooltips, `aria-label` y errores. Lo mismo aplica a las instrucciones de estilo que se entregan a modelos de lenguaje.
 
 - Correcto: «Ingrese su usuario», «Reinicie el lanzador», «Puede consultar…».
 - Incorrecto: «Ingresá tu usuario», «Reiniciá el lanzador», «Podés consultar…», «Ingresa tu usuario».
 - Preferir formas impersonales cuando alcanzan: «No se pudo iniciar Leda».
 - Los tests que buscan por texto o nombre accesible usan el mismo registro.
+
+**Mensajes fijos de Leda: registro configurable.** Los mensajes fijos de Leda (Canal A, Canal B y respuestas a notas de voz) siguen el ajuste «Trato al usuario» de Configuración general → Leda: **usted** (por defecto), **rioplatense** (vos) o **neutro** (tú).
+
+- Todo mensaje fijo nuevo de Leda se agrega a `services/leda-runtime/src/leda_runtime/leda_copy.py` con sus tres variantes, como oraciones completas (nunca reemplazando palabras sueltas).
+- La variante usted sigue las reglas de arriba. Rioplatense lleva tilde en el voseo («podés», «intentá»). Neutro usa tú («puedes», «intenta»).
+- Las respuestas con datos de Leda (`answer_from_snapshot`) van en tercera persona y no dependen del registro.
 
 ## Política anti-parches (obligatoria)
 
