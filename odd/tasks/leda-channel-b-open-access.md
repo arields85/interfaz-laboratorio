@@ -55,8 +55,8 @@ The user wants more people to use the bot (PW-022). The master document (§6.3, 
 - [x] B8 — Runtime: Channel B is enabled from the admin, not from the server. User decision (2026-10-02): everything must be controlled from the admin. Today the bot only starts with `LEDA_LOCAL_TELEGRAM_ENABLED=1` (`telegram_config.py:33`); without it, ▶ fails with `TELEGRAM_DISABLED` and every reboot leaves Channel B off. Mirror Channel A (`channel_a_manager.py:753`): in protected mode the bot is enabled exactly when its credential is stored and starts on boot; 🗑 deletion stops it. Remove the variable from `docs/DEPLOYMENT.md`. Route: delegated.
 - [x] B9 — HMI: show the same notification bell inside the admin (AdminLayout context bar, next to "SESIÓN ADMIN ACTIVA"). User request (2026-10-02, live check). It reuses `NotificationBell` and the shared query, with no duplicate polling logic. Route: delegated.
 - [x] B10 — Bug found in the live check (2026-10-02): Channel B answers "Todavía no hay datos del dashboard cargados." to approved chats while the HMI shows live data and keeps posting `/hmi/current-snapshot` (202). The branch did not touch that path. Root cause under investigation by a read-only explorer.
-- [ ] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
-- [ ] B7 — Live check with the real bot (request, approve, use, revoke) and native review of the work-unit commits.
+- [x] B6 — Docs: new Aclaración in `LEDA_DOCUMENTO_MAESTRO.md` §6.3, the poll-thread follow-up, and the PW-022 closure in `PENDING_WORK.md`. Route: inline.
+- [x] B7 — Live check with the real bot (request, approve, use, revoke) and native review of the work-unit commits.
 
 ## TDD
 
@@ -163,6 +163,14 @@ Strict mode ON (source: global user configuration). Runners:
 - 2026-10-02: B10 closed. The user confirmed the cause (viewer not visible) and chose the clearer message; the definitive fix stays in PW-003.
   - New shared reply `NO_DASHBOARD_OPEN_REPLY`: "En este momento no hay ningún dashboard abierto en la HMI. Vuelva a consultar cuando haya uno en pantalla." It replaces "Todavía no hay datos del dashboard cargados." in `answer_from_snapshot`, so all three channels use it.
   - RED: the test module failed to import the constant. GREEN: full runtime suite 2010 tests OK.
+
+- 2026-10-02: B7 closed, live check passed (user screenshots):
+  - a new account (Cristina) requested access with /start, appeared in the viewer bell, the admin bell and the Leda tab, was approved and got the notice;
+  - revoked from the Leda tab, the list showed "Acceso de Cristina revocado." and moved her to "Rechazados o revocados", and her next message got "No tiene acceso a este asistente.";
+  - with no visible viewer, the bot answered with `NO_DASHBOARD_OPEN_REPLY`, text plus voice note.
+  - B6 closed: PW-022 removed from `docs/PENDING_WORK.md`.
+  - Last native review boundary `4528464`; `1088678..116afc1` (36 lines, medium) stayed `under_budget` and unreviewed.
+  - Next: merge and push are the user's decision; tell IT that `docs/DEPLOYMENT.md` changed (Channel B nginx routes, no Telegram env var).
 
 ## Acceptance criteria
 
