@@ -52,7 +52,7 @@ It applies to Leda's fixed messages (Channel A, Channel B, voice-note replies) a
 ## Tasks
 
 - [x] R1 — Setting: shared-config key, domain type, reader/writer, hook, server validation, and the "Trato al usuario" selector in Opciones. Route: delegated (runtime + HMI).
-- [ ] R2 — Runtime: register-aware copy module for the ~28 fixed messages, the register resolver over `HmiConfigStore`, the bot wiring, and a register test matrix that replaces the usted-only guards. Route: delegated.
+- [x] R2 — Runtime: register-aware copy module for the ~28 fixed messages, the register resolver over `HmiConfigStore`, the bot wiring, and a register test matrix that replaces the usted-only guards. Route: delegated.
 - [ ] R3 — HMI copy mechanism: the helper and hook, migrating `channelBAccessCopy.ts`, Leda pairing (`LedaPairingControl.tsx`) and auth/login (`LoginOverlay`, `SessionReplacedNotice`, `adminSession.controller`). Route: delegated.
 - [ ] R4 — HMI sweep, admin components (`components/admin/**`: dialogs, settings, PropertyDock, BuilderCanvas, VoiceCredentialSettings…). Route: delegated.
 - [ ] R5 — HMI sweep, admin pages, widgets, layout, ui and viewer. Route: delegated.
@@ -89,4 +89,8 @@ Strict mode ON (global configuration). Runners:
   - `R3-001` (`admin_http.py:528-529`, `error.args[0]` without args) is folded into R2.
   - Not fixed: `R3-002` (`copyRegister.ts:26`) and `R3-003` (`ConnectionSettingsTab.tsx:428`).
   - Parent spot check: `test_copy_register.py` OK; the HMI copyRegister suites, 12 tests, OK.
-  - R2 started (delegated).
+  - R2 done (delegated writer). Commits bb7a237 (`fix(leda-runtime)`: R3-001, a code-less `HmiConfigInvalid`/`HmiConfigTooLarge` now answers `HMI_CONFIG_INVALID_REQUEST`/`HMI_CONFIG_DOCUMENT_TOO_LARGE` instead of an `IndexError` 500) and 220752c (register-aware fixed messages).
+  - Design: `leda_copy.py` holds 23 message ids as `{usted, rioplatense, neutro}` whole-sentence templates (`leda_text`, `leda_template`); the usted variants are byte-identical to the previous literals and the old constant names stay importable as the usted values. `copy_register.py` adds `CopyRegisterResolver` (TTL 5 s, injectable clock, any store failure reads as usted) and `active_register`. `create_app` builds one `HmiConfigStore` and one resolver, shared by the admin boundary, the Channel B bot factory, the Channel A activation (dialogue and query notice) and `/local/ask`.
+  - Message ids: no_dashboard_open, access_requested, access_requests_full, access_request_hint, access_pending, access_denied, access_approved, message_limit, migration_restart, bot_ready, bot_help, voice_note_too_long, voice_note_too_large, voice_note_download_failed, voice_note_transcription_empty, voice_note_transcription_unavailable, confirmation_prompt, welcome, destination_unavailable, action_refused, inactivity_warning, unlink_confirm_prompt, query_unavailable.
+  - RED: 7 test modules failed to import (`leda_copy`, `COPY_REGISTER_TTL_SECONDS`, `active_register` missing) and the R3-001 case returned 500 instead of 400. GREEN: runtime 2075 tests OK (was 2020).
+  - Known limit: Channel A hands `answer_from_snapshot` itself as `parse` (pinned by `test_channel_a_root`), so its no-dashboard text stays usted; that branch is practically unreachable there because Channel A fails closed on a missing context (only a context without a `widgets` list would hit it).
