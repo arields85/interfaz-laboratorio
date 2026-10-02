@@ -19,6 +19,7 @@ import time
 from collections import deque
 from pathlib import Path
 import unicodedata
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -61,6 +62,7 @@ from .telegram_lifecycle import (
     project_telegram_diagnostic,
 )
 from .telegram_verification import TelegramTokenVerificationService
+from .timing_log import StageTimer, elapsed_ms, install_timing_log_handler, log_timing
 from .voice_events import (
     VOICE_EVENT_KIND_CANCEL,
     VOICE_EVENT_KIND_THINKING,
@@ -312,6 +314,16 @@ def _fire_voice_prefetch(local_http: requests.Session, voice_url: str, event_id:
         _logger.warning("Leda voice prefetch rejected: reason=%s", type(error).__name__)
 
 
+def _telegram_lag_seconds(message):
+    """Whole seconds between Telegram's own message timestamp and now, or None.
+    Only a number is ever returned (and logged); wall clocks are compared, so a
+    skewed local clock shows up as a constant offset, not as a negative value."""
+    sent_at = message.get("date") if isinstance(message, dict) else None
+    if isinstance(sent_at, bool) or not isinstance(sent_at, (int, float)):
+        return None
+    return max(0, round(time.time() - sent_at))
+
+
 def _fire_channel_b_voice_reply(local_http: requests.Session, voice_url: str, token: str) -> None:
     """B1: Channel B's own on-answer voice request. Fired on its own
     background thread by TelegramLocalBot._request_channel_b_voice_reply,
@@ -321,16 +333,19 @@ def _fire_channel_b_voice_reply(local_http: requests.Session, voice_url: str, to
     HMI owner and no published voice event, so it never touches the shared
     voice_events store (see VoiceEventStore.mint_channel_b_reply_token). A
     slow or failed request simply means no voice note this time; nothing
-    here may ever raise."""
+    here may ever raise. Returns the HTTP status (only logged, as a number, by
+    the Channel B timing line) or None when the request itself failed."""
     try:
-        local_http.post(
+        response = local_http.post(
             f"{voice_url}/internal/leda/channel-b/telegram-voice-reply",
             json={},
             headers={CAPABILITY_HEADER: token},
             timeout=CHANNEL_B_VOICE_REPLY_TIMEOUT_SECONDS,
         )
+        status = getattr(response, "status_code", None)
+        return status if isinstance(status, int) and not isinstance(status, bool) else None
     except Exception:
-        pass
+        return None
 
 
 def _fire_channel_a_voice_prefetch(local_http: requests.Session, voice_url: str, event_id: str, token: str) -> None:
@@ -700,6 +715,11 @@ class TelegramLocalBot:
     never overwrite a live lease.
     """
 
+    # PW-026: the timer of the message currently being handled (the poll loop
+    # handles one message at a time); lets the voice-note helpers record their
+    # own stages without changing their signatures.
+    _message_timer = None
+
     def __init__(self, token, snapshot_store, state_store, voice_events, api_base=DEFAULT_TELEGRAM_API_URL, reservation=None, voice_url=None, local_http=None, session_registry=None, typing_enabled=False, rate_limiter=None, audit_log=None, copy_register=None):
         self.token, self.snapshot_store, self.state_store, self.voice_events = token, snapshot_store, state_store, voice_events
         # Channel B admission safeguards: a per-chat message limit (always on) and an
@@ -1043,6 +1063,28 @@ class TelegramLocalBot:
         return True
 
     def _handle_message(self, message, *, migration_active=False):
+        """PW-026: times one handled message and logs ONE redacted line (stage
+        durations in ms plus a short outcome token) on the ``leda_runtime.timing``
+        logger. Messages that are ignored outright (not a private text/voice
+        message) log nothing."""
+        timer = StageTimer()
+        self._message_timer = timer
+        try:
+            self._handle_message_timed(message, migration_active, timer)
+        except Exception:
+            if timer.outcome is None:
+                timer.outcome = "error"
+            raise
+        finally:
+            self._message_timer = None
+            if timer.outcome is not None:
+                timer.emit("Leda Channel B timing:", outcome=timer.outcome, telegram_lag_s=_telegram_lag_seconds(message))
+
+    def _timed_stage(self, name):
+        timer = self._message_timer
+        return timer.stage(name) if timer is not None else nullcontext()
+
+    def _handle_message_timed(self, message, migration_active, timer):
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}; chat_id = chat.get("id")
         text, voice = message.get("text"), message.get("voice")
         has_text, has_voice = isinstance(text, str), isinstance(voice, dict) and not isinstance(text, str)
@@ -1050,18 +1092,24 @@ class TelegramLocalBot:
         command = normalize(text.split()[0]) if has_text and text.strip() else ""
         is_start = command.startswith("/start")
         # Per-chat limit, before any other work: it caps the fixed replies of chats without access too.
-        verdict = self.rate_limiter.admit(chat_id)
+        with timer.stage("status"):
+            verdict = self.rate_limiter.admit(chat_id)
         if verdict is not MessageVerdict.ALLOWED:
+            timer.outcome = "limited"
             if verdict is MessageVerdict.LIMITED_NOTIFY and self.state_store.status_of(self.bot_id, chat_id) == "approved":
                 self.send_message(chat_id, self._text("message_limit"))
             return
         if is_start and migration_active:
+            timer.outcome = "start"
             self.send_message(chat_id, self._text("migration_restart")); return
         # Read on every message, never cached: an admin revocation must apply to the very next one.
-        status = self.state_store.status_of(self.bot_id, chat_id)
+        with timer.stage("status"):
+            status = self.state_store.status_of(self.bot_id, chat_id)
         if status != "approved":
+            timer.outcome = "unapproved"
             self._reply_to_unapproved(chat_id, status, message, chat, is_start=is_start); return
         if is_start:
+            timer.outcome = "start"
             self.send_message(chat_id, self._text("bot_ready")); return
         # Live test 2026-09-25 (F6): "typing…" while this paired chat's
         # question (text or voice note) is processed, non-blocking, marked
@@ -1077,14 +1125,22 @@ class TelegramLocalBot:
             if has_voice:
                 transcript = self._transcribe_voice_note(chat_id, message.get("message_id"), voice)
                 if transcript is None:
+                    timer.outcome = "voice_failed"
                     return
                 text = transcript
             if command.startswith("/status"):
+                timer.outcome = "command"
                 snapshot = self._active_snapshot(); self.send_message(chat_id, f"Leda está activa. Última actualización de datos: {snapshot.get('timestamp') if snapshot else 'sin datos' }."); return
             if command.startswith("/help"):
+                timer.outcome = "command"
                 self.send_message(chat_id, self._text("bot_help")); return
-            answer = answer_from_snapshot(self._active_snapshot(), text, self.copy_register); self.send_message(chat_id, answer.answer_text)
-            self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
+            with timer.stage("answer"):
+                answer = answer_from_snapshot(self._active_snapshot(), text, self.copy_register)
+            timer.outcome = "answered"
+            with timer.stage("text_send"):
+                self.send_message(chat_id, answer.answer_text)
+            with timer.stage("voice_enqueue"):
+                self._request_channel_b_voice_reply(chat_id, message.get("message_id"), answer.answer_text)
         finally:
             if answered is not None:
                 answered.set()
@@ -1112,8 +1168,9 @@ class TelegramLocalBot:
             self.send_message(chat_id, self._voice_reply("voice_note_too_large"))
             return None
         try:
-            file_path = self._call("getFile", timeout=20, data={"file_id": file_id}).get("result", {}).get("file_path")
-            audio_bytes = self._download_voice_file(file_path)
+            with self._timed_stage("download"):
+                file_path = self._call("getFile", timeout=20, data={"file_id": file_id}).get("result", {}).get("file_path")
+                audio_bytes = self._download_voice_file(file_path)
             if not audio_bytes:
                 raise RuntimeError("TELEGRAM_VOICE_FILE_EMPTY")
         except Exception:
@@ -1126,7 +1183,8 @@ class TelegramLocalBot:
         try:
             audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
             token = self.voice_events.mint_voice_transcription_token(audio_base64, mime_type, extra_terms)
-            return _request_voice_transcription(self.local_http, self.voice_url, token)
+            with self._timed_stage("transcription"):
+                return _request_voice_transcription(self.local_http, self.voice_url, token)
         except VoiceTranscriptionEmpty:
             self.send_message(chat_id, self._voice_reply("voice_note_transcription_empty"))
             return None
@@ -1204,7 +1262,7 @@ class TelegramLocalBot:
             if len(queue) >= CHANNEL_B_VOICE_QUEUE_MAX_PENDING:
                 _logger.warning("Leda channel B voice reply: queue full for this chat, answering text-only")
                 return
-            queue.append((reply_to_message_id, answer_text))
+            queue.append((reply_to_message_id, answer_text, time.monotonic()))
             start_worker = len(queue) == 1
 
         if start_worker:
@@ -1226,12 +1284,25 @@ class TelegramLocalBot:
                 queue = self._channel_b_voice_queues.get(chat_id)
                 if not queue:
                     return
-                reply_to_message_id, answer_text = queue[0]
+                reply_to_message_id, answer_text, enqueued_at = queue[0]
+            # PW-026: one redacted line per voice request -- how long it waited
+            # behind earlier ones, the token mint, and the HTTP round trip to
+            # the voice process (which covers its whole TTS + sendVoice).
+            timer = StageTimer()
+            timer.add("queue_wait", elapsed_ms(enqueued_at))
+            outcome, http_status = "dispatched", None
             try:
-                token = self.voice_events.mint_channel_b_reply_token(chat_id, answer_text, reply_to_message_id)
-                _fire_channel_b_voice_reply(self.local_http, self.voice_url, token)
+                with timer.stage("mint"):
+                    token = self.voice_events.mint_channel_b_reply_token(chat_id, answer_text, reply_to_message_id)
+                with timer.stage("voice_request"):
+                    http_status = _fire_channel_b_voice_reply(self.local_http, self.voice_url, token)
             except Exception:
+                outcome = "failed"
                 _logger.warning("Leda channel B voice reply: mint or dispatch failed")
+            leading = {"outcome": outcome}
+            if isinstance(http_status, int) and not isinstance(http_status, bool):
+                timer.set("http_status", http_status)
+            timer.emit("Leda Channel B voice request timing:", **leading)
             with self._channel_b_voice_lock:
                 queue = self._channel_b_voice_queues.get(chat_id)
                 if queue:
@@ -1286,7 +1357,10 @@ class TelegramLocalBot:
                 offset = record["nextUpdateOffset"]
                 request_data = {"timeout": 0 if migration_active else 25, **({"offset": offset} if offset is not None else {})}
                 self._note_stage("poll")
+                poll_started = time.monotonic()
                 payload = self._call("getUpdates", timeout=35, data=request_data)
+                poll_wait_ms = elapsed_ms(poll_started)
+                offset_ms = 0
                 self._note_stage("validate")
                 updates = payload.get("result")
                 if not isinstance(updates, list):
@@ -1322,8 +1396,14 @@ class TelegramLocalBot:
                         self._note_stage("handle")
                         self._handle_message(message, migration_active=migration_active)
                     self._note_stage("persist")
+                    offset_started = time.monotonic()
                     self.state_store.set_offset(self.bot_id, update_id + 1)
+                    offset_ms += elapsed_ms(offset_started)
                     current_offset = update_id + 1
+                if validated_updates:
+                    # PW-026: one line per non-empty batch; the poll_wait_ms of an
+                    # idle long poll is how long it stayed open before delivering.
+                    log_timing("Leda Channel B poll timing:", {"updates": len(validated_updates), "poll_wait_ms": poll_wait_ms, "offset_ms": offset_ms})
                 self.last_error = None
                 self._note_poll_success()
             except Exception as error:
@@ -1995,6 +2075,7 @@ def main():
     if telegram_manager: telegram_manager.startup_apply()
     if channel_a_manager: channel_a_manager.startup_apply()
     install_access_log_query_redaction()
+    install_timing_log_handler()
     try: app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, threaded=True, use_reloader=False)
     finally:
         if channel_a_manager: channel_a_manager.stop()

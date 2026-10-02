@@ -23,6 +23,7 @@ import threading
 import time
 import wave
 from collections import OrderedDict
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -48,6 +49,7 @@ from .voice_transcription import (
     VoiceTranscriptionUnavailable,
     transcribe_voice_note,
 )
+from .timing_log import StageTimer, elapsed_ms, install_timing_log_handler, log_timing
 
 
 app = Flask(__name__)
@@ -60,6 +62,9 @@ app = Flask(__name__)
 # (e.g. `logging.basicConfig(level=logging.INFO)`) to see it. Only a
 # duration is ever logged, never an event id, question or answer text.
 _logger = logging.getLogger(__name__)
+# PW-026: whether the most recent get_gemini_client() call on this thread reused
+# the warm client; read by the Channel B voice timing line.
+_timing_context = threading.local()
 # T11: switched from gemini-3.1-flash-tts-preview (Interactions API,
 # client.interactions.create) to the stable gemini-3.8-flash-lite-tts model
 # via client.models.generate_content_stream -- user-authorized decision
@@ -280,6 +285,13 @@ def _cancel_telegram_job(job):
     if encoder is not None: encoder.cancel()
 
 
+def _job_stage(job, name):
+    """PW-026: a timing stage on the job's Channel B timer, or a no-op for every
+    other caller (HMI voice, Channel A), which never attaches one."""
+    timer = job.get("timing") if isinstance(job, dict) else None
+    return timer.stage(name) if timer is not None else nullcontext()
+
+
 def _send_same_leda_audio_to_telegram(job):
     if not job or not _valid_telegram_chat_id(job.get("telegram_chat_id")): return
     event_id = _safe_event_id(job.get("event_id"))
@@ -293,7 +305,8 @@ def _send_same_leda_audio_to_telegram(job):
         _logger.warning("Telegram voice delivery cancelled: no bot token available (event_id=%s)", event_id)
         _cancel_telegram_job(job)
         return
-    ogg_data = encoder.finish_and_get(timeout=15) if encoder else None; base = os.environ.get("TELEGRAM_BOT_API_BASE", "https://api.telegram.org").rstrip("/"); chat_id = job["telegram_chat_id"]
+    with _job_stage(job, "opus_finish"): ogg_data = encoder.finish_and_get(timeout=15) if encoder else None
+    base = os.environ.get("TELEGRAM_BOT_API_BASE", "https://api.telegram.org").rstrip("/"); chat_id = job["telegram_chat_id"]
     # B1: reply to the question message when one was bound at job creation
     # (Channel B), so text and audio stay visually paired under overlapping
     # questions. Absent for every other caller (Channel A, HMI prefetch),
@@ -304,8 +317,11 @@ def _send_same_leda_audio_to_telegram(job):
     reply_data = {"reply_to_message_id": reply_to} if reply_to else {}
     if ogg_data:
         try:
-            response = _telegram_post(f"{base}/bot{token}/sendVoice", data={"chat_id": str(chat_id), **reply_data}, files={"voice": (f"leda_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
-            if 200 <= response.status_code < 300: return
+            with _job_stage(job, "send_voice"):
+                response = _telegram_post(f"{base}/bot{token}/sendVoice", data={"chat_id": str(chat_id), **reply_data}, files={"voice": (f"leda_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
+            if 200 <= response.status_code < 300:
+                job["timing_sent"] = True
+                return
         except Exception: pass
         try:
             response = _telegram_post(f"{base}/bot{token}/sendDocument", data={"chat_id": str(chat_id), "caption": "Respuesta por voz de Leda", **reply_data}, files={"document": (f"leda_{event_id}.ogg", ogg_data, "audio/ogg")}, timeout=15)
@@ -326,6 +342,8 @@ def _queue_same_leda_audio_to_telegram(job):
     if not job or job.get("telegram_delivery_queued") or not _valid_telegram_chat_id(job.get("telegram_chat_id")) or not job.get("telegram_pcm_parts"): return
     if job.get("cancelled") is not None and job["cancelled"].is_set(): _cancel_telegram_job(job); return
     job["telegram_delivery_queued"] = True; stop = job.get("telegram_chat_action_stop")
+    timer = job.get("timing")
+    if timer is not None: timer.stop("tts_total")
     if stop is not None: stop.set()
     _send_same_leda_audio_to_telegram(job)
 
@@ -450,6 +468,7 @@ def get_gemini_client(secret=None):
     resolve_elapsed_ms = round((time.monotonic() - resolve_start) * 1000)
     build_start = time.monotonic()
     client, reused = _warm_gemini_client.get(resolved)
+    _timing_context.client_reused = reused
     build_elapsed_ms = round((time.monotonic() - build_start) * 1000)
     _logger.info(
         "Leda Gemini client: resolve_elapsed_ms=%d build_elapsed_ms=%d reused=%s",
@@ -756,6 +775,8 @@ def _generate_tts_audio(job, secret=None, control=None):
     # A hit replays already-DSP-processed PCM straight from memory and never
     # calls Gemini; a miss falls through to the normal streaming path below,
     # which stores its result in the cache once it completes successfully.
+    timer = job.get("timing")
+    if timer is not None: timer.start("tts_total")
     cache_key = _voice_audio_cache_key(job)
     cached = _voice_audio_cache.get(cache_key)
     if cached is not None:
@@ -786,7 +807,9 @@ def _generate_tts_audio(job, secret=None, control=None):
             # never registered for cancel-callback close, and never closed in
             # this generator's `finally` below -- only the per-request stream
             # and idle guard are.
+            _timing_context.client_reused = None
             client = get_gemini_client(secret)
+            client_reused = getattr(_timing_context, "client_reused", None)
             stream_requested_at = time.monotonic()
             stream = _create_tts_stream(client, job["text"])
             if control is not None: control.add_cancel_callback(lambda resource=stream: _close_tts_stream(resource))
@@ -797,6 +820,9 @@ def _generate_tts_audio(job, secret=None, control=None):
                 if control is not None and control.cancelled.is_set(): return
                 if first_byte_at is None:
                     first_byte_at = time.monotonic()
+                    if timer is not None:
+                        if client_reused is not None: timer.set("gemini_client_reused", client_reused)
+                        timer.add("gemini_ttfb", elapsed_ms(stream_requested_at, first_byte_at))
                     _logger.info(
                         "Leda Gemini TTS: time_to_first_byte_ms=%d",
                         round((first_byte_at - stream_requested_at) * 1000),
@@ -1029,13 +1055,24 @@ def _deliver_channel_b_voice_reply(payload):
     the shared voice_events store, since Channel B has no HMI owner and no
     published voice event. The generator is drained for its Telegram-delivery
     side effect only; nothing streams back over HTTP here."""
-    job = _create_interactions_tts_job(
-        payload["text"],
-        telegram_chat_id=payload["chatId"],
-        telegram_reply_to_message_id=payload.get("replyToMessageId"),
-    )
-    for _chunk in _generate_tts_audio(job):
-        pass
+    # PW-026: one redacted line per Channel B voice reply -- stage durations
+    # (ms), whether the warm Gemini client was reused, and a short outcome token;
+    # never the text, the chat id or an exception message.
+    timer = StageTimer()
+    outcome = "error"
+    try:
+        with timer.stage("job_create"):
+            job = _create_interactions_tts_job(
+                payload["text"],
+                telegram_chat_id=payload["chatId"],
+                telegram_reply_to_message_id=payload.get("replyToMessageId"),
+            )
+        job["timing"] = timer
+        for _chunk in _generate_tts_audio(job):
+            pass
+        outcome = "sent" if job.get("timing_sent") else "send_failed"
+    finally:
+        timer.emit("Leda Channel B voice timing:", outcome=outcome)
 
 
 def _generate_event_audio(event, voice_config, secret, control):
@@ -1343,24 +1380,28 @@ def _warm_up_gemini_client_in_background():
     lookup -- the same call GeminiVerificationService already uses to
     verify a key, consuming no generation quota -- forces that connection
     now, at boot, where nobody is waiting on it."""
+    started = time.monotonic()
+    stage = "credential"
     try:
         secret = gemini_credentials.resolve()
-    except Exception:
-        return
-    try:
+        stage = "client"
         client, _reused = _warm_gemini_client.get(secret)
-    except Exception:
-        return
-    try:
+        stage = "connect"
         client.models.get(model=TTS_MODEL)
-    except Exception:
-        pass
+    except Exception as error:
+        # PW-026: this used to swallow every failure silently. Only the stage
+        # and the exception TYPE are logged (never the message, which could
+        # echo a credential); the first real request still builds lazily.
+        log_timing("Leda Gemini warm-up:", {"outcome": "failed", "stage": stage, "error_type": type(error).__name__, "elapsed_ms": elapsed_ms(started)})
+        return
+    log_timing("Leda Gemini warm-up:", {"outcome": "ok", "elapsed_ms": elapsed_ms(started)})
 
 
 def main():
     _validate_single_process_environment()
     threading.Thread(target=_warm_up_gemini_client_in_background, name="LedaGeminiWarmup", daemon=True).start()
     install_access_log_query_redaction()
+    install_timing_log_handler()
     app.run(host=LEDA_VOICE_HOST, port=5056, threaded=True, use_reloader=False)
 
 

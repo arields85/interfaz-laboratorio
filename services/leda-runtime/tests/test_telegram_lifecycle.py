@@ -23,7 +23,7 @@ from leda_runtime.bot_identity_reservation import (
     BotIdentityReservationError,
     process_bot_identity_reservation,
 )
-from leda_runtime.channel_b_admission import ChatMessageLimiter
+from leda_runtime.channel_b_admission import ChatMessageLimiter, MessageVerdict
 from leda_runtime.copy_register import COPY_REGISTER_KEY, COPY_REGISTER_TTL_SECONDS, CopyRegisterResolver
 from leda_runtime.hmi_sessions import HmiSessionRegistry
 from leda_runtime.leda_copy import leda_text
@@ -439,6 +439,25 @@ class TelegramLifecycleTests(unittest.TestCase):
         bot.run()
         self.assertEqual(handled, ["ten"])
         self.assertEqual(bot._record()["nextUpdateOffset"], 11)
+
+    def test_poll_batch_logs_one_redacted_timing_line_with_poll_wait_and_offset_cost(self):
+        state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [], "nextUpdateOffset": 10, "migrationActive": False}}}
+        bot = self.prepared_bot(state)
+        bot.stop_event = ImmediateStopEvent()
+        bot._handle_message = lambda message, **_kwargs: None
+        calls = 0
+        def call(_method, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"ok": True, "result": [{"update_id": 10, "message": {"text": "private question"}}]}
+            bot.stop_event.set(); return {"ok": True, "result": []}
+        bot._call = call
+        with self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            bot.run()
+        lines = [record.getMessage() for record in observed.records]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], r"^Leda Channel B poll timing: updates=1 poll_wait_ms=\d+ offset_ms=\d+$")
 
     def test_stop_before_send_keeps_update_unacknowledged(self):
         state = {"schemaVersion": 2, "bots": {"123": {"pairedPrivateChatIds": [7], "nextUpdateOffset": 5, "migrationActive": False}}}
@@ -1386,6 +1405,102 @@ class ChannelBVoiceReplyTests(unittest.TestCase):
         self.assertEqual(captured["voice_url"], "http://127.0.0.1:5056")
         payload = events.resolve_channel_b_reply_token(captured["token"])
         self.assertEqual(payload, {"chatId": 7, "text": "El OEE actual es 88,6 %.", "replyToMessageId": 55})
+
+    TIMING_LABEL = "Leda Channel B timing:"
+    TIMING_LINE = r"^Leda Channel B timing: outcome=%s( telegram_lag_s=\d+)?( (?:status|answer|text_send|voice_enqueue|download|transcription)_ms=\d+)+ total_ms=\d+$"
+
+    def timing_lines(self, observed):
+        return [record.getMessage() for record in observed.records if record.getMessage().startswith(self.TIMING_LABEL)]
+
+    def wait_for_voice_request_line(self, observed):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not any(
+            record.getMessage().startswith("Leda Channel B voice request timing:") for record in observed.records
+        ):
+            time.sleep(0.01)
+        return [record.getMessage() for record in observed.records if record.getMessage().startswith("Leda Channel B voice request timing:")]
+
+    def test_an_answered_question_logs_exactly_one_redacted_timing_line(self):
+        import leda_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", return_value=200), \
+                self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 55, "date": int(time.time()), "text": "¿Cuál es el OEE?"})
+        lines = self.timing_lines(observed)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], self.TIMING_LINE % "answered")
+        for key in ("status_ms=", "answer_ms=", "text_send_ms=", "voice_enqueue_ms=", "total_ms=", "telegram_lag_s="):
+            self.assertIn(key, lines[0])
+        for forbidden in ("OEE", "88", "¿", "995", "secret-token", "leda_bot"):
+            self.assertNotIn(forbidden, lines[0])
+
+    def test_a_voice_note_question_adds_download_and_transcription_stages(self):
+        import leda_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        with patch.object(bot, "_call", return_value={"result": {"file_path": "voice/a.oga"}}), \
+                patch.object(bot, "_download_voice_file", return_value=b"audio"), \
+                patch.object(local_presentation_module, "_request_voice_transcription", return_value="¿Cuál es el OEE?"), \
+                patch.object(local_presentation_module, "_fire_channel_b_voice_reply", return_value=200), \
+                self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 56, "voice": {"duration": 3, "file_id": "abc", "file_size": 1000}})
+        lines = self.timing_lines(observed)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], self.TIMING_LINE % "answered")
+        self.assertIn("download_ms=", lines[0])
+        self.assertIn("transcription_ms=", lines[0])
+        self.assertNotIn("OEE", lines[0])
+
+    def test_non_answer_outcomes_are_labelled_with_short_tokens(self):
+        cases = (
+            ("start", {"chat": {"id": 7, "type": "private"}, "message_id": 1, "text": "/start"}, None),
+            ("command", {"chat": {"id": 7, "type": "private"}, "message_id": 2, "text": "/help"}, None),
+            ("unapproved", {"chat": {"id": 8, "type": "private"}, "message_id": 3, "text": "hola"}, None),
+            ("limited", {"chat": {"id": 7, "type": "private"}, "message_id": 4, "text": "hola"}, MessageVerdict.LIMITED_SILENT),
+        )
+        for outcome, message, verdict in cases:
+            with self.subTest(outcome=outcome):
+                bot = self.build_bot(local_http=Mock())
+                if verdict is not None:
+                    bot.rate_limiter = Mock(admit=Mock(return_value=verdict))
+                with self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+                    bot._handle_message(message)
+                lines = self.timing_lines(observed)
+                self.assertEqual(len(lines), 1, lines)
+                self.assertRegex(lines[0], self.TIMING_LINE % outcome)
+
+    def test_ignored_updates_log_no_timing_line(self):
+        bot = self.build_bot(local_http=Mock())
+        with self.assertNoLogs("leda_runtime.timing", level="INFO"):
+            bot._handle_message({"chat": {"id": 7, "type": "group"}, "message_id": 1, "text": "hola"})
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 2})
+
+    def test_the_voice_request_worker_logs_queue_wait_mint_and_request_time_without_content(self):
+        import leda_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", return_value=200), \
+                self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 55, "text": "¿Cuál es el OEE?"})
+            lines = self.wait_for_voice_request_line(observed)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(
+            lines[0],
+            r"^Leda Channel B voice request timing: outcome=dispatched queue_wait_ms=\d+ mint_ms=\d+ voice_request_ms=\d+ http_status=200 total_ms=\d+$",
+        )
+
+    def test_a_failed_voice_dispatch_is_labelled_failed_in_the_request_line(self):
+        import leda_runtime.local_presentation as local_presentation_module
+
+        bot = self.build_bot(local_http=Mock())
+        with patch.object(local_presentation_module, "_fire_channel_b_voice_reply", side_effect=RuntimeError("secret detail")), \
+                self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            bot._handle_message({"chat": {"id": 7, "type": "private"}, "message_id": 55, "text": "¿Cuál es el OEE?"})
+            lines = self.wait_for_voice_request_line(observed)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("outcome=failed", lines[0])
+        self.assertNotIn("secret", lines[0])
 
     def test_informational_replies_never_trigger_a_voice_request(self):
         import leda_runtime.local_presentation as local_presentation_module

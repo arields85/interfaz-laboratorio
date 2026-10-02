@@ -697,6 +697,117 @@ class VoiceServiceTests(unittest.TestCase):
                 patch.object(service._warm_gemini_client, "get", return_value=(fake_client, False)):
             service._warm_up_gemini_client_in_background()  # must not raise
 
+    def test_boot_warm_up_logs_success_with_its_elapsed_time(self):
+        fake_client = Mock()
+        with patch.object(service.gemini_credentials, "resolve", return_value="secret-value"), \
+                patch.object(service._warm_gemini_client, "get", return_value=(fake_client, False)), \
+                self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            service._warm_up_gemini_client_in_background()
+        lines = [record.getMessage() for record in observed.records]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], r"^Leda Gemini warm-up: outcome=ok elapsed_ms=\d+$")
+
+    def test_boot_warm_up_logs_the_failing_stage_and_exception_type_only(self):
+        credential_error = service.GeminiCredentialUnavailable("secret-value in message")
+        cases = (
+            ("credential", {"resolve": credential_error}, None, "GeminiCredentialUnavailable"),
+            ("client", {"resolve": "secret-value"}, RuntimeError("secret-value in message"), "RuntimeError"),
+            ("connect", {"resolve": "secret-value"}, ConnectionError("secret-value in message"), "ConnectionError"),
+        )
+        for stage, resolve, failure, error_type in cases:
+            with self.subTest(stage=stage):
+                fake_client = Mock()
+                if stage == "connect":
+                    fake_client.models.get.side_effect = failure
+                resolve_patch = (
+                    {"side_effect": resolve["resolve"]} if isinstance(resolve["resolve"], BaseException) else {"return_value": resolve["resolve"]}
+                )
+                get_patch = {"side_effect": failure} if stage == "client" else {"return_value": (fake_client, False)}
+                with patch.object(service.gemini_credentials, "resolve", **resolve_patch), \
+                        patch.object(service._warm_gemini_client, "get", **get_patch), \
+                        self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+                    service._warm_up_gemini_client_in_background()
+                lines = [record.getMessage() for record in observed.records]
+                self.assertEqual(len(lines), 1, lines)
+                self.assertRegex(
+                    lines[0],
+                    rf"^Leda Gemini warm-up: outcome=failed stage={stage} error_type={error_type} elapsed_ms=\d+$",
+                )
+                self.assertNotIn("secret", lines[0])
+
+    CHANNEL_B_PAYLOAD = {"chatId": 995701520, "text": "El OEE actual es 88,6 %.", "replyToMessageId": 55}
+    VOICE_TIMING_LINE = (
+        r"^Leda Channel B voice timing: outcome=%s job_create_ms=\d+( gemini_client_reused=(?:true|false))?"
+        r"( gemini_ttfb_ms=\d+)?( tts_total_ms=\d+)?( opus_finish_ms=\d+)?( send_voice_ms=\d+)? total_ms=\d+$"
+    )
+
+    def deliver_channel_b_reply(self, client, *, resolve_client=False, send_status=200):
+        encoder = Mock()
+        encoder.finish_and_get.return_value = b"ogg-bytes"
+        patches = [
+            patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_ENABLED": "1", "LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}),
+            patch.object(service, "TelegramOpusStreamEncoder", return_value=encoder),
+            patch.object(service, "_start_telegram_recording_indicator"),
+            patch.object(service, "_telegram_post", return_value=Mock(status_code=send_status)),
+            patch.object(service, "LedaStreamingDSP", IdentityDsp),
+        ]
+        if resolve_client:
+            patches += [
+                patch.object(service.gemini_credentials, "resolve", return_value="secret-value"),
+                patch.object(service._warm_gemini_client, "get", return_value=(client, True)),
+            ]
+        else:
+            patches.append(patch.object(service, "get_gemini_client", return_value=client))
+        for active in patches:
+            active.start()
+            self.addCleanup(active.stop)
+        with self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            service._deliver_channel_b_voice_reply(dict(self.CHANNEL_B_PAYLOAD))
+        return [record.getMessage() for record in observed.records]
+
+    def test_channel_b_voice_delivery_logs_one_redacted_stage_timing_line(self):
+        client = FakeClient([FakeStream([audio_chunk(b"\x12\x34")])])
+        lines = self.deliver_channel_b_reply(client)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], self.VOICE_TIMING_LINE % "sent")
+        for key in ("job_create_ms=", "gemini_ttfb_ms=", "tts_total_ms=", "send_voice_ms=", "total_ms="):
+            self.assertIn(key, lines[0])
+        for forbidden in ("OEE", "88", "995701520", "test-token", "55 "):
+            self.assertNotIn(forbidden, lines[0])
+
+    def test_channel_b_voice_delivery_reports_whether_the_warm_gemini_client_was_reused(self):
+        client = FakeClient([FakeStream([audio_chunk(b"\x12\x34")])])
+        lines = self.deliver_channel_b_reply(client, resolve_client=True)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn(" gemini_client_reused=true ", lines[0])
+
+    def test_channel_b_voice_delivery_marks_a_failed_send(self):
+        client = FakeClient([FakeStream([audio_chunk(b"\x12\x34")])])
+        lines = self.deliver_channel_b_reply(client, send_status=500)
+        self.assertRegex(lines[0], self.VOICE_TIMING_LINE % "send_failed")
+
+    def test_channel_b_voice_delivery_logs_an_error_outcome_without_the_exception_text(self):
+        payload = dict(self.CHANNEL_B_PAYLOAD)
+        with patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_ENABLED": "1", "LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "test-token"}), \
+                patch.object(service, "_start_telegram_recording_indicator"), \
+                patch.object(service, "TelegramOpusStreamEncoder"), \
+                patch.object(service, "_generate_tts_audio", side_effect=service.LedaTtsProviderError("secret boom")), \
+                self.assertLogs("leda_runtime.timing", level="INFO") as observed:
+            with self.assertRaises(service.LedaTtsProviderError):
+                service._deliver_channel_b_voice_reply(payload)
+        lines = [record.getMessage() for record in observed.records]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], self.VOICE_TIMING_LINE % "error")
+        self.assertNotIn("secret", lines[0])
+
+    def test_hmi_voice_jobs_without_channel_b_log_no_voice_timing_line(self):
+        stream = FakeStream([audio_chunk(b"\x12\x34")])
+        client = FakeClient([stream])
+        with patch.object(service, "get_gemini_client", return_value=client), patch.object(service, "LedaStreamingDSP", IdentityDsp), patch.object(service, "_queue_same_leda_audio_to_telegram"):
+            job = service._create_interactions_tts_job("Plain HMI transcript")
+            with self.assertNoLogs("leda_runtime.timing", level="INFO"):
+                list(service._generate_tts_audio(job))
+
     def test_known_multiworker_and_reloader_modes_fail_closed(self):
         with self.assertRaisesRegex(RuntimeError, "SINGLE_PROCESS"):
             service._validate_single_process_environment({"WEB_CONCURRENCY": "2"})
