@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import AdminActionButton from './AdminActionButton';
+import CopyRegisterSelector from './CopyRegisterSelector';
 import type { SaveStatus } from './saveStatus';
 import {
     ADMIN_SIDEBAR_HINT_CLS,
@@ -15,6 +16,8 @@ import {
     readLoaderOptionsConfig,
     saveLoaderOptionsConfig,
 } from '../../config/loaderOptions.config';
+import type { CopyRegister } from '../../domain/copyRegister';
+import { readCopyRegister, saveCopyRegister } from '../../services/copyRegister.service';
 
 type LoaderOptionsSettingsTabProps = {
     onDirtyChange?: (dirty: boolean) => void;
@@ -60,6 +63,9 @@ function toConfig(draft: LoaderOptionsDraft): LoaderOptionsConfig {
 
 export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusChange, saveRef }: LoaderOptionsSettingsTabProps) {
     const [draft, setDraft] = useState<LoaderOptionsDraft>(() => toDraft(readLoaderOptionsConfig()));
+    // The register is a different shared key: it is written only when it differs from the saved one.
+    const [savedRegister, setSavedRegister] = useState<CopyRegister>(() => readCopyRegister());
+    const [registerDraft, setRegisterDraft] = useState<CopyRegister>(savedRegister);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
 
     const normalizedDraft = useMemo(() => toConfig(draft), [draft]);
@@ -76,6 +82,12 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusCh
                 enabled,
             },
         }));
+        setSaveStatus('dirty');
+        onDirtyChange?.(true);
+    };
+
+    const handleRegisterChange = (register: CopyRegister) => {
+        setRegisterDraft(register);
         setSaveStatus('dirty');
         onDirtyChange?.(true);
     };
@@ -120,6 +132,10 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusCh
         saveRef.current = () => {
             try {
                 saveLoaderOptionsConfig(normalizedDraft);
+                if (registerDraft !== savedRegister) {
+                    saveCopyRegister(registerDraft);
+                    setSavedRegister(registerDraft);
+                }
                 setSaveStatus('saved');
                 onDirtyChange?.(false);
             } catch {
@@ -133,7 +149,7 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusCh
         return () => {
             saveRef.current = null;
         };
-    }, [normalizedDraft, onDirtyChange, saveRef]);
+    }, [normalizedDraft, onDirtyChange, registerDraft, saveRef, savedRegister]);
 
     return (
         <div className="space-y-4">
@@ -143,6 +159,8 @@ export default function LoaderOptionsSettingsTab({ onDirtyChange, onSaveStatusCh
                     Configure loaders visuales de la HMI sin cambios sobre la planta.
                 </p>
             </header>
+
+            <CopyRegisterSelector value={registerDraft} onChange={handleRegisterChange} />
 
             {PROFILE_ORDER.map((profileId) => {
                 const sectionDraft = draft[profileId];

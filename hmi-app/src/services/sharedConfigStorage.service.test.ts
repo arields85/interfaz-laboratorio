@@ -330,6 +330,7 @@ describe('sharedConfigStorage', () => {
             ['HMI_CONFIG_REQUEST_TOO_LARGE', 413],
             ['HMI_CONFIG_VALUE_TOO_LARGE', 413],
             ['HMI_CONFIG_INVALID_REQUEST', 400],
+            ['HMI_CONFIG_INVALID_COPY_REGISTER', 400],
         ])('drops a batch rejected as %s, keeps the error visible and lets later writes flow', async (code, status) => {
             const { storage, writeSharedConfig, server } = createHarness({ items: { 'hmi:a': 'server' }, revision: 1 });
             await storage.load();

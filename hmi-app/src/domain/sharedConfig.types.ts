@@ -14,12 +14,13 @@ export const SHARED_CONFIG_PERMANENT_ERROR_CODES: ReadonlySet<string> = new Set(
     'HMI_CONFIG_REQUEST_TOO_LARGE',
     'HMI_CONFIG_VALUE_TOO_LARGE',
     'HMI_CONFIG_INVALID_REQUEST',
+    'HMI_CONFIG_INVALID_COPY_REGISTER',
     'SHARED_CONFIG_INVALID_KEY',
     'SHARED_CONFIG_VALUE_TOO_LARGE',
 ]);
 
 // The single list of localStorage keys that belong to the shared configuration: the five
-// content stores plus the HMI configuration (data connection, name, loader and temporal
+// content stores plus the HMI configuration (data connection, name, copy register, loader and temporal
 // options, Leda orb, theme, design and shader). A pinning test ties it to the modules'
 // own key constants. Per-browser state must never be added here: hierarchy expanded nodes,
 // dialog tab, ui store, voice prebuffer, auth keys, alert history, the hidden-access flag,
@@ -35,6 +36,7 @@ export const SHARED_CONFIG_KEYS: readonly string[] = [
     'hmi:data-history-endpoint',
     'hmi:activity-series-endpoint',
     'hmi:leda-hmi-name',
+    'hmi:copy-register',
     'hmi:loader-options',
     'hmi:temporal-settings',
     'hmi:leda-orb-visual-config',

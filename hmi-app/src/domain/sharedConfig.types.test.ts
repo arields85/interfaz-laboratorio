@@ -16,6 +16,7 @@ import { LOADER_OPTIONS_STORAGE_KEY } from '../config/loaderOptions.config';
 import { LEDA_ORB_STORAGE_KEY } from '../config/ledaOrb.config';
 import { TEMPORAL_SETTINGS_STORAGE_KEY } from '../config/temporalSettings.config';
 import { DESIGN_COLOR_STORAGE_KEY, DESIGN_FONT_STORAGE_KEY } from '../services/designSettingsStorage.service';
+import { COPY_REGISTER_STORAGE_KEY } from '../services/copyRegister.service';
 import { FRAME_SHAPE_STORAGE_KEY } from '../services/frameShape.service';
 import { HMI_NAME_STORAGE_KEY } from '../services/hmiName.service';
 import { ICON_CUTOUT_STORAGE_KEY } from '../services/iconCutout.service';
@@ -117,6 +118,7 @@ describe('shared config domain', () => {
             ACTIVITY_SERIES_ENDPOINT_STORAGE_KEY,
             // identity, options and presentation
             HMI_NAME_STORAGE_KEY,
+            COPY_REGISTER_STORAGE_KEY,
             LOADER_OPTIONS_STORAGE_KEY,
             TEMPORAL_SETTINGS_STORAGE_KEY,
             LEDA_ORB_STORAGE_KEY,
