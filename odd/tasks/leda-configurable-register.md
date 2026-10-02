@@ -98,3 +98,10 @@ Strict mode ON (global configuration). Runners:
   - Placement: `VoiceSettingsTab.tsx:314`, after the credential blocks (name, Gemini, Channel B access) and above the playback buffer and voice effects sections.
   - Save model: the Leda tab's shared Guardar (`handleSave`, one `saveRef`), the same one the orb and voice config use; credential sections keep saving on their own and are not touched. The register has a draft and a saved copy: a change calls `markPersistentEdit` (dirty), Guardar writes `hmi:copy-register` once and only if it differs from the saved value (after the voice-config validity check, so an invalid save writes nothing), and returning to the saved value clears dirty. Descartar is the dialog's discard (unmounting the tab), so nothing is written.
   - RED: 5 new tests failed (selector missing from the Leda tab). GREEN: HMI `npm test` 300 files / 4008 tests, `npx tsc -b` and `npm run lint` clean. The pre-commit review passed.
+- 2026-10-02: R3 parent spot check: VoiceSettingsTab and LoaderOptionsSettingsTab suites, 34 tests OK.
+  - Final code slice `5cedde5..943ac2f`: `under_budget` (246 lines), reviewed anyway because it is the last code slice. Granted under standing consent, **approved** and acknowledged (lineage `review-1f22e4c18e8ec44b`).
+  - Follow-ups not fixed: `R3-register-write-failure-path` (`VoiceSettingsTab.tsx:193-196`: a throwing `saveCopyRegister` rejects the save, the same pattern as the orb save) and `R3-invalid-save-untested`.
+- 2026-10-02: R6 docs done, except closing PW-025:
+  - `6e1f0ae`: AGENTS.md §5 and docs/CONVENTIONS.md now say the HMI is always usted, Leda's fixed messages follow the register, and new ones go to `leda_copy.py` in three variants.
+  - `aec5c78`: master document changelog 2.0.24.
+  - Closing PW-025 waits for R7.
