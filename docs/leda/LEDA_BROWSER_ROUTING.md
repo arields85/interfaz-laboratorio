@@ -32,6 +32,8 @@ UNI-1, UNI-2, and UNI-3 are complete offline after corrected independent verific
 | `/api/leda/admin/credentials/telegram_channel_a/status` | `GET` | Same path on `http://127.0.0.1:5057` | Observational Channel A status (authenticated read only) |
 | `/api/leda/admin/credentials/telegram_channel_a/apply` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit Channel A apply and restart |
 | `/api/leda/admin/credentials/telegram_channel_a/verify` | `POST` | Same path on `http://127.0.0.1:5057` | Explicit, non-sending Channel A bot token verification |
+| `/api/leda/admin/channel-b/access` | `GET` | Same path on `http://127.0.0.1:5057` | Channel B access requests and decisions (authenticated read; 503 when the bot is not running) |
+| `/api/leda/admin/channel-b/access/<chatId>/{approve,reject,revoke}` | `POST` | Same path on `http://127.0.0.1:5057` | Admin decision on one Channel B chat (session + CSRF); the chat id is a canonical integer |
 | `/api/leda/hmi-config` | `GET` | Same path on `http://127.0.0.1:5057` | Shared HMI configuration document (public read) |
 | `/api/leda/hmi-config/revision` | `GET` | Same path on `http://127.0.0.1:5057` | Shared configuration revision (cheap poll, public read) |
 | `/api/leda/admin/hmi-config` | `PUT` | Same path on `http://127.0.0.1:5057` | Admin-only batch write of the shared configuration |
