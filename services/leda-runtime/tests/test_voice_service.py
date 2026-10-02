@@ -792,12 +792,13 @@ class VoiceServiceTests(unittest.TestCase):
         self.assertIn("WARNING", joined)
         self.assertNotIn("protected-token", joined)
 
-    def test_telegram_token_stays_empty_when_not_enabled_even_in_protected_mode(self):
-        with patch.dict(os.environ, {"LEDA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}, clear=True), \
-                patch.object(service.telegram_credentials, "resolve") as resolve:
+    def test_telegram_token_resolves_the_stored_credential_in_protected_mode_without_the_env_switch(self):
+        # B8: protected mode is admin-controlled; the stored credential, not
+        # LEDA_LOCAL_TELEGRAM_ENABLED, decides whether voice replies reach Telegram.
+        with patch.dict(os.environ, {"LEDA_CREDENTIAL_MASTER_KEY_FILE": "C:/protected/key"}, clear=True),                 patch.object(service.telegram_credentials, "resolve", return_value="protected-token") as resolve:
             token = service._telegram_token()
-        self.assertEqual(token, "")
-        resolve.assert_not_called()
+        self.assertEqual(token, "protected-token")
+        resolve.assert_called_once_with()
 
     def test_telegram_token_reads_the_environment_value_directly_when_not_protected(self):
         with patch.dict(os.environ, {"LEDA_LOCAL_TELEGRAM_ENABLED": "1", "LEDA_LOCAL_TELEGRAM_BOT_TOKEN": "env-token"}), \

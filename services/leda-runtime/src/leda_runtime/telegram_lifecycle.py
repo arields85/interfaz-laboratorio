@@ -346,9 +346,13 @@ class TelegramLifecycleManager:
         self.operation_lock = threading.RLock()
         self.state_lock = threading.RLock()
         self.bot = None
+        # Protected mode is admin-controlled: "enabled" tracks whether the
+        # Channel B credential is stored (set_secret/delete_secret/apply keep it
+        # current), and the channel starts disabled until one is found.
+        self._protected = resolver.source == "protected"
         self._status = {
             "source": resolver.source,
-            "enabled": bool(config.enabled),
+            "enabled": bool(config.enabled) and not self._protected,
             "configured": bool(config.token) if resolver.source == "environment" else False,
             "desiredGeneration": 1,
             "appliedGeneration": 0,
@@ -358,7 +362,7 @@ class TelegramLifecycleManager:
             "lastError": config.configuration_error,
             "telegramDiagnostic": None,
         }
-        if not config.enabled:
+        if self._protected or not config.enabled:
             self._status.update({"appliedGeneration": 1, "restartRequired": False, "lastError": None})
 
     def _update(self, **values):
@@ -401,14 +405,14 @@ class TelegramLifecycleManager:
             self.credential_service.set_secret("telegram", secret)
             with self.state_lock:
                 generation = self._status["desiredGeneration"] + 1
-            self._update(desiredGeneration=generation, configured=True, verified=False, lastError=None)
+            self._update(desiredGeneration=generation, enabled=self._protected or self._status["enabled"], configured=True, verified=False, lastError=None)
 
     def delete_secret(self) -> bool:
         with self.operation_lock:
             self.credential_service.delete_secret("telegram")
             with self.state_lock:
                 generation = self._status["desiredGeneration"] + 1
-            self._update(desiredGeneration=generation, configured=False, verified=False, lastError=None)
+            self._update(desiredGeneration=generation, enabled=self._status["enabled"] and not self._protected, configured=False, verified=False, lastError=None)
             if not self._stop_owned_bot():
                 self._update(lastError="TELEGRAM_STOP_TIMEOUT")
                 return False
@@ -418,7 +422,7 @@ class TelegramLifecycleManager:
 
     def apply(self):
         with self.operation_lock:
-            if not self.config.enabled:
+            if not self._protected and not self.config.enabled:
                 self._update(lastError="TELEGRAM_DISABLED")
                 raise TelegramLifecycleError("TELEGRAM_DISABLED")
             with self.state_lock:
@@ -432,7 +436,14 @@ class TelegramLifecycleManager:
                 token = self.resolver.resolve()
             except TelegramCredentialError as error:
                 code = error.args[0]
-                self._update(running=False, configured=False, verified=False, lastError=code)
+                missing = self._protected and code == "TELEGRAM_CREDENTIAL_MISSING"
+                self._update(
+                    running=False,
+                    configured=False,
+                    verified=False,
+                    lastError=code,
+                    **({"enabled": False} if missing else {}),
+                )
                 raise TelegramLifecycleError(code) from None
             try:
                 candidate = self.bot_factory(token)
@@ -474,6 +485,7 @@ class TelegramLifecycleManager:
                 raise TelegramLifecycleError(failure_code) from None
             self.bot = candidate
             self._update(
+                enabled=True,
                 configured=True,
                 appliedGeneration=generation,
                 running=True,
@@ -484,7 +496,15 @@ class TelegramLifecycleManager:
             return self.status()
 
     def startup_apply(self):
-        if not self.config.enabled:
+        if self._protected:
+            # Mirrors Channel A: a stored credential restores the channel on
+            # boot; an absent one is a pure no-op that leaves status untouched.
+            try:
+                self.resolver.resolve()
+            except TelegramCredentialError as error:
+                if error.args and error.args[0] == "TELEGRAM_CREDENTIAL_MISSING":
+                    return self.status()
+        elif not self.config.enabled:
             return self.status()
         try:
             return self.apply()

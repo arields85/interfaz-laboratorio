@@ -294,7 +294,7 @@ excepciones no relacionadas. Aun así:
 
 Sin clave Gemini o con una clave en blanco, ambos endpoints de voz devuelven HTTP 503
 con `GEMINI_API_KEY_MISSING` y remedio accionable, sin construir cliente ni llamar al
-proveedor. Telegram opt-in sin token se informa como habilitado pero no configurado; no
+proveedor. En modo legacy, Telegram opt-in sin token se informa como habilitado pero no configurado; no
 construye ni inicia bot. Lo anterior describe la fuente legacy, vigente solo cuando el
 modo protegido no fue seleccionado; el almacenamiento cifrado de secretos y la UI de
 credenciales existen desde PAC-2–PAC-4 y se aceptaron offline (ver §11).

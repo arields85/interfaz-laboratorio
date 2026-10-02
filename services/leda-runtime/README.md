@@ -151,8 +151,8 @@ unexpected binary is rejected without ever being run.
 | Variable | Role |
 |----------|------|
 | `GEMINI_API_KEY` | Legacy Gemini source used only when protected mode is not selected. Optional at startup; whitespace-only values are missing. |
-| `LEDA_LOCAL_TELEGRAM_ENABLED` | Set to `1` to opt in to Telegram. |
-| `LEDA_LOCAL_TELEGRAM_BOT_TOKEN` | Legacy Telegram source used only when protected mode is not selected. Telegram still requires explicit opt-in. |
+| `LEDA_LOCAL_TELEGRAM_ENABLED` | Legacy environment mode only: set to `1` to opt in to Telegram. Ignored (any value, no error) when `LEDA_CREDENTIAL_MASTER_KEY_FILE` is set: Channel B is then enabled from the admin by its stored credential. |
+| `LEDA_LOCAL_TELEGRAM_BOT_TOKEN` | Legacy Telegram source used only when protected mode is not selected. In environment mode Telegram still requires explicit opt-in. |
 | `LEDA_RUNTIME_STATE_DIR` | Overrides the mutable state root. |
 | `LEDA_CREDENTIAL_MASTER_KEY_FILE` | Absolute path to the separately protected raw 32-byte credential master-key file. It must be outside the runtime state root. |
 | `LEDA_BOOTSTRAP_PYTHON` | Bootstrap only. Explicit path to the base interpreter used **once**, to create the environment. Validated and logged; never consulted by a launcher. |
@@ -172,7 +172,13 @@ with `operations\stop-local.ps1`, confirm ports `5056` and `5057` are free, and
 start again. No `setx` or machine-level persistence is required; per-process
 environment is the supported mechanism.
 
-A token without the explicit opt-in does not construct the Telegram bot or make
+In protected mode (master key configured) Channel B is controlled from the HMI
+admin only: it is enabled exactly when its Telegram credential is stored, starts
+automatically on runtime start (an absent credential is a no-op), starts when the
+credential is saved, and stops, staying off across restarts, when it is deleted.
+`LEDA_LOCAL_TELEGRAM_ENABLED` is ignored there.
+
+In legacy environment mode, a token without the explicit opt-in does not construct the Telegram bot or make
 Telegram requests. Enabling Telegram without a token in the selected source leaves the
 integration enabled but unconfigured: no bot is constructed, no Telegram request is made,
 and runtime health remains available. A nonblank master-key-file setting selects protected

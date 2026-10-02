@@ -25,6 +25,7 @@ $env:LEDA_LOCAL_SNAPSHOT_FILE = Join-Path $stateRoot 'leda_local_snapshot.json'
 $env:LEDA_LOCAL_STATE_FILE = Join-Path $stateRoot 'leda_local_state.json'
 $env:LEDA_CONFIG_MODE = 'local'
 $env:LEDA_VOICE_HOST = '127.0.0.1'
+# Legacy environment mode only; protected mode enables Channel B from the admin credential.
 $env:TELEGRAM_BOT_TOKEN = if ($env:LEDA_LOCAL_TELEGRAM_ENABLED -eq '1') { $telegramToken } else { '' }
 $env:PYTHONPATH = "$runtimeRoot\src" + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
 
