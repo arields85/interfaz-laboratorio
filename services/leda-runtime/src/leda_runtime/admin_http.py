@@ -525,8 +525,8 @@ class AdminHttpBoundary:
                 return rejected
             try:
                 revision = self.hmi_config_store.apply_batch(*batch)
-            except HmiConfigInvalid:
-                return self._error("HMI_CONFIG_INVALID_REQUEST", 400)
+            except HmiConfigInvalid as error:
+                return self._error(error.args[0], 400)
             except HmiConfigTooLarge as error:
                 return self._error(error.args[0], 413)
             except HmiConfigUnavailable:

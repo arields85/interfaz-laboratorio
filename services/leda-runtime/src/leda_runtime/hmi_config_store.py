@@ -58,6 +58,18 @@ def _validate_value(value: object) -> str:
     return value
 
 
+def _validate_known_values(sets: Mapping[str, str]) -> None:
+    """Keys whose value has a fixed shape are checked here; every other key stays free-form."""
+    from .copy_register import (  # local import: copy_register imports this module
+        COPY_REGISTER_KEY,
+        HMI_CONFIG_INVALID_COPY_REGISTER,
+        is_valid_copy_register_value,
+    )
+
+    if COPY_REGISTER_KEY in sets and not is_valid_copy_register_value(sets[COPY_REGISTER_KEY]):
+        raise HmiConfigInvalid(HMI_CONFIG_INVALID_COPY_REGISTER)
+
+
 class HmiConfigStore:
     """SQLite-backed document. The file is created lazily on first use."""
 
@@ -141,6 +153,7 @@ class HmiConfigStore:
         if len(sets) + len(deletes) > MAX_BATCH_OPERATIONS:
             raise HmiConfigInvalid("HMI_CONFIG_INVALID_REQUEST")
         valid_sets = {_validate_key(key): _validate_value(value) for key, value in sets.items()}
+        _validate_known_values(valid_sets)
         valid_deletes = [_validate_key(key) for key in deletes]
         if set(valid_sets) & set(valid_deletes):
             raise HmiConfigInvalid("HMI_CONFIG_INVALID_REQUEST")
