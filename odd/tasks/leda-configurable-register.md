@@ -85,3 +85,8 @@ Strict mode ON (global configuration). Runners:
 
 - 2026-10-02: code mapped (read-only explorer), feature document created.
 - 2026-10-02: R1 done (delegated writer). Commits 46eabb8 (runtime validation, `HMI_CONFIG_INVALID_COPY_REGISTER`) and e155d8d (key `hmi:copy-register`, `CopyRegister` domain type, service, `useCopyRegister` hook, "Trato al usuario" selector in the Opciones tab). RED: runtime tests failed on the missing `copy_register` module; HMI tests failed on missing modules plus the new permanent-code case. GREEN: runtime 2020 tests OK, HMI `npm test` 300 files / 4005 tests, `npx tsc -b` and `npm run lint` clean.
+- 2026-10-02: R1 native review (slice `dcc3f4a..817389d`, including the Connection tab icon fix `bacf70e`; medium, 689 lines): granted under standing consent, **approved** and acknowledged (lineage `review-44c21a6ce3229f83`).
+  - `R3-001` (`admin_http.py:528-529`, `error.args[0]` without args) is folded into R2.
+  - Not fixed: `R3-002` (`copyRegister.ts:26`) and `R3-003` (`ConnectionSettingsTab.tsx:428`).
+  - Parent spot check: `test_copy_register.py` OK; the HMI copyRegister suites, 12 tests, OK.
+  - R2 started (delegated).
