@@ -5,7 +5,6 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import LoaderOptionsSettingsTab from './LoaderOptionsSettingsTab';
 import { LOADER_OPTIONS_STORAGE_KEY } from '../../config/loaderOptions.config';
-import { COPY_REGISTER_STORAGE_KEY, saveCopyRegister } from '../../services/copyRegister.service';
 
 function createSaveRef() {
     return { current: null as null | (() => void) };
@@ -191,74 +190,11 @@ describe('LoaderOptionsSettingsTab save status projection', () => {
     });
 });
 
-describe('LoaderOptionsSettingsTab copy register selector', () => {
-    beforeEach(() => {
-        localStorage.clear();
-    });
-
-    it('renders the three options with usted selected by default and a helper text', () => {
+describe('LoaderOptionsSettingsTab copy register', () => {
+    it('does not render the register selector (it lives in the Leda tab)', () => {
         render(<LoaderOptionsSettingsTab />);
 
-        const group = screen.getByRole('radiogroup', { name: 'Trato al usuario' });
-        expect(group).toBeInTheDocument();
-        expect(screen.getByRole('radio', { name: 'Usted (formal)' })).toBeChecked();
-        expect(screen.getByRole('radio', { name: 'Rioplatense (vos)' })).not.toBeChecked();
-        expect(screen.getByRole('radio', { name: 'Neutro (tú)' })).not.toBeChecked();
-        expect(screen.getByText(/cambia cómo la HMI y Leda se dirigen a las personas/i)).toBeInTheDocument();
-    });
-
-    it('renders the stored register as selected', () => {
-        saveCopyRegister('neutro');
-
-        render(<LoaderOptionsSettingsTab />);
-
-        expect(screen.getByRole('radio', { name: 'Neutro (tú)' })).toBeChecked();
-        expect(screen.getByRole('radio', { name: 'Usted (formal)' })).not.toBeChecked();
-    });
-
-    it('marks the tab dirty on change and persists only when saved', async () => {
-        const user = userEvent.setup();
-        const handleDirtyChange = vi.fn();
-        const handleSaveStatusChange = vi.fn();
-        const saveRef = createSaveRef();
-
-        render(
-            <LoaderOptionsSettingsTab
-                onDirtyChange={handleDirtyChange}
-                onSaveStatusChange={handleSaveStatusChange}
-                saveRef={saveRef}
-            />,
-        );
-
-        await user.click(screen.getByRole('radio', { name: 'Rioplatense (vos)' }));
-
-        expect(screen.getByRole('radio', { name: 'Rioplatense (vos)' })).toBeChecked();
-        expect(handleDirtyChange).toHaveBeenLastCalledWith(true);
-        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('dirty');
-        expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBeNull();
-
-        act(() => {
-            saveRef.current?.();
-        });
-
-        expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBe(
-            JSON.stringify({ version: 1, register: 'rioplatense' }),
-        );
-        expect(handleSaveStatusChange).toHaveBeenLastCalledWith('saved');
-        expect(handleDirtyChange).toHaveBeenLastCalledWith(false);
-    });
-
-    it('does not write the register when only the loaders changed', async () => {
-        const user = userEvent.setup();
-        const saveRef = createSaveRef();
-
-        render(<LoaderOptionsSettingsTab saveRef={saveRef} />);
-
-        await user.click(screen.getByRole('checkbox', { name: 'Habilitar loader short' }));
-        act(() => {
-            saveRef.current?.();
-        });
-
-        expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBeNull();
+        expect(screen.queryByRole('radiogroup', { name: 'Trato al usuario' })).not.toBeInTheDocument();
+        expect(screen.queryByText('Trato al usuario')).not.toBeInTheDocument();
     });
 });

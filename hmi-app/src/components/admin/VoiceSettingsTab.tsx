@@ -12,12 +12,15 @@ import {
     cloneLedaVoiceConfig,
     validateLedaVoiceConfig,
 } from '../../domain/ledaVoiceConfig';
+import type { CopyRegister } from '../../domain/copyRegister';
 import type { LedaOrbVisualConfig } from '../../domain/voice.types';
 import { useLedaVoiceConfigDraft } from '../../hooks/useLedaVoiceConfigDraft';
 import { useLedaVoiceConfig } from '../../queries/useLedaVoiceConfig';
+import { readCopyRegister, saveCopyRegister } from '../../services/copyRegister.service';
 import { useUpdateLedaVoiceConfig } from '../../queries/useUpdateLedaVoiceConfig';
 import LedaOrb from '../LedaOrb';
 import AdminSelect from './AdminSelect';
+import CopyRegisterSelector from './CopyRegisterSelector';
 import DockColorField from './DockColorField';
 import DockInlineControlRow from './DockInlineControlRow';
 import DockSliderField from './DockSliderField';
@@ -81,6 +84,9 @@ export default function VoiceSettingsTab({
     const persistedSettingsRef = useRef({
         visualConfig: initialSettings.visualConfig,
     });
+    // The register is a different shared key: it is written only when it differs from the saved one.
+    const [savedRegister, setSavedRegister] = useState<CopyRegister>(() => readCopyRegister());
+    const [registerDraft, setRegisterDraft] = useState<CopyRegister>(savedRegister);
     const [draftVisualConfig, setDraftVisualConfig] = useState(initialSettings.visualConfig);
     const [coreHexCode, setCoreHexCode] = useState(initialSettings.visualConfig.core.slice(1));
     const [glowHexCode, setGlowHexCode] = useState(initialSettings.visualConfig.glow.slice(1));
@@ -150,6 +156,7 @@ export default function VoiceSettingsTab({
     useEffect(() => {
         const persisted = persistedSettingsRef.current;
         const hasUnsavedChanges = !visualConfigsEqual(draftVisualConfig, persisted.visualConfig)
+            || registerDraft !== savedRegister
             || voiceConfigDraft.isDirty
             || !voiceConfigValid;
         onDirtyChange?.(
@@ -160,6 +167,8 @@ export default function VoiceSettingsTab({
     }, [
         draftVisualConfig,
         onDirtyChange,
+        registerDraft,
+        savedRegister,
         saveStatus,
         voiceConfigDraft.isDirty,
         voiceConfigValid,
@@ -181,6 +190,10 @@ export default function VoiceSettingsTab({
             return Promise.resolve();
         }
 
+        if (registerDraft !== savedRegister) {
+            saveCopyRegister(registerDraft);
+            setSavedRegister(registerDraft);
+        }
         const savedVisualConfig = saveLedaOrbVisualConfig(draftVisualConfig);
         persistedSettingsRef.current = {
             visualConfig: savedVisualConfig,
@@ -220,6 +233,8 @@ export default function VoiceSettingsTab({
         return request;
     }, [
         draftVisualConfig,
+        registerDraft,
+        savedRegister,
         voiceConfigDraft,
         updateVoiceConfig,
     ]);
@@ -277,6 +292,11 @@ export default function VoiceSettingsTab({
         }
     };
 
+    const handleRegisterChange = (register: CopyRegister) => {
+        markPersistentEdit();
+        setRegisterDraft(register);
+    };
+
     const resolvedSpeaking = autoDemo ? demoSpeaking : speaking;
 
     return (
@@ -290,6 +310,8 @@ export default function VoiceSettingsTab({
                     No se pudo cargar la configuración de Leda. Se mantienen los valores actuales.
                 </p>
             ) : null}
+
+            <CopyRegisterSelector value={registerDraft} onChange={handleRegisterChange} />
 
             <LedaVoicePlaybackBufferSettings
                 config={voiceConfigDraft.draft.playbackBuffer}

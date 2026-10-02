@@ -7,6 +7,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { LEDA_ORB_STORAGE_KEY, readLedaOrbVisualConfig } from '../../config/ledaOrb.config';
 import { createDefaultLedaVoiceConfig } from '../../domain/ledaVoiceConfig';
 import VoiceSettingsTab from './VoiceSettingsTab';
+import { COPY_REGISTER_STORAGE_KEY, saveCopyRegister } from '../../services/copyRegister.service';
+import { sharedConfigStorage } from '../../services/sharedConfigStorage.service';
 import { UNAUTHENTICATED_SESSION, useAuthStore } from '../../store/auth.store';
 import { adminAuthClient } from '../../services/adminAuth.service';
 
@@ -371,6 +373,98 @@ describe('VoiceSettingsTab', () => {
 
         expect(localStorage.getItem(LEDA_ORB_STORAGE_KEY)).not.toBeNull();
         expect(readLedaOrbVisualConfig().core).toBe('#1240c8');
+    });
+
+    describe('copy register ("Trato al usuario")', () => {
+        it('renders the selector with the stored register and the Leda-only helper text', () => {
+            saveCopyRegister('neutro');
+
+            render(<VoiceSettingsTab />);
+
+            expect(screen.getByRole('radiogroup', { name: 'Trato al usuario' })).toBeInTheDocument();
+            expect(screen.getByRole('radio', { name: 'Neutro (tú)' })).toBeChecked();
+            expect(screen.getByRole('radio', { name: 'Usted (formal)' })).not.toBeChecked();
+            expect(screen.getByText(/cómo Leda se dirige a las personas en sus mensajes/i)).toHaveTextContent(
+                /Telegram, Canal A y Canal B.*La HMI no cambia/,
+            );
+        });
+
+        it('sits outside the credential sections and above the playback buffer', async () => {
+            render(<VoiceSettingsTab />);
+
+            const group = screen.getByRole('radiogroup', { name: 'Trato al usuario' });
+            const channelB = screen.getByRole('region', { name: 'Acceso al Canal B' });
+            expect(channelB.contains(group)).toBe(false);
+            expect(group.compareDocumentPosition(await screen.findByRole('heading', { name: 'Buffer de audio' })) & Node.DOCUMENT_POSITION_FOLLOWING)
+                .toBeTruthy();
+        });
+
+        it('marks the tab dirty on change and writes the key once on Save', async () => {
+            vi.stubGlobal('fetch', vi.fn(async () => configEnvelope()));
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+            const onSaveStatusChange = vi.fn();
+            const saveRef = { current: null as null | (() => void | Promise<void>) };
+            render(
+                <VoiceSettingsTab
+                    onDirtyChange={onDirtyChange}
+                    onSaveStatusChange={onSaveStatusChange}
+                    saveRef={saveRef}
+                />,
+            );
+
+            await user.click(screen.getByRole('radio', { name: 'Rioplatense (vos)' }));
+
+            expect(screen.getByRole('radio', { name: 'Rioplatense (vos)' })).toBeChecked();
+            expect(onSaveStatusChange).toHaveBeenLastCalledWith('dirty');
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+            expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBeNull();
+
+            const setItem = vi.spyOn(sharedConfigStorage, 'setItem');
+            try {
+                await act(async () => saveRef.current?.());
+                expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBe(
+                    JSON.stringify({ version: 1, register: 'rioplatense' }),
+                );
+                expect(setItem.mock.calls.filter(([key]) => key === COPY_REGISTER_STORAGE_KEY)).toHaveLength(1);
+            } finally {
+                setItem.mockRestore();
+            }
+        });
+
+        it('does not write the register when only another setting changed', async () => {
+            vi.stubGlobal('fetch', vi.fn(async () => configEnvelope()));
+            const saveRef = { current: null as null | (() => void | Promise<void>) };
+            render(<VoiceSettingsTab saveRef={saveRef} />);
+
+            fireEvent.change(screen.getByLabelText('Hex del núcleo'), { target: { value: '1240c8' } });
+            await act(async () => saveRef.current?.());
+
+            expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBeNull();
+        });
+
+        it('is clean again when the selection returns to the saved register', async () => {
+            const user = userEvent.setup();
+            const onDirtyChange = vi.fn();
+            render(<VoiceSettingsTab onDirtyChange={onDirtyChange} />);
+
+            await user.click(screen.getByRole('radio', { name: 'Neutro (tú)' }));
+            expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+            await user.click(screen.getByRole('radio', { name: 'Usted (formal)' }));
+
+            expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+        });
+
+        it('discarding (unmounting without Save) leaves the stored register untouched', async () => {
+            const user = userEvent.setup();
+            const view = render(<VoiceSettingsTab />);
+            await user.click(screen.getByRole('radio', { name: 'Neutro (tú)' }));
+            view.unmount();
+
+            expect(localStorage.getItem(COPY_REGISTER_STORAGE_KEY)).toBeNull();
+            render(<VoiceSettingsTab />);
+            expect(screen.getByRole('radio', { name: 'Usted (formal)' })).toBeChecked();
+        });
     });
 
     it('keeps preview-only controls transient and clean', async () => {

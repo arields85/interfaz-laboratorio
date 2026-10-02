@@ -33,7 +33,7 @@ export default function CopyRegisterSelector({ value, onChange }: CopyRegisterSe
                 Trato al usuario
             </div>
             <p id={hintId} className={`mb-4 ${ADMIN_SIDEBAR_HINT_CLS}`}>
-                Cambia cómo la HMI y Leda se dirigen a las personas. Se aplica a todos los navegadores.
+                Cambia cómo Leda se dirige a las personas en sus mensajes (Telegram, Canal A y Canal B). La HMI no cambia. Se aplica a todos los navegadores.
             </p>
 
             <div
