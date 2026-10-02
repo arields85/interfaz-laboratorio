@@ -49,6 +49,7 @@ from .voice_transcription import (
     VoiceTranscriptionUnavailable,
     transcribe_voice_note,
 )
+from .keep_warm import GEMINI_KEEP_WARM_INTERVAL_SECONDS, TELEGRAM_KEEP_WARM_INTERVAL_SECONDS, start_keep_warm_thread
 from .timing_log import StageTimer, elapsed_ms, install_timing_log_handler, log_timing
 
 
@@ -137,6 +138,37 @@ telegram_credentials = TelegramCredentialResolver(credential_service_factory=_de
 def _telegram_post(url, **kwargs):
     with _TELEGRAM_HTTP_LOCK:
         return _TELEGRAM_HTTP_SESSION.post(url, **kwargs)
+
+
+def _telegram_keep_warm_probe():
+    """PW-026 W3: a read-only ``getMe`` on the SAME session and lock as the real
+    sends, so the pooled connection to Telegram stays alive across idle gaps and
+    never overlaps a send. Returns False (no network) without a token. An error
+    status raises; the loop logs only the exception type. The session keeps its
+    default pool on purpose: urllib3 would retry a dead pooled socket as a read
+    error, which for a non-idempotent sendVoice could duplicate a voice note, so
+    keeping the connection warm is the safe fix instead of a retrying adapter."""
+    token = _telegram_token()
+    if not token:
+        return False
+    base = os.environ.get("TELEGRAM_BOT_API_BASE", "https://api.telegram.org").rstrip("/")
+    with _TELEGRAM_HTTP_LOCK:
+        _TELEGRAM_HTTP_SESSION.get(f"{base}/bot{token}/getMe", timeout=5).raise_for_status()
+    return True
+
+
+def _gemini_keep_warm_probe():
+    """PW-026 W3: ``models.get`` (no generation, no tokens) on the warm client
+    inside its keep-alive window. The credential is re-resolved every time and
+    ``WarmGeminiClient.get`` rebuilds on rotation, so a changed key just warms
+    the new client. No credential: nothing to warm."""
+    try:
+        secret = gemini_credentials.resolve()
+    except GeminiCredentialUnavailable:
+        return False
+    client, _reused = _warm_gemini_client.get(secret)
+    client.models.get(model=TTS_MODEL)
+    return True
 
 
 def _valid_telegram_chat_id(value):
@@ -1402,7 +1434,13 @@ def main():
     threading.Thread(target=_warm_up_gemini_client_in_background, name="LedaGeminiWarmup", daemon=True).start()
     install_access_log_query_redaction()
     install_timing_log_handler()
-    app.run(host=LEDA_VOICE_HOST, port=5056, threaded=True, use_reloader=False)
+    keep_warm_stop = threading.Event()
+    start_keep_warm_thread("telegram", TELEGRAM_KEEP_WARM_INTERVAL_SECONDS, _telegram_keep_warm_probe, keep_warm_stop, probe_first=True)
+    start_keep_warm_thread("gemini", GEMINI_KEEP_WARM_INTERVAL_SECONDS, _gemini_keep_warm_probe, keep_warm_stop)
+    try:
+        app.run(host=LEDA_VOICE_HOST, port=5056, threaded=True, use_reloader=False)
+    finally:
+        keep_warm_stop.set()
 
 
 if __name__ == "__main__": main()
