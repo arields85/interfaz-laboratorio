@@ -38,7 +38,6 @@ Deben existir antes de arrancar (se leen una sola vez).
 | `LEDA_RUNTIME_STATE_DIR` | **Obligatoria.** Directorio de estado: volumen persistente. |
 | `LEDA_CREDENTIAL_MASTER_KEY_FILE` | **Obligatoria.** Ruta absoluta de la clave (32 bytes), **fuera** del directorio de estado, sin enlaces simbólicos; también en los comandos de provisión. |
 | `LEDA_PUBLIC_ORIGIN` | **Obligatoria.** Origen exacto `https://host[:puerto]`, sin barra final ni ruta. Inválido → `503 AUTH_CONFIGURATION_INVALID`. |
-| `LEDA_LOCAL_TELEGRAM_ENABLED` | `1` solo si se usa Telegram Canal B. |
 
 No defina `GEMINI_API_KEY` ni `LEDA_LOCAL_TELEGRAM_BOT_TOKEN` (las credenciales las carga el propietario desde la UI). No defina `WEB_CONCURRENCY` > 1 (el servicio de voz aborta). El resto de variables tiene valores por defecto correctos.
 
