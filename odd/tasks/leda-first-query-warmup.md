@@ -29,7 +29,7 @@ The user reported on 2026-10-02 that the first question sent to the Channel B bo
 
 ## Tasks
 
-- [ ] W1 — Instrumentation: one redacted timing line per Channel B message (stage names and milliseconds only, no text, no chat names) in the presentation process (received → status → answer → text sent → voice requested) and in the voice process (job create, Gemini time to first byte, sendVoice, total). Both must be visible in the runtime log files. Route: delegated.
+- [x] W1 — Instrumentation: one redacted timing line per Channel B message (stage names and milliseconds only, no text, no chat names) in the presentation process (received → status → answer → text sent → voice requested) and in the voice process (job create, Gemini time to first byte, sendVoice, total). Both must be visible in the runtime log files. Route: delegated.
 - [ ] W2 — Live measurement with the user: restart; question after 2+ min idle; question right after; question after 30 s; question after 90 s. Note whether the text or only the voice note is late.
 - [ ] W3 — Fix according to the evidence. If the Gemini keep-alive is confirmed: a lightweight periodic keep-warm (e.g. `client.models.get` every ~45 s while Channel B or the voice service is active; no tokens). Possibly also keep the Telegram voice session warm, or pre-warm ffmpeg at boot if W2 points there. Route: delegated.
 - [ ] W4 — Live re-check with the user, native review, and close PW-026.
@@ -50,3 +50,14 @@ Default test-first policy:
 ## Progress
 
 - 2026-10-02: prior work checked at the user's request (PW-006), path mapped, feature document created.
+- 2026-10-02: W1 done in `136b994` (`feat(leda-runtime): log redacted Channel B stage timings`, route: delegated writer). RED observed first: 17 new tests failed because no timing line existed (the 11 pure `timing_log` helper tests were written after the small helper module, so they have no RED). GREEN: full runtime suite, 2102 tests OK (`unittest discover -s services/leda-runtime -p 'test_*.py'`, fresh state dir, `GEMINI_API_KEY` and `TELEGRAM_BOT_TOKEN` unset).
+  - **Visibility:** a dedicated `leda_runtime.timing` logger (INFO, `propagate=False`) with its own timestamped stderr handler, installed by each process' `main()` (`timing_log.install_timing_log_handler`). No global INFO logging; every other logger keeps its visibility. Each line is prefixed with `YYYY-MM-DD HH:MM:SS,mmm` so the two processes' lines can be correlated by time.
+  - **Redaction:** values are only ints, booleans or `[A-Za-z0-9_]{1,40}` tokens, anything else is written as `redacted`; keys are plain identifiers; emitting never raises.
+  - **`leda-presentation-stderr.log`:**
+    - `Leda Channel B timing: outcome=<answered|start|command|unapproved|limited|voice_failed|error> [telegram_lag_s=N] [status_ms=N] [download_ms=N] [transcription_ms=N] [answer_ms=N] [text_send_ms=N] [voice_enqueue_ms=N] total_ms=N` (one per handled private message; `telegram_lag_s` is wall-clock now minus Telegram's message `date`; `download_ms` and `transcription_ms` only for voice notes; `status_ms` is rate-limit admission plus the pairing-status read);
+    - `Leda Channel B voice request timing: outcome=<dispatched|failed> queue_wait_ms=N mint_ms=N voice_request_ms=N [http_status=N] total_ms=N` (one per queued voice request, from the voice worker thread; `voice_request_ms` is the loopback round trip, i.e. the voice process' whole TTS plus sendVoice);
+    - `Leda Channel B poll timing: updates=N poll_wait_ms=N offset_ms=N` (one per non-empty `getUpdates` batch; `offset_ms` is the summed `set_offset` cost).
+  - **`leda-voice-stderr.log`:**
+    - `Leda Channel B voice timing: outcome=<sent|send_failed|error> job_create_ms=N [gemini_client_reused=true|false] [gemini_ttfb_ms=N] [tts_total_ms=N] [opus_finish_ms=N] [send_voice_ms=N] total_ms=N` (one per Channel B voice reply; `tts_total_ms` runs from generator start to the start of delivery; `gemini_*` are absent on an exact-text cache hit; HMI voice and Channel A jobs log no such line);
+    - `Leda Gemini warm-up: outcome=ok elapsed_ms=N` or `Leda Gemini warm-up: outcome=failed stage=<credential|client|connect> error_type=<ExceptionTypeName> elapsed_ms=N` (once at boot; a missing credential also logs `failed stage=credential`).
+  - **Limits:** the voice-side token resolve (loopback call back to the presentation process) has no stage of its own: it is the gap between `voice_request_ms` and the voice line's `total_ms`. Open: none blocking W2.
