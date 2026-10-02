@@ -30,7 +30,9 @@ interface LedaProxyRoute {
     browserPath: string;
     pattern: string;
     target: string;
-    upstreamPath: string;
+    // null: the upstream path is the browser path itself (used by dynamic-segment routes,
+    // whose browserPath is a label and cannot be rewritten to a fixed string).
+    upstreamPath: string | null;
     methods: readonly string[];
     stripSessionCapability?: boolean;
 }
@@ -51,6 +53,31 @@ function createRoute(
         stripSessionCapability,
     };
 }
+
+// A route whose path carries a dynamic segment: `browserPath` is a readable label and
+// `pathPattern` the regex source matched against the request path. The path is forwarded
+// to the runtime unchanged (same path on 5057), so no rewrite target is needed.
+function createDynamicRoute(
+    browserPath: string,
+    pathPattern: string,
+    target: string,
+    methods: readonly string[],
+    stripSessionCapability = false,
+): LedaProxyRoute {
+    return {
+        browserPath,
+        pattern: `^${pathPattern}(?:\\?.*)?$`,
+        target,
+        upstreamPath: null,
+        methods,
+        stripSessionCapability,
+    };
+}
+
+// Telegram chat ids are canonical decimal integers (negative for groups); the runtime caps
+// them at 20 characters (admin_http.parse_chat_id), so up to 19 digits after an optional sign.
+const CHANNEL_B_ACCESS_PATH = '/api/leda/admin/channel-b/access';
+const CHANNEL_B_CHAT_ID_PATTERN = '-?[0-9]{1,19}';
 
 export const LEDA_PROXY_ROUTES: readonly LedaProxyRoute[] = Object.freeze([
     createRoute('/api/leda/session', 'http://127.0.0.1:5057', '/hmi/session', ['POST', 'DELETE']),
@@ -88,6 +115,16 @@ export const LEDA_PROXY_ROUTES: readonly LedaProxyRoute[] = Object.freeze([
     createRoute('/api/leda/hmi-config', 'http://127.0.0.1:5057', '/api/leda/hmi-config', ['GET'], true),
     createRoute('/api/leda/hmi-config/revision', 'http://127.0.0.1:5057', '/api/leda/hmi-config/revision', ['GET'], true),
     createRoute('/api/leda/admin/hmi-config', 'http://127.0.0.1:5057', '/api/leda/admin/hmi-config', ['PUT'], true),
+    // Channel B access control: the pending/approved chat list and the approve/reject/revoke
+    // decisions. Same path on 5057; the decisions carry the chat id as a path segment.
+    createRoute(CHANNEL_B_ACCESS_PATH, 'http://127.0.0.1:5057', CHANNEL_B_ACCESS_PATH, ['GET'], true),
+    createDynamicRoute(
+        `${CHANNEL_B_ACCESS_PATH}/:chatId/:decision`,
+        `${CHANNEL_B_ACCESS_PATH}/${CHANNEL_B_CHAT_ID_PATTERN}/(?:approve|reject|revoke)`,
+        'http://127.0.0.1:5057',
+        ['POST'],
+        true,
+    ),
     createRoute('/api/leda/health', 'http://127.0.0.1:5057', '/health', ['GET'], true),
 ]);
 
@@ -143,10 +180,11 @@ export function createLedaProxyConfig(): Record<string, ProxyOptions> {
                     serverResponse.end(body);
                 });
             },
-            rewrite: (path: string) => path.replace(
-                new RegExp(`^${route.browserPath}(?=\\?|$)`),
-                route.upstreamPath,
-            ),
+            rewrite: (path: string) => {
+                const { upstreamPath } = route;
+                if (upstreamPath === null) return path;
+                return path.replace(new RegExp(`^${route.browserPath}(?=\\?|$)`), upstreamPath);
+            },
         },
     ]));
 }

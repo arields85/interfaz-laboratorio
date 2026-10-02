@@ -354,6 +354,133 @@ describe('Leda Vite proxy configuration', () => {
             .toBe(`${CHANNEL_A_PAIRING_UPSTREAM_PATH}?value=a%2Fb%20c&next=%252F`);
     });
 
+    describe('Channel B access admin routes', () => {
+        const ACCESS_LIST_PATH = '/api/leda/admin/channel-b/access';
+        const DECISION_ROUTE_PATH = '/api/leda/admin/channel-b/access/:chatId/:decision';
+        const decisionPaths = (chatId: string) =>
+            ['approve', 'reject', 'revoke'].map((action) => `${ACCESS_LIST_PATH}/${chatId}/${action}`);
+        const matchingRoutes = (path: string) =>
+            LEDA_PROXY_ROUTES.filter(({ pattern }) => new RegExp(pattern).test(path));
+        const bypassFor = (route: (typeof LEDA_PROXY_ROUTES)[number]) =>
+            createLedaProxyConfig()[route.pattern].bypass as ProxyBypass;
+        const callBypass = (bypass: ProxyBypass, method: string) => {
+            const response = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
+            const result = bypass(
+                { method } as unknown as IncomingMessage,
+                response as unknown as ServerResponse,
+                {} as Parameters<ProxyBypass>[2],
+            );
+            return { result, response };
+        };
+
+        it('declares the access list as an exact GET admin route with the capability stripped', () => {
+            const route = LEDA_PROXY_ROUTES.find((candidate) => candidate.browserPath === ACCESS_LIST_PATH);
+
+            expect(route).toMatchObject({
+                upstreamPath: ACCESS_LIST_PATH,
+                target: 'http://127.0.0.1:5057',
+                methods: ['GET'],
+                stripSessionCapability: true,
+            });
+        });
+
+        it('declares one POST decision route on 5057 with the capability stripped', () => {
+            const route = LEDA_PROXY_ROUTES.find((candidate) => candidate.browserPath === DECISION_ROUTE_PATH);
+
+            expect(route).toMatchObject({
+                target: 'http://127.0.0.1:5057',
+                methods: ['POST'],
+                stripSessionCapability: true,
+            });
+        });
+
+        it.each(['123456789', '0', '-1001234567890'])('matches exactly the three decisions for chat id %s', (chatId) => {
+            for (const path of decisionPaths(chatId)) {
+                const routes = matchingRoutes(path);
+                expect(routes).toHaveLength(1);
+                expect(routes[0].browserPath).toBe(DECISION_ROUTE_PATH);
+                expect(matchingRoutes(`${path}?value=a%2Fb`)).toHaveLength(1);
+            }
+        });
+
+        it('matches the access list on its exact path only', () => {
+            expect(matchingRoutes(ACCESS_LIST_PATH).map(({ browserPath }) => browserPath)).toEqual([ACCESS_LIST_PATH]);
+            expect(matchingRoutes(`${ACCESS_LIST_PATH}?x=1`)).toHaveLength(1);
+        });
+
+        it.each([
+            '/api/leda/admin/channel-b/access/',
+            '/api/leda/admin/channel-b/access/123',
+            '/api/leda/admin/channel-b/access/123/',
+            '/api/leda/admin/channel-b/access/abc/approve',
+            '/api/leda/admin/channel-b/access/12a/approve',
+            '/api/leda/admin/channel-b/access/1.5/approve',
+            '/api/leda/admin/channel-b/access/--1/approve',
+            '/api/leda/admin/channel-b/access/+1/approve',
+            '/api/leda/admin/channel-b/access//approve',
+            '/api/leda/admin/channel-b/access/123/delete',
+            '/api/leda/admin/channel-b/access/123/approvex',
+            '/api/leda/admin/channel-b/access/123/approve/',
+            '/api/leda/admin/channel-b/access/123/approve/extra',
+            '/api/leda/admin/channel-b/access/123/approve%2Fextra',
+            '/api/leda/admin/channel-b/access/123%2Fapprove',
+            '/api/leda/admin/channel-b/access/1/2/approve',
+            '/api/leda/admin/channel-b/access/123456789012345678901/approve',
+            '/api/leda/admin/channel-b/accesss',
+            '/api/leda/admin/channel-b',
+            '/api/leda/channel-b/access',
+            '/api/leda/admin/channel-b/access/123/approve' + String.fromCharCode(10),
+        ])('rejects the Channel B access lookalike %s', (path) => {
+            expect(matchingRoutes(path)).toHaveLength(0);
+        });
+
+        it('rewrites each decision to the identical upstream path preserving encoded query bytes', () => {
+            const route = LEDA_PROXY_ROUTES.find((candidate) => candidate.browserPath === DECISION_ROUTE_PATH);
+            const proxy = route ? createLedaProxyConfig()[route.pattern] : undefined;
+
+            for (const path of [...decisionPaths('42'), ...decisionPaths('-100500')]) {
+                expect(proxy?.rewrite(path)).toBe(path);
+                expect(proxy?.rewrite(`${path}?value=a%2Fb%20c&next=%252F`)).toBe(`${path}?value=a%2Fb%20c&next=%252F`);
+            }
+        });
+
+        it('rewrites the access list to the identical upstream path', () => {
+            const route = LEDA_PROXY_ROUTES.find((candidate) => candidate.browserPath === ACCESS_LIST_PATH);
+            const proxy = route ? createLedaProxyConfig()[route.pattern] : undefined;
+
+            expect(proxy?.rewrite(`${ACCESS_LIST_PATH}?a=1`)).toBe(`${ACCESS_LIST_PATH}?a=1`);
+        });
+
+        it('allows GET on the list and POST on the decisions, answering 405 otherwise', () => {
+            for (const [browserPath, allowed, denied] of [
+                [ACCESS_LIST_PATH, 'GET', ['POST', 'PUT', 'DELETE']],
+                [DECISION_ROUTE_PATH, 'POST', ['GET', 'PUT', 'DELETE']],
+            ] as const) {
+                const route = LEDA_PROXY_ROUTES.find((candidate) => candidate.browserPath === browserPath);
+                const bypass = bypassFor(route as NonNullable<typeof route>);
+
+                expect(callBypass(bypass, allowed).result).toBeUndefined();
+                for (const method of denied) {
+                    const { result, response } = callBypass(bypass, method);
+                    expect(result).toBe(false);
+                    expect(response.statusCode).toBe(405);
+                }
+            }
+        });
+
+        it('strips the session capability header on both route kinds', () => {
+            for (const browserPath of [ACCESS_LIST_PATH, DECISION_ROUTE_PATH]) {
+                const { proxy } = channelAProxy(browserPath);
+                const handlers = credentialProxyRequestHandlers(proxy?.configure);
+                const proxyRequest = { removeHeader: vi.fn() };
+
+                expect(handlers).toHaveLength(1);
+                handlers.forEach((handler) => handler(proxyRequest));
+                expect(proxyRequest.removeHeader).toHaveBeenCalledWith('X-Leda-Session-Capability');
+            }
+        });
+    });
+
     describe('proxy error handling (T4b: JSON 503 instead of Vite\'s bodiless default 500)', () => {
         it.each([
             ['a stripSessionCapability route', CHANNEL_A_STATUS_PATH],
