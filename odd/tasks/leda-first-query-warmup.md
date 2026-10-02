@@ -111,4 +111,8 @@ Default test-first policy:
   - urllib3 tries the IPv6 address first (getaddrinfo order). A NEW connection hitting the bad IPv6 attempt waits the whole connect timeout (20 s presentation `sendMessage`, 5 s voice `sendChatAction`/getMe) before falling back to IPv4.
   - This also explains the earlier 4.5-5.3 s voice cases.
   - TCP keep-alive (W3b) does not help, because the delay is in opening a connection, not in a stale one.
-- [ ] W3c — Prefer IPv4 for Telegram connections, with IPv6 fallback only when no IPv4 address exists. Route: delegated.
+- [x] W3c — Prefer IPv4 for Telegram connections, with IPv6 fallback only when no IPv4 address exists. Route: delegated.
+- 2026-10-02: W3c done in `144fa17` (`fix(leda-runtime): connect to Telegram over IPv4 first`, route: delegated writer). RED observed first: 3 failures and 1 error in `tests/test_http_keepalive.py` (IPv4 not tried first). GREEN: full runtime suite, 2139 tests OK (fresh state dir, `GEMINI_API_KEY` and `TELEGRAM_BOT_TOKEN` unset, no real network I/O).
+  - **Mechanism (urllib3 2.7.0):** `KeepAliveHTTPAdapter.init_poolmanager` sets `poolmanager.pool_classes_by_scheme` to pool classes whose `ConnectionCls` overrides `_new_conn`: it resolves the host, then dials IPv4 addresses first and IPv6 after by swapping `_dns_host` per attempt (`self.host` is untouched, so SNI and certificate verification use the hostname). Each attempt keeps the connect timeout; W3b socket options and no-retry are unchanged. Nothing process-wide is patched.
+  - **Edge cases:** IPv6-only host or name-resolution failure takes urllib3's unchanged path. Proxied requests use `ProxyManager`, which bypasses the pool classes and the socket options (as already for keep-alive); documented, not worse.
+  - **Smoke (public `GET https://api.telegram.org/`, fresh session each, no credentials):** 5/5 over IPv4 (149.154.167.99), 1521-1618 ms each (includes DNS, TCP and TLS from this network).
