@@ -127,6 +127,11 @@ Strict mode ON (source: global user configuration). Runners:
   - Restarted the dev environment (stop-local, relaunch CoreAnalytics.cmd). Ports 5056, 5057 and 5173 are up.
   - The state file is still v2, because it migrates on the first read or write of the bot. Waiting for the user's live test.
 
+- 2026-10-02 B7 live check, proxy route fix:
+  - Bug: the browser could not reach `GET /api/leda/admin/channel-b/access` nor `POST .../access/<chatId>/approve|reject|revoke`; neither the dev proxy allowlist (`hmi-app/vite.ledaProxy.config.ts`) nor the nginx regex in `docs/DEPLOYMENT.md` listed them.
+  - Fix: an exact GET list route plus one anchored POST decision route (chat id `-?[0-9]{1,19}`, matching the runtime's `parse_chat_id`, three actions only), both forwarded unchanged to 5057 with the session capability stripped; the nginx regex gained the same shape and now counts 22 routes. Tests written first (10 RED, then GREEN): commits `18e64fa` (dev proxy) and `357c4cf` (deployment doc).
+  - Not edited, flagged: the route table in `docs/leda/LEDA_BROWSER_ROUTING.md` still lacks these routes.
+
 ## Acceptance criteria
 
 - An unknown private chat that sends `/start` appears as pending in the HMI and gets no data until it is approved.
