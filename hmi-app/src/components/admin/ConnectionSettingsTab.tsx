@@ -425,11 +425,11 @@ export default function ConnectionSettingsTab({ onDirtyChange, onSaveStatusChang
                     Limpiar URL guardada
                 </AdminActionButton>
                 <AdminActionButton variant="secondary" onClick={handleExport}>
-                    <Download size={14} />
+                    <Upload size={14} />
                     Exportar
                 </AdminActionButton>
                 <AdminActionButton variant="secondary" onClick={() => importInputRef.current?.click()}>
-                    <Upload size={14} />
+                    <Download size={14} />
                     Importar
                 </AdminActionButton>
                 <input
